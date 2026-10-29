@@ -1,0 +1,7 @@
+r-portable/**/*.dll filter=lfs diff=lfs merge=lfs -text
+r-portable/**/*.exe filter=lfs diff=lfs merge=lfs -text
+r-portable/**/*.pdf filter=lfs diff=lfs merge=lfs -text
+r-portable/**/*.rdb filter=lfs diff=lfs merge=lfs -text
+r-portable/**/*.rdx filter=lfs diff=lfs merge=lfs -text
+r-portable/**/*.dat filter=lfs diff=lfs merge=lfs -text
+r-portable/**/*.html filter=lfs diff=lfs merge=lfs -text

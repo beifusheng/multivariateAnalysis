@@ -1,0 +1,2 @@
+Error in logger.info(sprintf("PERMANOVA formula: %s", formula_str)): 没有"logger.info"这个函数
+

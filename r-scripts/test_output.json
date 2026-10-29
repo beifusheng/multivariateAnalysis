@@ -1,0 +1,28 @@
+{
+  "success": true,
+  "permanova_result": [
+    {
+      "Df": 1,
+      "R2": 0.123397,
+      "SumOfSqs": 0.032083,
+      "p_value": 1,
+      "_row": "Model"
+    },
+    {
+      "Df": 3,
+      "R2": 0.876603,
+      "SumOfSqs": 0.227917,
+      "_row": "Residual"
+    },
+    {
+      "Df": 4,
+      "R2": 1,
+      "SumOfSqs": 0.26,
+      "_row": "Total"
+    }
+  ],
+  "R2": 0.123397,
+  "p_value": 1,
+  "permutations": 999,
+  "message": "演示模式：使用随机分组。请提供 sampleData 和 formula 进行真实分析。"
+}

@@ -1,0 +1,5 @@
+Error: lexical error: invalid string in json text.
+                                       test_simple.json
+                     (right here) ------^
+
+

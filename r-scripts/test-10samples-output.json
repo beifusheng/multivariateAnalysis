@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "permanova_result": [
+    {
+      "Df": 3,
+      "R2": 0.824655,
+      "SumOfSqs": 0.97,
+      "p_value": 0.001,
+      "_row": "Model"
+    },
+    {
+      "Df": 6,
+      "R2": 0.175345,
+      "SumOfSqs": 0.20625,
+      "_row": "Residual"
+    },
+    {
+      "Df": 9,
+      "R2": 1,
+      "SumOfSqs": 1.17625,
+      "_row": "Total"
+    }
+  ],
+  "R2": 0.824655,
+  "p_value": 0.001,
+  "permutations": 999
+}

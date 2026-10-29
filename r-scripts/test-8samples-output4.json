@@ -1,0 +1,144 @@
+{
+  "success": true,
+  "permanova_result": [
+    {
+      "Df": 4,
+      "R2": 0.292553,
+      "SumOfSqs": 0.1311,
+      "p_value": 0.854,
+      "_row": "Model"
+    },
+    {
+      "Df": 3,
+      "R2": 0.707447,
+      "SumOfSqs": 0.317025,
+      "_row": "Residual"
+    },
+    {
+      "Df": 7,
+      "R2": 1,
+      "SumOfSqs": 0.448125,
+      "_row": "Total"
+    }
+  ],
+  "R2": 0.292553,
+  "p_value": 0.854,
+  "permutations": 999,
+  "pcoa": {
+    "axes": [
+      {
+        "axis": "PCoA1",
+        "eigenvalue": 0.445498,
+        "variance_explained": 99.168436,
+        "cumulative_variance": 99.168436
+      },
+      {
+        "axis": "PCoA2",
+        "eigenvalue": 0.003736,
+        "variance_explained": 0.831564,
+        "cumulative_variance": 100
+      },
+      {
+        "axis": "PCoA3",
+        "eigenvalue": 3.16587e-17,
+        "variance_explained": 7.047263e-15,
+        "cumulative_variance": 100
+      },
+      {
+        "axis": "PCoA4",
+        "eigenvalue": 7.458009e-18,
+        "variance_explained": 1.660161e-15,
+        "cumulative_variance": 100
+      },
+      {
+        "axis": "PCoA5",
+        "eigenvalue": 7.214431e-18,
+        "variance_explained": 1.60594e-15,
+        "cumulative_variance": 100
+      },
+      {
+        "axis": "PCoA6",
+        "eigenvalue": 3.579674e-19,
+        "variance_explained": 7.968394e-17,
+        "cumulative_variance": 100
+      }
+    ],
+    "samples": [
+      {
+        "sample_id": "Sample1",
+        "coordinates": {
+          "PCoA1": 0.342609,
+          "PCoA2": 0.041948
+        },
+        "group": "A",
+        "group_variable": "Disease"
+      },
+      {
+        "sample_id": "Sample2",
+        "coordinates": {
+          "PCoA1": 0.292089,
+          "PCoA2": -0.044356
+        },
+        "group": "A",
+        "group_variable": "Disease"
+      },
+      {
+        "sample_id": "Sample3",
+        "coordinates": {
+          "PCoA1": 0.144689,
+          "PCoA2": -0.001254
+        },
+        "group": "B",
+        "group_variable": "Disease"
+      },
+      {
+        "sample_id": "Sample4",
+        "coordinates": {
+          "PCoA1": 0.0445,
+          "PCoA2": -0.000592
+        },
+        "group": "B",
+        "group_variable": "Disease"
+      },
+      {
+        "sample_id": "Sample5",
+        "coordinates": {
+          "PCoA1": -0.055688,
+          "PCoA2": 0.00007
+        },
+        "group": "A",
+        "group_variable": "Disease"
+      },
+      {
+        "sample_id": "Sample6",
+        "coordinates": {
+          "PCoA1": -0.155877,
+          "PCoA2": 0.000732
+        },
+        "group": "B",
+        "group_variable": "Disease"
+      },
+      {
+        "sample_id": "Sample7",
+        "coordinates": {
+          "PCoA1": -0.256066,
+          "PCoA2": 0.001395
+        },
+        "group": "A",
+        "group_variable": "Disease"
+      },
+      {
+        "sample_id": "Sample8",
+        "coordinates": {
+          "PCoA1": -0.356255,
+          "PCoA2": 0.002057
+        },
+        "group": "B",
+        "group_variable": "Disease"
+      }
+    ],
+    "total_variance": 0.449234,
+    "n_samples": 8,
+    "n_axes": 6
+  }
+}
