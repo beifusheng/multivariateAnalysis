@@ -24,12 +24,43 @@ tryCatch({
   }
   
   # 提取参数
-  distance_matrix <- as.matrix(params$distanceMatrix)
+  cat("[PERMANOVA.R] Starting analysis...\n")
+  
+  # 确保距离矩阵是数值型 matrix
+  distance_matrix_raw <- params$distanceMatrix
+  
+  # 如果是 list（来自 JSON），转换为 matrix
+  if (is.list(distance_matrix_raw)) {
+    cat("[PERMANOVA.R] Converting list to matrix...\n")
+    # 先转换为向量，再转换为 matrix
+    distance_vector <- unlist(distance_matrix_raw, use.names = FALSE)
+    
+    n_rows <- length(distance_matrix_raw)
+    n_cols <- length(distance_matrix_raw[[1]])
+    
+    distance_matrix <- matrix(
+      as.numeric(distance_vector),
+      nrow = n_rows,
+      ncol = n_cols,
+      byrow = TRUE
+    )
+  } else {
+    distance_matrix <- as.matrix(distance_matrix_raw)
+  }
+  
+  cat("[PERMANOVA.R] Distance matrix:", nrow(distance_matrix), "x", ncol(distance_matrix), "\n")
+  
   permutations <- params$permutations
   if (is.null(permutations)) permutations <- 999
+
+  # 置换检验种子：默认 12345，保证「同输入 => 同输出」
+  seed_value <- params$seed
+  if (is.null(seed_value)) seed_value <- 12345L
+  set.seed(as.integer(seed_value))
   
   # 将距离矩阵转换为 dist 对象
   dist_obj <- as.dist(distance_matrix)
+  cat("[PERMANOVA.R] dist_obj created, size:", attr(dist_obj, "Size"), "\n")
   
   # 创建虚拟的环境变量数据（用于演示）
   n_samples <- nrow(distance_matrix)
@@ -37,7 +68,41 @@ tryCatch({
   # 检查是否提供了样本数据和公式
   if (!is.null(params$sampleData) && !is.null(params$formula)) {
     # 用户提供了样本数据和公式
-    sample_data <- as.data.frame(params$sampleData)
+    sample_data_raw <- params$sampleData
+    cat("[PERMANOVA.R] Sample data raw type:", typeof(sample_data_raw), "\n")
+    cat("[PERMANOVA.R] Sample data raw names:", paste(names(sample_data_raw), collapse=", "), "\n")
+    cat("[PERMANOVA.R] Sample data first column length:", length(sample_data_raw[[1]]), "\n")
+    
+    # 使用 list 构建 data.frame
+    sample_data_list <- list()
+    col_names <- names(sample_data_raw)
+    
+    for (i in seq_along(col_names)) {
+      col_name <- col_names[i]
+      col_data <- sample_data_raw[[col_name]]
+      
+      # 第一列是样本 ID，转换为字符型；其他列尝试转换为数值型
+      if (i == 1) {
+        sample_data_list[[col_name]] <- as.character(col_data)
+      } else {
+        # 尝试转换为数值，如果失败则保持字符
+        numeric_data <- suppressWarnings(as.numeric(col_data))
+        if (all(is.na(numeric_data))) {
+          sample_data_list[[col_name]] <- as.character(col_data)
+        } else {
+          sample_data_list[[col_name]] <- numeric_data
+        }
+      }
+    }
+    
+    # 从 list 创建 data.frame
+    sample_data <- as.data.frame(sample_data_list, stringsAsFactors = FALSE)
+    
+    cat("[PERMANOVA.R] Sample data converted. Dimensions:", nrow(sample_data), "x", ncol(sample_data), "\n")
+    cat("[PERMANOVA.R] Sample data columns:", paste(colnames(sample_data), collapse=", "), "\n")
+    cat("[PERMANOVA.R] Sample data structure:\n")
+    str(sample_data)
+    
     formula_str <- params$formula
     
     # 验证样本数匹配
@@ -51,21 +116,26 @@ tryCatch({
       ))
     }
     
-    # 将距离矩阵转换为 dist 对象
-    dist_obj <- as.dist(distance_matrix)
-    
-    # 检查公式格式，如果没有 ~ ，自动添加
-    if (!grepl("~", formula_str)) {
-      # 用户只提供了右侧变量，如 "Treatment" 或 "pH + Temperature"
-      formula_str <- formula_str
+    # 处理公式格式：提取 ~ 右侧的部分
+    # 如果公式包含 ~ ，只保留右侧变量
+    if (grepl("~", formula_str)) {
+      # 分割公式，取右侧部分
+      formula_parts <- strsplit(formula_str, "~")[[1]]
+      if (length(formula_parts) >= 2) {
+        # 取右侧部分，去除首尾空格
+        formula_str <- trimws(formula_parts[2])
+      }
     }
+    
+    cat(sprintf("PERMANOVA formula (right side): %s\n", formula_str))
     
     cat(sprintf("PERMANOVA formula: dist_obj ~ %s\n", formula_str))
     cat(sprintf("Sample data columns: %s\n", paste(colnames(sample_data), collapse=", ")))
     cat(sprintf("Number of samples: %d\n", nrow(sample_data)))
     
     # 执行 PERMANOVA
-    # 直接使用 dist_obj 在公式中
+    # 注意：adonis2 的置换用全局 RNG，不设种子则每次 p 值都会抖动，
+    # 无法做回归比对与结果复核，故固定（可用 params.seed 覆盖）
     result <- vegan::adonis2(
       as.formula(paste("dist_obj ~", formula_str)),
       data = sample_data,
@@ -90,6 +160,9 @@ tryCatch({
   
   # 构建 permanova_result 数组
   permanova_result_list <- list()
+  # F 列名兼容：现代 vegan 输出 "F"，旧版输出 "F.Model"
+  f_col <- if ("F.Model" %in% colnames(result_df)) "F.Model" else if ("F" %in% colnames(result_df)) "F" else NULL
+
   for (i in 1:nrow(result_df)) {
     row <- result_df[i, ]
     row_data <- list(
@@ -102,8 +175,15 @@ tryCatch({
     } else if ("SumOfSqs" %in% colnames(result_df)) {
       row_data$SumOfSqs <- as.numeric(row$SumOfSqs)
     }
-    if ("F.Model" %in% colnames(result_df)) {
-      row_data$F_model <- ifelse(is.na(row$F.Model), 0, as.numeric(row$F.Model))
+    # vegan 当前列名是 "F"（早期版本才是 "F.Model"），两者都兼容。
+    # NA 行（Residual/Total）直接不输出该字段：jsonlite 会把 NA 写成字符串 "NA"，
+    # 前端拿它做数值比较会静默出错。
+    if (!is.null(f_col)) {
+      f_val <- as.numeric(row[[f_col]])
+      if (!is.na(f_val)) {
+        row_data$F_model <- f_val
+        row_data$F <- f_val
+      }
     }
     if ("Pr(>F)" %in% colnames(result_df)) {
       if (!is.na(row$`Pr(>F)`)) {
@@ -120,9 +200,13 @@ tryCatch({
   output$permanova_result <- permanova_result_list
   output$R2 <- as.numeric(result$R2[1])
   
-  # 检查并添加 F_model
-  if ("F.Model" %in% colnames(result_df)) {
-    output$F_model <- ifelse(is.na(result$F.Model[1]), 0, as.numeric(result$F.Model[1]))
+  # 检查并添加 F_model（同样兼容 F / F.Model 两种列名；NA 则不输出，避免 jsonlite 写成字符串 "NA"）
+  if (!is.null(f_col)) {
+    fv <- as.numeric(result[[f_col]][1])
+    if (!is.na(fv)) {
+      output$F_model <- fv
+      output$F <- fv
+    }
   }
   
   # 检查并添加 p_value
