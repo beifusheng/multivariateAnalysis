@@ -51,3 +51,20 @@ node r-scripts/tools/test_nr_charts.mjs       # 4 张图 × 4 个设计（127 �
 node r-scripts/tools/test_nr_view.mjs         # canRun / buildPayload / 结果映射（43 项）
 node r-scripts/tools/test_nr_render.mjs       # SSR 渲染 + Vue 告警必须为 0（28 项）
 ```
+另：`node r-scripts/tools/test_home_status.mjs`（28 项）断言首页卡片写的状态与
+真实代码一致——标「可用」必须已有路由 + 视图文件，引擎源码里还写「简化版」的不许标可用。
+
+## 接下来两个：已确定的输入约定
+
+这些约定原来只写在已删除的旧原型 `views/RAnalysis.vue`（`git show HEAD:frontend/src/views/RAnalysis.vue`
+在删改前的那个提交可查），现在以 `electron/controller/rController.ts` 的签名为准：
+
+- **GMR⁴**（`gmr4.R`）：`X: number[][]` 预测变量、`Y: number[][]` 响应变量、`Z?: number[][]` 协变量，
+  `rank?` / `lambda?`；超时 15min。脚本当前是自述“简化版，需根据论文完善”的占位实现。
+- **Bayesian ERA**（`bayesian_era_mediation.R`）：`X` / `Y` / `M`（中介）、`chains?` / `iterations?`；
+  超时 30min。同样占位。
+- `frontend/src/api/r.js` 里的 `runGMR4` / `runBayesianERA_Mediation` 封装已存在但**无调用方**，
+  视图上线才接。
+- `rService.runScript` 是把 `params` 整包 `JSON.stringify` 写入 input.json，**不做字段筛选**；
+  所以改入参形状要同时改三处：rController 类型、视图 `buildPayload()`、R 脚本解析。
+

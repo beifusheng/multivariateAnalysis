@@ -23,7 +23,10 @@ electron-egg/
 │       │   └── r.js                # R API 调用（新增）
 │       └── views/
 │           ├── example/
-│           └── RAnalysis.vue       # R 分析界面（新增）
+│           └── r-analysis/         # 每个方法一个视图
+│               ├── PERMANOVA.vue
+│               ├── PERMANOVA_Med.vue
+│               └── Nonrandom_PERMANOVA.vue
 ├── r-scripts/                      # R 脚本目录（新增）
 │   ├── permanova.R
 │   ├── permanova_med.R
@@ -42,7 +45,7 @@ electron-egg/
 ┌─────────────────────────────────────────────────────────┐
 │                    前端 (Vue 3 + Vite)                    │
 │  ┌───────────────────────────────────────────────────┐  │
-│  │  RAnalysis.vue                                    │  │
+│  │  views/r-analysis/*.vue                             │  │
 │  │  - 方法选择                                        │  │
 │  │  - 参数配置                                        │  │
 │  │  - 结果展示 (ECharts)                              │  │
@@ -228,7 +231,8 @@ npm run dev-electron
    - 在 `rController.ts` 添加方法
    - 在 `r-scripts/` 创建对应 R 脚本
    - 在 `frontend/src/api/r.js` 添加 API
-   - 在 `RAnalysis.vue` 添加 UI
+   - 在 `frontend/src/views/r-analysis/` 添加视图（复用 `components/r-analysis/` 共享组件，约束见该目录 README.md）
+   - 先配齐 `r-scripts/tools/` 下的 verify_/test_ 回归，再改 Home.vue 的卡片状态（`test_home_status.mjs` 会拦谎报“可用”）
 
 2. **超时设置**
    ```typescript

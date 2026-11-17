@@ -259,12 +259,25 @@ export default class RController {
   }
 
   /**
-   * 执行非随机 PERMANOVA 扩展（Jaccard 距离）
+   * 执行非随机 PERMANOVA（受限/分层/空间置换，因子设计）
+   * 入参跟 frontend/src/views/r-analysis/Nonrandom_PERMANOVA.vue 的 buildPayload() 一致；
+   * rService.runScript 是把 params 整包 JSON.stringify 写到 input.json，不做字段筛选，
+   * 所以这里的类型只是文档，改了要同步改视图和 r-scripts/nonrandom_permanova.R。
    */
   async runNonRandomPERMANOVA(params: {
-    presenceAbsenceData: number[][];
-    formula: string;
-    permutations?: number;
+    communityData: number[][];        // 物种 × 样本矩阵（行数 = 样本数）
+    sampleData: object[];             // 行对象数组：分组/区组变量，均为因子
+    formula: string;                  // 如 "group" 或 "phase + cell"
+    strata?: string;                  // 分层置换的区组列名
+    scheme: string;                   // stratified | spatial | gradient | ...
+    distance: string;                 // bray | ws | jaccard | ... 见脚本 VEGAN_METHODS
+    presenceAbsence?: boolean;
+    controlCoverage?: boolean;
+    permutations?: number;            // LDM 方案必须是 100 的倍数
+    seed?: number;
+    coordinates?: number[][];         // scheme='spatial' 时必填
+    spatialBand?: number;
+    note?: string;                    // 模板说明，随结果导出
   }): Promise<any> {
     logger.info('[RController] Running Non-random PERMANOVA with params:', params);
     

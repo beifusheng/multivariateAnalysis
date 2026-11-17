@@ -972,13 +972,13 @@ export default {
           return;
         }
 
-        console.log('[RAnalysis] Running PERMANOVA with params:');
-        console.log('[RAnalysis]   matrixSize:', this.permanovaParams.distanceMatrix?.length);
-        console.log('[RAnalysis]   matrix type:', typeof this.permanovaParams.distanceMatrix);
-        console.log('[RAnalysis]   matrix is array:', Array.isArray(this.permanovaParams.distanceMatrix));
-        console.log('[RAnalysis]   matrix[0] type:', typeof this.permanovaParams.distanceMatrix?.[0]);
-        console.log('[RAnalysis]   matrix[0] is array:', Array.isArray(this.permanovaParams.distanceMatrix?.[0]));
-        console.log('[RAnalysis]   permutations:', this.permanovaParams.permutations);
+        console.log('[PERMANOVA] Running PERMANOVA with params:');
+        console.log('[PERMANOVA]   matrixSize:', this.permanovaParams.distanceMatrix?.length);
+        console.log('[PERMANOVA]   matrix type:', typeof this.permanovaParams.distanceMatrix);
+        console.log('[PERMANOVA]   matrix is array:', Array.isArray(this.permanovaParams.distanceMatrix));
+        console.log('[PERMANOVA]   matrix[0] type:', typeof this.permanovaParams.distanceMatrix?.[0]);
+        console.log('[PERMANOVA]   matrix[0] is array:', Array.isArray(this.permanovaParams.distanceMatrix?.[0]));
+        console.log('[PERMANOVA]   permutations:', this.permanovaParams.permutations);
         
         // 构建参数
         const params = {
@@ -986,11 +986,11 @@ export default {
           permutations: this.permanovaParams.permutations
         };
         
-        console.log('[RAnalysis] Params to send to R:');
-        console.log('[RAnalysis]   matrix dimensions:', params.distanceMatrix?.length, 'x', params.distanceMatrix?.[0]?.length);
-        console.log('[RAnalysis]   matrix[0][0]:', params.distanceMatrix?.[0]?.[0], 'type:', typeof params.distanceMatrix?.[0]?.[0]);
-        console.log('[RAnalysis]   matrix[0]:', params.distanceMatrix?.[0]);
-        console.log('[RAnalysis]   full params:', JSON.stringify({
+        console.log('[PERMANOVA] Params to send to R:');
+        console.log('[PERMANOVA]   matrix dimensions:', params.distanceMatrix?.length, 'x', params.distanceMatrix?.[0]?.length);
+        console.log('[PERMANOVA]   matrix[0][0]:', params.distanceMatrix?.[0]?.[0], 'type:', typeof params.distanceMatrix?.[0]?.[0]);
+        console.log('[PERMANOVA]   matrix[0]:', params.distanceMatrix?.[0]);
+        console.log('[PERMANOVA]   full params:', JSON.stringify({
           matrixSize: params.distanceMatrix?.length,
           matrix0Size: params.distanceMatrix?.[0]?.length,
           matrix00: params.distanceMatrix?.[0]?.[0],
@@ -1003,9 +1003,9 @@ export default {
           params.formula = this.permanovaParams.formula || 'Treatment';
         }
 
-        console.log('[RAnalysis] Calling runPERMANOVA API...');
+        console.log('[PERMANOVA] Calling runPERMANOVA API...');
         const result = await runPERMANOVA(params);
-        console.log('[RAnalysis] PERMANOVA result:', result);
+        console.log('[PERMANOVA] PERMANOVA result:', result);
 
         this.analysisResult = result;
 
@@ -1023,7 +1023,7 @@ export default {
           });
         }
       } catch (error) {
-        console.error('[RAnalysis] PERMANOVA error:', error);
+        console.error('[PERMANOVA] PERMANOVA error:', error);
         this.$message.error({
           message: 'PERMANOVA 分析失败：' + error.message,
           duration: 5000,
