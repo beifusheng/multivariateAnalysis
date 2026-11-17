@@ -52,12 +52,13 @@ const server = await createServer({
 // 而组件用的是 Vite 解出的 ESM 版 —— 两份 Vue 实例会让 renderToString 直接报错。
 const depsFile = path.join(FRONTEND, '.nr-ssr-deps.js');
 fs.writeFileSync(depsFile, [
-  "export { createSSRApp } from 'vue';",
+  "export { createSSRApp, h } from 'vue';",
   "export { renderToString } from '@vue/server-renderer';",
   "export { default as ElementPlus } from 'element-plus';"
 ].join('\n') + '\n');
 const deps = await server.ssrLoadModule('/.nr-ssr-deps.js');
 const vue = { createSSRApp: deps.createSSRApp };
+const h = deps.h;
 const { renderToString } = deps;
 const ElementPlus = deps.ElementPlus;
 
@@ -71,11 +72,37 @@ const capture = (...a) => warnings.push(a.map(String).join(' '));
 const views = await server.ssrLoadModule('/src/views/r-analysis/Nonrandom_PERMANOVA.vue');
 const Comp = views.default;
 
+// el-dialog 的内容在 <teleport to="body"> 里，renderToString 不会把它写进页面，
+// 于是对话框里的标记根本没被渲染过、测不到。这里用立即渲染的替身接管它，
+// 局部组件优先级高于全局注册，所以模板里的 <el-dialog> 会命中这个。
+const DialogStub = {
+  name: 'ElDialog',
+  props: { title: String, modelValue: Boolean, width: String },
+  setup(props, { slots }) {
+    // 必须尊重 modelValue：否则“没打开的对话框”也会渲染，空态断言会被污染
+    return () => (props.modelValue
+      ? h('div', { class: 'dialog-stub' }, [
+        h('h4', props.title || ''),
+        slots.default ? slots.default() : null,
+        slots.footer ? slots.footer() : null
+      ])
+      : null);
+  }
+};
+const UploadStub = {
+  name: 'ElUpload',
+  props: { drag: Boolean, accept: String },
+  setup(props, { slots }) {
+    return () => h('div', { class: 'upload-stub' }, [slots.default ? slots.default() : null]);
+  }
+};
+
 /** 用给定状态渲染整页；dataOverride 深合并到组件 data() 结果上 */
 const render = async (tag, dataOverride) => {
   warnings.length = 0;
   const Wrapped = {
     ...Comp,
+    components: { ...(Comp.components || {}), ElDialog: DialogStub, ElUpload: UploadStub },
     data() {
       const d = Comp.data.call(this);
       return { ...d, ...dataOverride(d) };
@@ -104,10 +131,15 @@ const render = async (tag, dataOverride) => {
   } finally {
     console.warn = origWarn; console.error = origErr;
   }
+  if (process.env.NR_DUMP) fs.writeFileSync(path.join(os.tmpdir(), 'nr-render-dump-' + tag + '.html'), html);
   if (threw) check(`${tag} 渲染未抛异常`, false, threw.message);
   else check(`${tag} 渲染未抛异常`, true);
   const noisy = warnings.filter((w) => /Failed to resolve component|Invalid prop|Missing required prop/.test(w));
   check(`${tag} 无「组件未注册 / prop 非法」告警`, noisy.length === 0, noisy.slice(0, 3).join(' | '));
+  // Vue 在 SSR 里会把渲染错误吐掉、只留一个 <!----> 占位——上面那条“渲染未抛异常”查不出来，
+  // 必须把 errorHandler / console.error 捕获到的东西也算失败
+  const errs = warnings.filter((w) => /\[error\]/.test(w) || /ReferenceError|TypeError/.test(w));
+  check(`${tag} 无被吞掉的渲染错误`, errs.length === 0, errs.slice(0, 2).join(' | '));
   return html;
 };
 
@@ -116,7 +148,9 @@ console.log('=== 空态 ===');
   const html = await render('空态', () => ({}));
   check('标题渲染', html.includes('Non-random PERMANOVA（受限置换）'));
   check('返回按钮渲染', html.includes('返回首页'));
-  check('工具栏渲染', html.includes('下载数据') && html.includes('导出结果'));
+  check('工具栏四个按钮齐（模板/导入/导出/下载输入）',
+    ['下载模板', '导入数据', '导出结果', '下载输入'].every((x) => html.includes(x)),
+    ['下载模板', '导入数据', '导出结果', '下载输入'].filter((x) => !html.includes(x)).join(','));
   check('数据模板区渲染 26 个按钮', (html.match(/btn-template/g) || []).length >= 26,
     String((html.match(/btn-template/g) || []).length));
   check('模板分组标题渲染', html.includes('教学：置换方案为什么会改变结论') && html.includes('水体与海洋'));
@@ -172,6 +206,35 @@ console.log('\n=== 带真实 R 结果 ===');
   check('模型信息含公式与距离', html.includes('group') && /Bray-Curtis/.test(html));
   check('四个图表 tab 都在', ['零分布对比', '结论对比', 'PCoA 排序', '解释量分解'].every((t) => html.includes(t)));
   check('解释文案来自 R（不是前端写死）', html.includes(result.interpretation.slice(0, 12)), result.interpretation.slice(0, 40));
+}
+
+console.log('=== 导入对话框（打开 + 有预览）===');
+{
+  const html = await render('导入态', (d) => ({
+    ...d,
+    showImportDialog: true,
+    importPreview: {
+      n: 6, p: 8,
+      communityRows: [{ 样本: 'S1', Bacteroides: 42, Prevotella: 18 }],
+      speciesCols: ['Bacteroides', 'Prevotella'],
+      sampleRows: [{ 样本: 'S1', group: 'Case', strata: 'B1' }],
+      sampleCols: ['样本', 'group', 'strata'],
+      coordRows: [{ 样本: 'S1', x: 0, y: 0 }],
+      coordCols: ['样本', 'x', 'y']
+    },
+    importWarnings: ['样本信息里这些列全是数值：pH。本模块只接受因子，运行前请先分箱'],
+    importTab: 'community'
+  }));
+  check('预览标题带样本×物种数', html.includes('6 样本 × 8 物种'), '');
+  check('警告文案渲染出来了', html.includes('请先分箱'));
+  check('「填入表单」按钮可用', /填入表单/.test(html));
+}
+
+console.log('=== 导出对话框 ===');
+{
+  const html = await render('导出态', (d) => ({ ...d, showExportDialog: true, exportOptions: ['excel', 'json'], exportError: '' }));
+  check('导出选项齐全', ['分析结果', 'PCoA 坐标', '零分布样本', '完整结果', '当前输入', '当前图表'].every((x) => html.includes(x)),
+    ['分析结果', 'PCoA 坐标', '零分布样本', '完整结果', '当前输入', '当前图表'].filter((x) => !html.includes(x)).join(','));
 }
 
 await server.close();
