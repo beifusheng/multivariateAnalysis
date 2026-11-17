@@ -133,7 +133,7 @@ export function buildPComparisonChart(cd, { fmt, fmtP }) {
       formatter: (ps) => {
         const arr = Array.isArray(ps) ? ps : [ps];
         return arr
-          .map((p) => `${p.marker}${p.name}：p = ${fmtP(p.data)}${p.data < 0.05 ? '（显著）' : '（不显著）'}`)
+          .map((p) => `${p.marker}${p.name}：p = ${fmtP(p.value)}${Number(p.value) < 0.05 ? '（显著）' : '（不显著）'}`)
           .join('<br/>');
       }
     },
@@ -145,7 +145,7 @@ export function buildPComparisonChart(cd, { fmt, fmtP }) {
         type: 'bar',
         barWidth: rows.length > 1 ? 90 : 120,
         data: vals.map((v, i) => ({ value: v, itemStyle: { color: colors[i] } })),
-        label: { show: true, position: 'top', formatter: (x) => fmtP(x.data), fontWeight: 600 },
+        label: { show: true, position: 'top', formatter: (x) => fmtP(x.value), fontWeight: 600 },
         markLine: {
           symbol: 'none',
           lineStyle: { color: '#f56c6c', type: 'dashed', width: 2 },

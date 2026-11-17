@@ -58,7 +58,7 @@ const runR = (spec, tag) => {
 };
 
 // 三个有代表性的设计：假阳性案例（两条零分布分得很开）、双显著案例、纯自由置换案例
-const CASES = ['confoundedBlock', 'balancedBlock', 'freeOnly', 'spatialField'];
+const CASES = ['confoundedBlock', 'balancedBlock', 'freeOnly', 'spatialField', 'twinsSite'];
 const results = [];
 for (const id of CASES) {
   const item = nrt.NR_TEMPLATE_MAP[id];
@@ -170,6 +170,70 @@ for (const { id, json, built } of results) {
     t('旗舰案例：副标题写明两个 p', /p\(自由\)[\s\S]*p\(受限\)/.test(o.title.subtext), o.title.subtext);
     t('旗舰案例：受限 p 不显著、自由 p 显著',
       cd.null.p >= 0.05 && cd.null_free.p < 0.05);
+  }
+}
+
+// ------------------------------------- formatter 冒烟：回调必须被真调一次
+// 背景：ECharts 的 series.data 写成对象项（{ value, itemStyle }）时，params.data 是整个对象、
+// params.value 才是数值。结论对比图当初用的是 params.data，柱顶标签和 tooltip 全部
+// 渲染成 N/A；更严重的是 `p.data < 0.05` 恒为 false，tooltip 把 p=0.001 的显著结果
+// 写成「（不显著）」。结构断言（series 里有几个值、颜色对不对）永远查不出这类问题，
+// 必须把回调函数真调一次。
+{
+  const bad = [];
+  const scan = (opt, where) => {
+    const call = (fn, params) => {
+      let out;
+      try { out = fn(params); } catch (e) { bad.push(`${where} 抛异常：${e.message}`); return; }
+      if (typeof out !== 'string' || !out.length) { bad.push(`${where} 返回不是字符串：${String(out)}`); return; }
+      const m = out.match(/N\/A|undefined|NaN|\[object Object\]/);
+      if (m) bad.push(`${where} 输出含非法值「${m[0]}」：${out.replace(/<br\/>/g, ' | ')}`);
+    };
+    const axisTrigger = opt?.tooltip?.trigger === 'axis';
+    (opt?.series || []).forEach((s, si) => {
+      const mk = (i) => {
+        const item = (s.data || [])[i] ?? 0;
+        const value = item && typeof item === 'object' && 'value' in item ? item.value : item;
+        return {
+          value, data: item, dataIndex: i, seriesIndex: si, seriesName: s.name || '',
+          name: opt?.xAxis?.data?.[i] ?? s.name ?? '', marker: '', axisValue: String(i)
+        };
+      };
+      const n = Math.max(1, Math.min((s.data || []).length, 3));
+      for (let i = 0; i < n; i++) {
+        const p = mk(i);
+        if (typeof opt?.tooltip?.formatter === 'function') {
+          call(opt.tooltip.formatter, axisTrigger ? [p] : p);
+        }
+        if (typeof s?.label?.formatter === 'function') call(s.label.formatter, p);
+      }
+    });
+  };
+
+  for (const { id, json } of results) {
+    const cd = json.chart_data;
+    scan(nc.buildNullCompareChart(cd, F), `${id} · 零分布对比`);
+    scan(nc.buildPComparisonChart(cd, F), `${id} · 结论对比`);
+    scan(nc.buildPcoaChart(cd, F), `${id} · PCoA`);
+    scan(nc.buildVarianceChart(cd, F), `${id} · 方差分配`);
+  }
+  t('全部图表的 tooltip / label 回调可用，且不出现 N/A、undefined、[object Object]',
+    bad.length === 0, bad.slice(0, 4).join(' ;; '));
+
+  // 语义断言：显著性结论文字必须和 p 值一致（结构对了但说反话也算失败）
+  const c0 = results.find((r) => r.json.chart_data.comparison?.length >= 1);
+  if (c0) {
+    const opt = nc.buildPComparisonChart(c0.json.chart_data, F);
+    const rows = c0.json.chart_data.comparison;
+    rows.forEach((row, i) => {
+      const item = opt.series[0].data[i];
+      const tip = opt.tooltip.formatter([{ value: item.value, data: item, name: row.scheme, marker: '' }]);
+      const label = opt.series[0].label.formatter({ value: item.value, data: item });
+      const sig = Number(row.p) < 0.05;
+      t(`结论对比 tooltip 的显著性判定与 p=${Number(row.p).toFixed(4)} 一致`,
+        tip.includes(sig ? '（显著）' : '（不显著）') && !tip.includes(sig ? '（不显著）' : '（显著）'), tip);
+      t(`结论对比 柱顶标签把 p=${Number(row.p).toFixed(4)} 渲染出来了`, /\d/.test(label) && !/N\/A/.test(label), label);
+    });
   }
 }
 
