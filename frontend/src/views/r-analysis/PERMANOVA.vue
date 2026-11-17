@@ -57,594 +57,618 @@
     <!-- 参数配置区域 -->
     <div class="config-section">
 
-      <!-- 示例：PERMANOVA 配置 -->
-      <div class="config-form">
-        <!-- 输入模式选择 -->
-        <div class="form-group">
-          <label>数据模式:</label>
-          <div class="radio-group">
-            <label class="radio-label">
-              <input type="radio" v-model="permanovaParams.mode" value="simple" />
-              简单模式（仅距离矩阵）
-            </label>
-            <label class="radio-label">
-              <input type="radio" v-model="permanovaParams.mode" value="advanced" />
-              高级模式（距离矩阵 + 样本数据）
-            </label>
+      <!-- 当前选择的模板 -->
+      <div v-if="permanovaParams.selectedTemplate" class="selected-template-card">
+        <div class="template-card-header">
+          <div class="template-card-title">
+            <span class="template-icon">📌</span>
+            <span>当前选择的模板</span>
+          </div>
+          <el-button type="info" size="small" plain round @click="clearSelectedTemplate" class="clear-btn">
+            清除选择
+          </el-button>
+        </div>
+        <div class="template-card-content">
+          <div class="template-info-row">
+            <span class="info-label">模板名称：</span>
+            <span class="info-value template-name">{{ getTemplateName(permanovaParams.selectedTemplate) }}</span>
+          </div>
+          <div class="template-info-row">
+            <span class="info-label">模型公式：</span>
+            <code class="formula-code">{{ getTemplateFormula(permanovaParams.selectedTemplate) }}</code>
+          </div>
+          <div class="template-tip">
+            <span class="tip-icon">💡</span>
+            <span>修改公式或数据将自动清除模板选择</span>
           </div>
         </div>
+      </div>
 
-        <!-- 距离矩阵（两种模式都需要） -->
-        <div class="form-group">
-          <label>距离矩阵 (JSON 格式):</label>
-          <el-input v-model="permanovaParams.distanceMatrixStr" type="textarea" :rows="12"
-            placeholder='[[0, 0.2, 0.3], [0.2, 0, 0.25], [0.3, 0.25, 0]]' @input="onDistanceMatrixChangeAndValidate" />
-          <div v-if="permanovaParams.matrixError" class="error-msg">{{ permanovaParams.matrixError }}</div>
-          <div v-if="permanovaParams.matrixValid" class="success-msg">
-            ✅ 有效矩阵：{{ permanovaParams.matrixSize }} 个样本
+      <!-- 常用公式模板 -->
+      <div class="template-section">
+        <div class="template-header">
+          <div class="template-header-title">
+            <span class="template-icon">📋</span>
+            <span class="template-label">常用公式模板</span>
           </div>
+          <el-button class="template-toggle-btn" @click="toggleTemplateCollapse">
+            <el-icon class="toggle-icon">
+              <component :is="permanovaParams.templateCollapsed ? 'CaretRight' : 'CaretBottom'" />
+            </el-icon>
+            <span class="toggle-text">
+              {{ permanovaParams.templateCollapsed ? '展开所有模板' : '收起模板' }}
+            </span>
+          </el-button>
         </div>
 
-        <!-- 高级模式：样本数据 -->
-        <div v-if="permanovaParams.mode === 'advanced'" class="advanced-section">
-          <!-- 当前选择的公式 -->
-          <div v-if="permanovaParams.selectedTemplate" class="selected-template-card">
-            <div class="template-card-header">
-              <div class="template-card-title">
-                <span class="template-icon">📌</span>
-                <span>当前选择的模板</span>
-              </div>
-              <el-button type="info" size="small" plain round @click="clearSelectedTemplate" class="clear-btn">
-                清除选择
-              </el-button>
+        <el-collapse-transition>
+          <div v-show="!permanovaParams.templateCollapsed">
+
+            <!-- 生物/医学方向 -->
+            <div class="template-section-title">🔬 生物/医学方向</div>
+            <div class="template-buttons">
+              <el-tooltip content="单因素 PERMANOVA，检验分组效应" placement="top">
+                <button type="button" @click="loadTemplate('singleFactor')"
+                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'singleFactor' }]">
+                  🧪 单因素分析
+                </button>
+              </el-tooltip>
+              <el-tooltip content="多因素 PERMANOVA，同时检验多个变量" placement="top">
+                <button type="button" @click="loadTemplate('multiFactor')"
+                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'multiFactor' }]">
+                  📊 多因素分析
+                </button>
+              </el-tooltip>
+              <el-tooltip content="检验两个变量的交互作用" placement="top">
+                <button type="button" @click="loadTemplate('interaction')"
+                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'interaction' }]">
+                  🔀 交互作用
+                </button>
+              </el-tooltip>
+              <el-tooltip content="控制协变量后检验处理效应" placement="top">
+                <button type="button" @click="loadTemplate('ancova')"
+                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'ancova' }]">
+                  📈 协变量分析
+                </button>
+              </el-tooltip>
+              <el-tooltip content="嵌套设计，Site 内的 Treatment 效应" placement="top">
+                <button type="button" @click="loadTemplate('nested')"
+                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'nested' }]">
+                  🗂️ 嵌套设计
+                </button>
+              </el-tooltip>
+              <el-tooltip content="完全模型：主效应 + 交互 + 区组" placement="top">
+                <button type="button" @click="loadTemplate('fullModel')"
+                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'fullModel' }]">
+                  🎯 完全模型
+                </button>
+              </el-tooltip>
+              <el-tooltip content="微生物组研究常用设计" placement="top">
+                <button type="button" @click="loadTemplate('microbiome')"
+                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'microbiome' }]">
+                  🦠 微生物组
+                </button>
+              </el-tooltip>
             </div>
-            <div class="template-card-content">
-              <div class="template-info-row">
-                <span class="info-label">模板名称：</span>
-                <span class="info-value template-name">{{ getTemplateName(permanovaParams.selectedTemplate) }}</span>
-              </div>
-              <div class="template-info-row">
-                <span class="info-label">模型公式：</span>
-                <code class="formula-code">{{ getTemplateFormula(permanovaParams.selectedTemplate) }}</code>
-              </div>
-              <div class="template-tip">
-                <span class="tip-icon">💡</span>
-                <span>修改公式或数据将自动清除模板选择</span>
-              </div>
+
+            <!-- 物理/环境科学方向 -->
+            <div class="template-section-title">🌍 物理/环境科学方向</div>
+            <div class="template-buttons">
+              <el-tooltip content="时间序列分析，纵向数据" placement="top">
+                <button type="button" @click="loadTemplate('timeSeries')" class="btn-template">
+                  ⏱️ 时间序列
+                </button>
+              </el-tooltip>
+              <el-tooltip content="空间分布分析" placement="top">
+                <button type="button" @click="loadTemplate('spatial')" class="btn-template">
+                  🌍 空间分析
+                </button>
+              </el-tooltip>
+              <el-tooltip content="温度梯度分析" placement="top">
+                <button type="button" @click="loadTemplate('temperatureGradient')" class="btn-template">
+                  🌡️ 温度梯度
+                </button>
+              </el-tooltip>
+              <el-tooltip content="剂量反应分析" placement="top">
+                <button type="button" @click="loadTemplate('doseResponse')" class="btn-template">
+                  💊 剂量反应
+                </button>
+              </el-tooltip>
+              <el-tooltip content="重复测量设计" placement="top">
+                <button type="button" @click="loadTemplate('repeatedMeasures')" class="btn-template">
+                  🔄 重复测量
+                </button>
+              </el-tooltip>
+              <el-tooltip content="区组设计，控制批次效应" placement="top">
+                <button type="button" @click="loadTemplate('blockDesign')" class="btn-template">
+                  📦 区组设计
+                </button>
+              </el-tooltip>
+              <el-tooltip content="多环境因子综合分析" placement="top">
+                <button type="button" @click="loadTemplate('environmental')" class="btn-template">
+                  🌊 环境因子
+                </button>
+              </el-tooltip>
+            </div>
+
+            <!-- 农业/林业/生态方向 -->
+            <div class="template-section-title">🌾 农业/林业/生态方向</div>
+            <div class="template-buttons">
+              <el-tooltip content="作物品种与栽培管理" placement="top">
+                <button type="button" @click="loadTemplate('cropVariety')" class="btn-template">
+                  🌾 作物品种
+                </button>
+              </el-tooltip>
+              <el-tooltip content="土壤类型与理化性质" placement="top">
+                <button type="button" @click="loadTemplate('soilType')" class="btn-template">
+                  🟤 土壤分析
+                </button>
+              </el-tooltip>
+              <el-tooltip content="植物群落调查" placement="top">
+                <button type="button" @click="loadTemplate('plantCommunity')" class="btn-template">
+                  🌿 植物群落
+                </button>
+              </el-tooltip>
+              <el-tooltip content="入侵物种影响评估" placement="top">
+                <button type="button" @click="loadTemplate('invasiveSpecies')" class="btn-template">
+                  🌾 入侵物种
+                </button>
+              </el-tooltip>
+              <el-tooltip content="森林群落结构" placement="top">
+                <button type="button" @click="loadTemplate('forestCommunity')" class="btn-template">
+                  🌲 森林群落
+                </button>
+              </el-tooltip>
+              <el-tooltip content="土地利用变化" placement="top">
+                <button type="button" @click="loadTemplate('landUse')" class="btn-template">
+                  🏞️ 土地利用
+                </button>
+              </el-tooltip>
+              <el-tooltip content="保护区评估" placement="top">
+                <button type="button" @click="loadTemplate('protectedArea')" class="btn-template">
+                  🛡️ 保护区
+                </button>
+              </el-tooltip>
+              <el-tooltip content="气候变化响应" placement="top">
+                <button type="button" @click="loadTemplate('climateChange')" class="btn-template">
+                  🌡️ 气候变化
+                </button>
+              </el-tooltip>
+            </div>
+
+            <!-- 海洋/昆虫方向 -->
+            <div class="template-section-title">🐟 海洋/昆虫方向</div>
+            <div class="template-buttons">
+              <el-tooltip content="鱼类群落分析" placement="top">
+                <button type="button" @click="loadTemplate('fishCommunity')" class="btn-template">
+                  🐟 鱼类群落
+                </button>
+              </el-tooltip>
+              <el-tooltip content="浮游生物研究" placement="top">
+                <button type="button" @click="loadTemplate('plankton')" class="btn-template">
+                  🦠 浮游生物
+                </button>
+              </el-tooltip>
+              <el-tooltip content="昆虫群落调查" placement="top">
+                <button type="button" @click="loadTemplate('insectCommunity')" class="btn-template">
+                  🦋 昆虫群落
+                </button>
+              </el-tooltip>
+            </div>
+
+            <!-- 基因组学/医学方向 -->
+            <div class="template-section-title">🧬 基因组学/医学方向</div>
+            <div class="template-buttons">
+              <el-tooltip content="基因表达谱分析" placement="top">
+                <button type="button" @click="loadTemplate('geneExpression')" class="btn-template">
+                  🧬 基因表达
+                </button>
+              </el-tooltip>
+              <el-tooltip content="单细胞转录组分析" placement="top">
+                <button type="button" @click="loadTemplate('singleCell')" class="btn-template">
+                  🔬 单细胞分析
+                </button>
+              </el-tooltip>
+              <el-tooltip content="疾病亚型分类" placement="top">
+                <button type="button" @click="loadTemplate('diseaseSubtype')" class="btn-template">
+                  🏥 疾病亚型
+                </button>
+              </el-tooltip>
+              <el-tooltip content="治疗效果评估" placement="top">
+                <button type="button" @click="loadTemplate('treatmentEffect')" class="btn-template">
+                  💊 治疗效果
+                </button>
+              </el-tooltip>
+              <el-tooltip content="脑区连接分析" placement="top">
+                <button type="button" @click="loadTemplate('brainConnectivity')" class="btn-template">
+                  🧠 脑连接
+                </button>
+              </el-tooltip>
+            </div>
+
+            <!-- 食品科学方向 -->
+            <div class="template-section-title">🍽️ 食品科学方向</div>
+            <div class="template-buttons">
+              <el-tooltip content="发酵过程监控" placement="top">
+                <button type="button" @click="loadTemplate('fermentation')" class="btn-template">
+                  🍶 发酵监控
+                </button>
+              </el-tooltip>
+              <el-tooltip content="食品产地溯源" placement="top">
+                <button type="button" @click="loadTemplate('foodOrigin')" class="btn-template">
+                  🍷 产地溯源
+                </button>
+              </el-tooltip>
+            </div>
+          </div>
+        </el-collapse-transition>
+      </div>
+
+      <!-- 数据输入区域 -->
+      <div class="data-input-section">
+        <h2 class="section-title">📊 数据输入</h2>
+
+        <div class="input-hint-card">
+          <el-icon>
+            <InfoFilled />
+          </el-icon>
+          <span>请输入距离矩阵（必需）和样本数据（用于公式分析）。所有数据必须有效才能运行分析。</span>
+        </div>
+
+        <div class="data-input-grid">
+          <!-- 距离矩阵 -->
+          <div class="data-input-card">
+            <h3>🔷 距离矩阵</h3>
+            <p class="input-hint">n × n 对称矩阵，对角线为 0</p>
+            <el-input v-model="permanovaParams.distanceMatrixStr" type="textarea" :rows="10"
+              placeholder='[[0, 0.2, 0.3], [0.2, 0, 0.25], [0.3, 0.25, 0]]'
+              @input="onDistanceMatrixChangeAndValidate" />
+            <div class="validation-status">
+              <el-tag :type="permanovaParams.matrixValid ? 'success' : 'info'" size="small">
+                {{ permanovaParams.matrixValid ? `✓ 有效矩阵：${permanovaParams.matrixSize} 个样本` : '等待输入' }}
+              </el-tag>
+              <span v-if="permanovaParams.matrixError" class="error-text">
+                {{ permanovaParams.matrixError }}
+              </span>
             </div>
           </div>
 
-          <!-- 常用公式模板 -->
-          <div class="form-group">
-            <div class="template-header">
-              <div class="template-header-title">
-                <span class="template-icon">📋</span>
-                <span class="template-label">常用公式模板</span>
-              </div>
-              <el-button class="template-toggle-btn" @click="toggleTemplateCollapse">
-                <el-icon class="toggle-icon">
-                  <component :is="permanovaParams.templateCollapsed ? 'CaretRight' : 'CaretBottom'" />
-                </el-icon>
-                <span class="toggle-text">
-                  {{ permanovaParams.templateCollapsed ? '展开所有模板' : '收起模板' }}
-                </span>
-              </el-button>
-            </div>
-
-            <el-collapse-transition>
-              <div v-show="!permanovaParams.templateCollapsed">
-
-                <!-- 生物/医学方向 -->
-                <div class="template-section-title">🔬 生物/医学方向</div>
-                <div class="template-buttons">
-                  <el-tooltip content="单因素 PERMANOVA，检验分组效应" placement="top">
-                    <button type="button" @click="loadTemplate('singleFactor')"
-                      :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'singleFactor' }]">
-                      🧪 单因素分析
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="多因素 PERMANOVA，同时检验多个变量" placement="top">
-                    <button type="button" @click="loadTemplate('multiFactor')"
-                      :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'multiFactor' }]">
-                      📊 多因素分析
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="检验两个变量的交互作用" placement="top">
-                    <button type="button" @click="loadTemplate('interaction')"
-                      :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'interaction' }]">
-                      🔀 交互作用
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="控制协变量后检验处理效应" placement="top">
-                    <button type="button" @click="loadTemplate('ancova')"
-                      :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'ancova' }]">
-                      📈 协变量分析
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="嵌套设计，Site 内的 Treatment 效应" placement="top">
-                    <button type="button" @click="loadTemplate('nested')"
-                      :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'nested' }]">
-                      🗂️ 嵌套设计
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="完全模型：主效应 + 交互 + 区组" placement="top">
-                    <button type="button" @click="loadTemplate('fullModel')"
-                      :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'fullModel' }]">
-                      🎯 完全模型
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="微生物组研究常用设计" placement="top">
-                    <button type="button" @click="loadTemplate('microbiome')"
-                      :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'microbiome' }]">
-                      🦠 微生物组
-                    </button>
-                  </el-tooltip>
-                </div>
-
-                <!-- 物理/环境科学方向 -->
-                <div class="template-section-title">🌍 物理/环境科学方向</div>
-                <div class="template-buttons">
-                  <el-tooltip content="时间序列分析，纵向数据" placement="top">
-                    <button type="button" @click="loadTemplate('timeSeries')" class="btn-template">
-                      ⏱️ 时间序列
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="空间分布分析" placement="top">
-                    <button type="button" @click="loadTemplate('spatial')" class="btn-template">
-                      🌍 空间分析
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="温度梯度分析" placement="top">
-                    <button type="button" @click="loadTemplate('temperatureGradient')" class="btn-template">
-                      🌡️ 温度梯度
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="剂量反应分析" placement="top">
-                    <button type="button" @click="loadTemplate('doseResponse')" class="btn-template">
-                      💊 剂量反应
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="重复测量设计" placement="top">
-                    <button type="button" @click="loadTemplate('repeatedMeasures')" class="btn-template">
-                      🔄 重复测量
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="区组设计，控制批次效应" placement="top">
-                    <button type="button" @click="loadTemplate('blockDesign')" class="btn-template">
-                      📦 区组设计
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="多环境因子综合分析" placement="top">
-                    <button type="button" @click="loadTemplate('environmental')" class="btn-template">
-                      🌊 环境因子
-                    </button>
-                  </el-tooltip>
-                </div>
-
-                <!-- 农业/林业/生态方向 -->
-                <div class="template-section-title">🌾 农业/林业/生态方向</div>
-                <div class="template-buttons">
-                  <el-tooltip content="作物品种与栽培管理" placement="top">
-                    <button type="button" @click="loadTemplate('cropVariety')" class="btn-template">
-                      🌾 作物品种
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="土壤类型与理化性质" placement="top">
-                    <button type="button" @click="loadTemplate('soilType')" class="btn-template">
-                      🟤 土壤分析
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="植物群落调查" placement="top">
-                    <button type="button" @click="loadTemplate('plantCommunity')" class="btn-template">
-                      🌿 植物群落
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="入侵物种影响评估" placement="top">
-                    <button type="button" @click="loadTemplate('invasiveSpecies')" class="btn-template">
-                      🌾 入侵物种
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="森林群落结构" placement="top">
-                    <button type="button" @click="loadTemplate('forestCommunity')" class="btn-template">
-                      🌲 森林群落
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="土地利用变化" placement="top">
-                    <button type="button" @click="loadTemplate('landUse')" class="btn-template">
-                      🏞️ 土地利用
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="保护区评估" placement="top">
-                    <button type="button" @click="loadTemplate('protectedArea')" class="btn-template">
-                      🛡️ 保护区
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="气候变化响应" placement="top">
-                    <button type="button" @click="loadTemplate('climateChange')" class="btn-template">
-                      🌡️ 气候变化
-                    </button>
-                  </el-tooltip>
-                </div>
-
-                <!-- 海洋/昆虫方向 -->
-                <div class="template-section-title">🐟 海洋/昆虫方向</div>
-                <div class="template-buttons">
-                  <el-tooltip content="鱼类群落分析" placement="top">
-                    <button type="button" @click="loadTemplate('fishCommunity')" class="btn-template">
-                      🐟 鱼类群落
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="浮游生物研究" placement="top">
-                    <button type="button" @click="loadTemplate('plankton')" class="btn-template">
-                      🦠 浮游生物
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="昆虫群落调查" placement="top">
-                    <button type="button" @click="loadTemplate('insectCommunity')" class="btn-template">
-                      🦋 昆虫群落
-                    </button>
-                  </el-tooltip>
-                </div>
-
-                <!-- 基因组学/医学方向 -->
-                <div class="template-section-title">🧬 基因组学/医学方向</div>
-                <div class="template-buttons">
-                  <el-tooltip content="基因表达谱分析" placement="top">
-                    <button type="button" @click="loadTemplate('geneExpression')" class="btn-template">
-                      🧬 基因表达
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="单细胞转录组分析" placement="top">
-                    <button type="button" @click="loadTemplate('singleCell')" class="btn-template">
-                      🔬 单细胞分析
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="疾病亚型分类" placement="top">
-                    <button type="button" @click="loadTemplate('diseaseSubtype')" class="btn-template">
-                      🏥 疾病亚型
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="治疗效果评估" placement="top">
-                    <button type="button" @click="loadTemplate('treatmentEffect')" class="btn-template">
-                      💊 治疗效果
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="脑区连接分析" placement="top">
-                    <button type="button" @click="loadTemplate('brainConnectivity')" class="btn-template">
-                      🧠 脑连接
-                    </button>
-                  </el-tooltip>
-                </div>
-
-                <!-- 食品科学方向 -->
-                <div class="template-section-title">🍽️ 食品科学方向</div>
-                <div class="template-buttons">
-                  <el-tooltip content="发酵过程监控" placement="top">
-                    <button type="button" @click="loadTemplate('fermentation')" class="btn-template">
-                      🍶 发酵监控
-                    </button>
-                  </el-tooltip>
-                  <el-tooltip content="食品产地溯源" placement="top">
-                    <button type="button" @click="loadTemplate('foodOrigin')" class="btn-template">
-                      🍷 产地溯源
-                    </button>
-                  </el-tooltip>
-                </div>
-              </div>
-            </el-collapse-transition>
-          </div>
-
-          <div class="form-group">
-            <label>样本数据 (JSON 格式):</label>
-            <el-input v-model="permanovaParams.sampleDataStr" type="textarea" :rows="12"
-              placeholder='{"Treatment": ["A", "A", "B", "B"], "pH": [6.5, 6.8, 7.2, 7.0]}'
+          <!-- 样本数据 -->
+          <div class="data-input-card">
+            <h3>📋 样本数据</h3>
+            <p class="input-hint">样本分组信息，用于 PERMANOVA 公式</p>
+            <el-input v-model="permanovaParams.sampleDataStr" type="textarea" :rows="10"
+              placeholder='{"Sample1": {"Group": "A", "Treatment": "Control"}, "Sample2": {"Group": "B", "Treatment": "Treated"}}'
               @input="onSampleDataChangeAndValidate" />
-            <div v-if="permanovaParams.sampleDataError" class="error-msg">{{ permanovaParams.sampleDataError }}</div>
-            <div v-if="permanovaParams.sampleDataValid" class="success-msg">
-              ✅ 有效数据：{{ permanovaParams.sampleDataRows }} 行，{{ permanovaParams.sampleDataCols }} 个变量
+            <div class="validation-status">
+              <el-tag :type="permanovaParams.sampleDataValid ? 'success' : 'info'" size="small">
+                {{ permanovaParams.sampleDataValid ? '✓ 数据有效' : '等待输入' }}
+              </el-tag>
+              <span v-if="permanovaParams.sampleDataError" class="error-text">
+                {{ permanovaParams.sampleDataError }}
+              </span>
             </div>
-            <div class="hint">键是变量名，值是数组（长度 = 样本数，需与距离矩阵匹配）</div>
           </div>
 
-          <div class="form-group">
-            <label>模型公式:</label>
-            <el-input v-model="permanovaParams.formula" @input="onFormulaChange" placeholder="Treatment" />
-            <div class="hint">输入样本数据中的变量名，用 + 连接多个变量，用 * 表示交互作用</div>
+          <!-- 模型公式 -->
+          <div class="data-input-card">
+            <h3>🧮 模型公式</h3>
+            <p class="input-hint">基于样本数据中的变量名</p>
+            <el-input v-model="permanovaParams.formula" size="large" placeholder="Treatment + pH * Temperature"
+              @input="onFormulaChange" />
+            <p class="formula-hint">
+              💡 用 <code>+</code> 连接多个变量，用 <code>*</code> 表示交互作用
+            </p>
+          </div>
+
+          <!-- 置换次数 -->
+          <div class="data-input-card">
+            <h3>🔄 置换次数</h3>
+            <p class="input-hint">统计显著性检验的置换次数</p>
+            <el-input-number v-model="permanovaParams.permutations" :min="99" :max="9999" :step="100"
+              controls-position="right" style="width: 100%;" />
+            <p class="formula-hint">
+              💡 建议 ≥ 999 以获得稳定的 p 值
+            </p>
           </div>
         </div>
+      </div>
 
-        <!-- 简单模式提示 -->
-        <div v-if="permanovaParams.mode === 'simple'" class="simple-hint">
-          <div class="hint">
-            ℹ️ 简单模式会自动创建分组进行演示分析。
-            <br />如需真实分析，请切换到高级模式并提供样本数据。
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label>置换次数:</label>
-          <el-input-number v-model="permanovaParams.permutations" :min="99" :max="9999" :step="100"
-            controls-position="right" style="width: 100%;" />
-        </div>
-
+      <!-- 运行分析按钮 -->
+      <div class="run-button-container">
         <button @click="runPERMANOVA" class="btn-run" :disabled="!permanovaParams.matrixValid">
+          <el-icon>
+            <VideoPlay />
+          </el-icon>
           运行分析
         </button>
+        <span v-if="!permanovaParams.matrixValid" class="run-hint">
+          <el-icon>
+            <InfoFilled />
+          </el-icon>
+          请确保所有数据有效
+        </span>
       </div>
+
+      <!-- 结果展示 -->
+      <div v-if="analysisResult" class="result-section">
+        <h2>分析结果</h2>
+    <div class="result-content">
+      <pre>{{ JSON.stringify(analysisResult, null, 2) }}</pre>
     </div>
 
-    <!-- 结果展示 -->
-    <div v-if="analysisResult" class="result-section">
-      <h2>分析结果</h2>
-      <div class="result-content">
-        <pre>{{ JSON.stringify(analysisResult, null, 2) }}</pre>
-      </div>
+    <!-- 图表展示区域（如果使用 ECharts） -->
+    <div v-if="analysisResult.permanova_result || analysisResult.pcoa" class="result-chart">
+      <h3>📊 分析结果可视化</h3>
 
-      <!-- 图表展示区域（如果使用 ECharts） -->
-      <div v-if="analysisResult.permanova_result || analysisResult.pcoa" class="result-chart">
-        <h3>📊 分析结果可视化</h3>
+      <!-- 图表类型切换 -->
+      <el-tabs v-model="activeChartType" type="card" @tab-click="handleChartTypeChange">
+        <el-tab-pane label="🔵 PCoA 散点图" name="scatter">PCoA 散点图</el-tab-pane>
+        <el-tab-pane label="📈 碎石图" name="scree">碎石图</el-tab-pane>
+        <el-tab-pane label="🥧 方差分解" name="variance">方差分解</el-tab-pane>
+        <el-tab-pane label="📦 分组箱线图" name="boxplot">分组箱线图</el-tab-pane>
+        <el-tab-pane label="🔥 距离热图" name="heatmap">距离热图</el-tab-pane>
+      </el-tabs>
 
-        <!-- 图表类型切换 -->
-        <el-tabs v-model="activeChartType" type="card" @tab-click="handleChartTypeChange">
-          <el-tab-pane label="🔵 PCoA 散点图" name="scatter">PCoA 散点图</el-tab-pane>
-          <el-tab-pane label="📈 碎石图" name="scree">碎石图</el-tab-pane>
-          <el-tab-pane label="🥧 方差分解" name="variance">方差分解</el-tab-pane>
-          <el-tab-pane label="📦 分组箱线图" name="boxplot">分组箱线图</el-tab-pane>
-          <el-tab-pane label="🔥 距离热图" name="heatmap">距离热图</el-tab-pane>
-        </el-tabs>
-
-        <!-- PCoA 统计信息（只在散点图 tab 显示） -->
-        <div v-if="pcoaStats && activeChartType === 'scatter'" class="pcoa-stats">
-          <div class="stat-item">
-            <span class="stat-label">总样本数</span>
-            <span class="stat-value">{{ pcoaStats.totalSamples }}</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">排序轴数量</span>
-            <span class="stat-value">{{ pcoaStats.nAxes }}</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">PCoA1 解释方差</span>
-            <span class="stat-value highlight">{{ pcoaStats.axis1Variance }}%</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">PCoA2 解释方差</span>
-            <span class="stat-value highlight">{{ pcoaStats.axis2Variance }}%</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">分组数量</span>
-            <span class="stat-value">{{ pcoaStats.groups }}</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">总特征值</span>
-            <span class="stat-value">{{ pcoaStats.totalVariance }}</span>
-          </div>
+      <!-- PCoA 统计信息（只在散点图 tab 显示） -->
+      <div v-if="pcoaStats && activeChartType === 'scatter'" class="pcoa-stats">
+        <div class="stat-item">
+          <span class="stat-label">总样本数</span>
+          <span class="stat-value">{{ pcoaStats.totalSamples }}</span>
         </div>
-
-        <div ref="pcoaChart" class="pcoa-chart"></div>
+        <div class="stat-item">
+          <span class="stat-label">排序轴数量</span>
+          <span class="stat-value">{{ pcoaStats.nAxes }}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">PCoA1 解释方差</span>
+          <span class="stat-value highlight">{{ pcoaStats.axis1Variance }}%</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">PCoA2 解释方差</span>
+          <span class="stat-value highlight">{{ pcoaStats.axis2Variance }}%</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">分组数量</span>
+          <span class="stat-value">{{ pcoaStats.groups }}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">总特征值</span>
+          <span class="stat-value">{{ pcoaStats.totalVariance }}</span>
+        </div>
       </div>
 
-      <!-- 事后检验区域 -->
-      <div v-if="analysisResult && analysisResult.permanova_result" class="posthoc-section">
-        <h3>🔬 事后检验 (Post-hoc Test)</h3>
-        <div class="posthoc-controls">
-          <el-tooltip :content="getPosthocTooltipContent()" placement="top" :show-after="300">
-            <el-button @click="showPosthocDialog = true" type="primary" plain round :disabled="!checkCanRunPosthoc()">
-              运行事后检验
-            </el-button>
-          </el-tooltip>
+      <div ref="pcoaChart" class="pcoa-chart"></div>
+    </div>
 
-          <div v-if="posthocResult" class="posthoc-hint">
-            <el-icon>
-              <InfoFilled />
-            </el-icon>
-            <span>已运行事后检验，{{ posthocResult.comparisons?.length || 0 }} 组两两比较</span>
-          </div>
+    <!-- 事后检验区域 -->
+    <div v-if="analysisResult && analysisResult.permanova_result" class="posthoc-section">
+      <h3>🔬 事后检验 (Post-hoc Test)</h3>
+      <div class="posthoc-controls">
+        <el-tooltip :content="getPosthocTooltipContent()" placement="top" :show-after="300">
+          <el-button @click="showPosthocDialog = true" type="primary" plain round :disabled="!checkCanRunPosthoc()">
+            运行事后检验
+          </el-button>
+        </el-tooltip>
+
+        <div v-if="posthocResult" class="posthoc-hint">
+          <el-icon>
+            <InfoFilled />
+          </el-icon>
+          <span>已运行事后检验，{{ posthocResult.comparisons?.length || 0 }} 组两两比较</span>
         </div>
       </div>
     </div>
-
-    <!-- 导入数据对话框 -->
-    <el-dialog v-model="showImportDialog" title="📁 导入数据" width="700px" :close-on-click-modal="false">
-      <div class="import-dialog-content">
-        <div class="import-instruction-card">
-          <div class="instruction-header">
-            <span class="instruction-icon">📋</span>
-            <span class="instruction-title">数据格式说明</span>
-          </div>
-          <div class="instruction-content">
-            <div class="instruction-row">
-              <span class="instruction-label">距离矩阵：</span>
-              <span class="instruction-value">对称矩阵，对角线为 0，行列名称为样本 ID</span>
-            </div>
-            <div class="instruction-row">
-              <span class="instruction-label">样本数据：</span>
-              <span class="instruction-value">至少包含样本 ID 和分组变量</span>
-            </div>
-            <div class="instruction-row">
-              <span class="instruction-label">支持格式：</span>
-              <span class="instruction-value">Excel (.xlsx, .xls) 或 CSV (.csv)</span>
-            </div>
-          </div>
-        </div>
-
-        <el-upload drag :auto-upload="false" :on-change="handleFileChange" :on-remove="handleFileRemove" :limit="1"
-          accept=".xlsx,.xls,.csv" class="upload-demo">
-          <el-icon class="el-icon--upload">
-            <UploadFilled />
-          </el-icon>
-          <div class="el-upload__text">
-            将文件拖到此处，或<em>点击上传</em>
-          </div>
-          <template #tip>
-            <div class="el-upload__tip">
-              支持 .xlsx / .xls / .csv 文件
-            </div>
-          </template>
-        </el-upload>
-
-        <div v-if="importPreview" class="import-preview">
-          <el-divider>数据预览</el-divider>
-
-          <el-tabs v-model="importPreviewActiveTab">
-            <el-tab-pane label="距离矩阵" name="distance">
-              <div class="preview-table-container">
-                <el-table :data="importPreview.distanceMatrixPreview" border size="small" max-height="300">
-                  <el-table-column type="index" width="50" label="行号" />
-                  <el-table-column v-for="col in importPreview.distanceMatrixCols" :key="col.key" :prop="col.key"
-                    :label="col.label" />
-                </el-table>
-              </div>
-            </el-tab-pane>
-
-            <el-tab-pane label="样本数据" name="sample">
-              <div class="preview-table-container">
-                <el-table :data="importPreview.sampleDataPreview" border size="small" max-height="300">
-                  <el-table-column type="index" width="50" />
-                  <el-table-column v-for="col in importPreview.sampleDataCols" :key="col.key" :prop="col.key"
-                    :label="col.label" />
-                </el-table>
-              </div>
-            </el-tab-pane>
-          </el-tabs>
-        </div>
-
-        <div v-if="importError" class="error-msg" style="margin-top: 16px;">
-          <el-icon>
-            <CircleClose />
-          </el-icon>
-          {{ importError }}
-        </div>
-      </div>
-
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showImportDialog = false">取消</el-button>
-          <el-button type="primary" @click="confirmImport" :disabled="!importPreview">
-            导入到分析
-          </el-button>
-        </span>
-      </template>
-    </el-dialog>
-
-    <!-- 导出结果对话框 -->
-    <el-dialog v-model="showExportDialog" title="💾 导出结果" width="500px">
-      <div class="export-dialog-content">
-        <p class="export-hint">选择要导出的内容：</p>
-
-        <div class="export-options">
-          <el-checkbox-group v-model="exportOptions">
-            <div class="checkbox-wrapper">
-              <el-checkbox label="json">完整结果 (JSON)</el-checkbox>
-            </div>
-            <div class="checkbox-wrapper">
-              <el-checkbox label="permanovaTable">PERMANOVA 表格 (Excel)</el-checkbox>
-            </div>
-            <div class="checkbox-wrapper">
-              <el-checkbox label="pcoaCoords">PCoA 坐标 (Excel)</el-checkbox>
-            </div>
-            <div class="checkbox-wrapper">
-              <el-checkbox label="chartPNG">当前图表 (PNG)</el-checkbox>
-            </div>
-          </el-checkbox-group>
-        </div>
-
-        <div v-if="exportError" class="error-msg" style="margin-top: 16px;">
-          <el-icon>
-            <CircleClose />
-          </el-icon>
-          {{ exportError }}
-        </div>
-      </div>
-
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showExportDialog = false">取消</el-button>
-          <el-button type="warning" @click="confirmExport" :disabled="exportOptions.length === 0">
-            导出
-          </el-button>
-        </span>
-      </template>
-    </el-dialog>
-
-    <!-- 事后检验对话框 -->
-    <el-dialog v-model="showPosthocDialog" title="🔬 事后检验配置" width="500px">
-      <div class="posthoc-dialog-content">
-        <el-form :label-width="'120px'">
-          <el-form-item label="p 值校正方法：">
-            <el-select v-model="posthocParams.method" placeholder="请选择" style="width: 100%;">
-              <el-option label="FDR (Benjamini-Hochberg) - 推荐" value="fdr" />
-              <el-option label="Bonferroni - 保守" value="bonferroni" />
-              <el-option label="BH (Benjamini-Hochberg)" value="bh" />
-              <el-option label="无校正" value="none" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="置换次数：">
-            <el-input-number v-model="posthocParams.permutations" :min="99" :max="9999" :step="100"
-              style="width: 100%;" />
-          </el-form-item>
-
-          <el-alert title="注意事项" type="warning" :closable="false" show-icon style="margin-top: 16px;">
-            <p>事后检验会进行所有组的两两比较，计算量较大。</p>
-            <p>建议使用 FDR 校正以平衡假阳性和假阴性。</p>
-          </el-alert>
-        </el-form>
-
-        <div v-if="posthocLoading" class="posthoc-loading">
-          <el-loading v-loading="posthocLoading" element-loading-text="正在运行事后检验..." />
-        </div>
-      </div>
-
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showPosthocDialog = false">取消</el-button>
-          <el-button type="primary" @click="runPosthocTest">运行检验</el-button>
-        </span>
-      </template>
-    </el-dialog>
-
-    <!-- 事后检验结果对话框 -->
-    <el-dialog v-model="showPosthocResultDialog" title="🔬 事后检验结果" width="900px" :close-on-click-modal="false">
-      <div class="posthoc-result-content">
-        <div v-if="posthocResult" class="posthoc-result">
-          <el-table :data="posthocResult.comparisons" border style="width: 100%;"
-            :header-cell-style="{ background: '#f0f9ff', color: '#0369a1', fontWeight: 600, textAlign: 'center' }"
-            :cell-style="{ textAlign: 'center' }">
-            <el-table-column prop="group1" label="组 1" min-width="120" />
-            <el-table-column prop="group2" label="组 2" min-width="120" />
-            <el-table-column prop="F" label="F 值" min-width="100" />
-            <el-table-column prop="R2" label="R²" min-width="100" />
-            <el-table-column prop="p" label="p 值" min-width="100" />
-            <el-table-column prop="p_adj" label="校正 p 值" min-width="120" />
-            <el-table-column label="显著性" min-width="100">
-              <template #default="scope">
-                <el-tag :type="scope.row.significance === '***' ? 'danger' :
-                  scope.row.significance === '**' ? 'warning' :
-                    scope.row.significance === '*' ? 'success' : 'info'" size="small">
-                  {{ scope.row.significance }}
-                </el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <div class="posthoc-significance-hint" style="margin-top: 16px;">
-            <el-icon>
-              <InfoFilled />
-            </el-icon>
-            <span>显著性标记：*** p < 0.001, ** p < 0.01, * p < 0.05</span>
-          </div>
-        </div>
-      </div>
-
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showPosthocResultDialog = false">关闭</el-button>
-          <el-button type="primary" @click="exportPosthocResult">导出结果</el-button>
-        </span>
-      </template>
-    </el-dialog>
+      </div><!-- result-section -->
+    </div><!-- config-section -->
   </div>
+
+  <!-- 导入数据对话框 -->
+  <el-dialog v-model="showImportDialog" title="📁 导入数据" width="700px" :close-on-click-modal="false">
+    <div class="import-dialog-content">
+      <div class="import-instruction-card">
+        <div class="instruction-header">
+          <span class="instruction-icon">📋</span>
+          <span class="instruction-title">数据格式说明</span>
+        </div>
+        <div class="instruction-content">
+          <div class="instruction-row">
+            <span class="instruction-label">距离矩阵：</span>
+            <span class="instruction-value">对称矩阵，对角线为 0，行列名称为样本 ID</span>
+          </div>
+          <div class="instruction-row">
+            <span class="instruction-label">样本数据：</span>
+            <span class="instruction-value">至少包含样本 ID 和分组变量</span>
+          </div>
+          <div class="instruction-row">
+            <span class="instruction-label">支持格式：</span>
+            <span class="instruction-value">Excel (.xlsx, .xls) 或 CSV (.csv)</span>
+          </div>
+        </div>
+      </div>
+
+      <el-upload ref="uploadRef" drag :auto-upload="false" :on-change="handleFileChange" :limit="1"
+        accept=".xlsx,.xls,.csv" class="upload-demo" :file-list="uploadFileList">
+        <el-icon class="el-icon--upload">
+          <UploadFilled />
+        </el-icon>
+        <div class="el-upload__text">
+          将文件拖到此处，或<em>点击上传</em>
+        </div>
+        <template #tip>
+          <div class="el-upload__tip">
+            支持 .xlsx / .xls / .csv 文件
+          </div>
+        </template>
+      </el-upload>
+
+      <div v-if="importPreview" class="import-preview">
+        <el-divider>数据预览</el-divider>
+
+        <el-tabs v-model="importPreviewActiveTab">
+          <el-tab-pane label="距离矩阵" name="distance">
+            <div class="preview-table-container">
+              <el-table :data="importPreview.distanceMatrixPreview" border size="small" max-height="300">
+                <el-table-column type="index" width="50" label="行号" />
+                <el-table-column v-for="col in importPreview.distanceMatrixCols" :key="col.key" :prop="col.key"
+                  :label="col.label" />
+              </el-table>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="样本数据" name="sample">
+            <div class="preview-table-container">
+              <el-table :data="importPreview.sampleDataPreview" border size="small" max-height="300">
+                <el-table-column type="index" width="50" />
+                <el-table-column v-for="col in importPreview.sampleDataCols" :key="col.key" :prop="col.key"
+                  :label="col.label" />
+              </el-table>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane v-if="importPreview.formula" label="模型公式" name="formula">
+            <div class="formula-preview">
+              <el-input v-model="importPreview.formula" type="textarea" :rows="3" readonly />
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+
+      <div v-if="importError" class="error-msg" style="margin-top: 16px;">
+        <el-icon>
+          <CircleClose />
+        </el-icon>
+        {{ importError }}
+      </div>
+    </div>
+
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button @click="closeImportDialog">取消</el-button>
+        <el-button type="primary" @click="confirmImport" :disabled="!importPreview">
+          导入到分析
+        </el-button>
+      </span>
+    </template>
+  </el-dialog>
+
+  <!-- 导出结果对话框 -->
+  <el-dialog v-model="showExportDialog" title="💾 导出结果" width="500px">
+    <div class="export-dialog-content">
+      <p class="export-hint">选择要导出的内容：</p>
+
+      <div class="export-options">
+        <el-checkbox-group v-model="exportOptions">
+          <div class="checkbox-wrapper">
+            <el-checkbox label="json">完整结果 (JSON)</el-checkbox>
+          </div>
+          <div class="checkbox-wrapper">
+            <el-checkbox label="permanovaTable">PERMANOVA 表格 (Excel)</el-checkbox>
+          </div>
+          <div class="checkbox-wrapper">
+            <el-checkbox label="pcoaCoords">PCoA 坐标 (Excel)</el-checkbox>
+          </div>
+          <div class="checkbox-wrapper">
+            <el-checkbox label="chartPNG">当前图表 (PNG)</el-checkbox>
+          </div>
+        </el-checkbox-group>
+      </div>
+
+      <div v-if="exportError" class="error-msg" style="margin-top: 16px;">
+        <el-icon>
+          <CircleClose />
+        </el-icon>
+        {{ exportError }}
+      </div>
+    </div>
+
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button @click="showExportDialog = false">取消</el-button>
+        <el-button type="warning" @click="confirmExport" :disabled="exportOptions.length === 0">
+          导出
+        </el-button>
+      </span>
+    </template>
+  </el-dialog>
+
+  <!-- 事后检验对话框 -->
+  <el-dialog v-model="showPosthocDialog" title="🔬 事后检验配置" width="500px">
+    <div class="posthoc-dialog-content">
+      <el-form :label-width="'120px'">
+        <el-form-item label="p 值校正方法：">
+          <el-select v-model="posthocParams.method" placeholder="请选择" style="width: 100%;">
+            <el-option label="FDR (Benjamini-Hochberg) - 推荐" value="fdr" />
+            <el-option label="Bonferroni - 保守" value="bonferroni" />
+            <el-option label="BH (Benjamini-Hochberg)" value="bh" />
+            <el-option label="无校正" value="none" />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="置换次数：">
+          <el-input-number v-model="posthocParams.permutations" :min="99" :max="9999" :step="100"
+            style="width: 100%;" />
+        </el-form-item>
+
+        <el-alert title="注意事项" type="warning" :closable="false" show-icon style="margin-top: 16px;">
+          <p>事后检验会进行所有组的两两比较，计算量较大。</p>
+          <p>建议使用 FDR 校正以平衡假阳性和假阴性。</p>
+        </el-alert>
+      </el-form>
+
+      <div v-if="posthocLoading" class="posthoc-loading">
+        <el-loading v-loading="posthocLoading" element-loading-text="正在运行事后检验..." />
+      </div>
+    </div>
+
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button @click="showPosthocDialog = false">取消</el-button>
+        <el-button type="primary" @click="runPosthocTest">运行检验</el-button>
+      </span>
+    </template>
+  </el-dialog>
+
+  <!-- 事后检验结果对话框 -->
+  <el-dialog v-model="showPosthocResultDialog" title="🔬 事后检验结果" width="900px" :close-on-click-modal="false">
+    <div class="posthoc-result-content">
+      <div v-if="posthocResult" class="posthoc-result">
+        <el-table :data="posthocResult.comparisons" border style="width: 100%;"
+          :header-cell-style="{ background: '#f0f9ff', color: '#0369a1', fontWeight: 600, textAlign: 'center' }"
+          :cell-style="{ textAlign: 'center' }">
+          <el-table-column prop="group1" label="组 1" min-width="120" />
+          <el-table-column prop="group2" label="组 2" min-width="120" />
+          <el-table-column prop="F" label="F 值" min-width="100" />
+          <el-table-column prop="R2" label="R²" min-width="100" />
+          <el-table-column prop="p" label="p 值" min-width="100" />
+          <el-table-column prop="p_adj" label="校正 p 值" min-width="120" />
+          <el-table-column label="显著性" min-width="100">
+            <template #default="scope">
+              <el-tag :type="scope.row.significance === '***' ? 'danger' :
+                scope.row.significance === '**' ? 'warning' :
+                  scope.row.significance === '*' ? 'success' : 'info'" size="small">
+                {{ scope.row.significance }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <div class="posthoc-significance-hint" style="margin-top: 16px;">
+          <el-icon>
+            <InfoFilled />
+          </el-icon>
+          <span>显著性标记：*** p < 0.001, ** p < 0.01, * p < 0.05</span>
+        </div>
+      </div>
+    </div>
+
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button @click="showPosthocResultDialog = false">关闭</el-button>
+        <el-button type="primary" @click="exportPosthocResult">导出结果</el-button>
+      </span>
+    </template>
+  </el-dialog>
 </template>
 
 <script>
@@ -664,7 +688,8 @@ import {
   UploadFilled,
   InfoFilled,
   CircleClose,
-  Setting
+  Setting,
+  VideoPlay
 } from '@element-plus/icons-vue';
 import { ElLoading } from 'element-plus';
 
@@ -688,6 +713,7 @@ export default {
     InfoFilled,
     CircleClose,
     Setting,
+    VideoPlay,
     TemplateButton,
     TemplateCategory
   },
@@ -703,6 +729,7 @@ export default {
 
       // 导入相关
       showImportDialog: false,
+      uploadFileList: [],  // 上传文件列表
       importPreview: null,
       importPreviewActiveTab: 'distance',
       importError: '',
@@ -724,7 +751,6 @@ export default {
       },
 
       permanovaParams: {
-        mode: 'simple', // 'simple' 或 'advanced'
         distanceMatrixStr: '',
         distanceMatrix: [],
         sampleDataStr: '',
@@ -778,6 +804,8 @@ export default {
   mounted() {
     console.log('[Toolbar] mounted, initial isToolbarExpanded:', this.isToolbarExpanded);
     this.checkRStatus();
+    // 滚动到页面顶部
+    window.scrollTo(0, 0);
   },
 
   methods: {
@@ -860,11 +888,13 @@ export default {
         this.permanovaParams.matrixSize = n;
         this.permanovaParams.distanceMatrix = matrix;
         console.log('[Validate] Success! Matrix is valid, size:', n);
+        console.log('[Validate] distanceMatrix type:', typeof matrix);
+        console.log('[Validate] distanceMatrix[0] type:', typeof matrix[0]);
+        console.log('[Validate] distanceMatrix[0][0] type:', typeof matrix[0][0]);
+        console.log('[Validate] distanceMatrix[0][0] value:', matrix[0][0]);
 
         // 距离矩阵变化后，重新验证样本数据
-        if (this.permanovaParams.mode === 'advanced') {
-          this.validateSampleData();
-        }
+        this.validateSampleData();
       } catch (e) {
         this.permanovaParams.matrixValid = false;
         this.permanovaParams.matrixError = 'JSON 格式错误：' + e.message;
@@ -942,27 +972,33 @@ export default {
           return;
         }
 
-        console.log('[RAnalysis] Running PERMANOVA with params:', {
-          matrixSize: this.permanovaParams.distanceMatrix.length,
-          mode: this.permanovaParams.mode,
-          permutations: this.permanovaParams.permutations
-        });
-
+        console.log('[RAnalysis] Running PERMANOVA with params:');
+        console.log('[RAnalysis]   matrixSize:', this.permanovaParams.distanceMatrix?.length);
+        console.log('[RAnalysis]   matrix type:', typeof this.permanovaParams.distanceMatrix);
+        console.log('[RAnalysis]   matrix is array:', Array.isArray(this.permanovaParams.distanceMatrix));
+        console.log('[RAnalysis]   matrix[0] type:', typeof this.permanovaParams.distanceMatrix?.[0]);
+        console.log('[RAnalysis]   matrix[0] is array:', Array.isArray(this.permanovaParams.distanceMatrix?.[0]));
+        console.log('[RAnalysis]   permutations:', this.permanovaParams.permutations);
+        
         // 构建参数
         const params = {
           distanceMatrix: this.permanovaParams.distanceMatrix,
           permutations: this.permanovaParams.permutations
         };
+        
+        console.log('[RAnalysis] Params to send to R:');
+        console.log('[RAnalysis]   matrix dimensions:', params.distanceMatrix?.length, 'x', params.distanceMatrix?.[0]?.length);
+        console.log('[RAnalysis]   matrix[0][0]:', params.distanceMatrix?.[0]?.[0], 'type:', typeof params.distanceMatrix?.[0]?.[0]);
+        console.log('[RAnalysis]   matrix[0]:', params.distanceMatrix?.[0]);
+        console.log('[RAnalysis]   full params:', JSON.stringify({
+          matrixSize: params.distanceMatrix?.length,
+          matrix0Size: params.distanceMatrix?.[0]?.length,
+          matrix00: params.distanceMatrix?.[0]?.[0],
+          permutations: params.permutations
+        }, null, 2));
 
-        // 高级模式：添加样本数据和公式
-        if (this.permanovaParams.mode === 'advanced') {
-          // 验证样本数据
-          this.validateSampleData();
-          if (!this.permanovaParams.sampleDataValid) {
-            this.$message.error('样本数据无效，请检查输入\n' + (this.permanovaParams.sampleDataError || ''));
-            loadingInstance.close();
-            return;
-          }
+        // 添加样本数据和公式（如果有效）
+        if (this.permanovaParams.sampleDataValid) {
           params.sampleData = this.permanovaParams.sampleData;
           params.formula = this.permanovaParams.formula || 'Treatment';
         }
@@ -1053,6 +1089,21 @@ export default {
             console.log('[Import] Sample data from second sheet, rows:', sampleData.length);
           }
 
+          // 读取模型公式
+          let formula = '';
+          if (workbook.SheetNames.includes('模型公式')) {
+            const ws = workbook.Sheets['模型公式'];
+            const formulaData = XLSX.utils.sheet_to_json(ws, { header: 1 });
+            // 查找公式行（格式：Y ~ ...）
+            for (const row of formulaData) {
+              if (row[0] && row[0].includes('~')) {
+                formula = row[0].trim();
+                break;
+              }
+            }
+            console.log('[Import] Formula loaded:', formula);
+          }
+
           // 解析距离矩阵
           if (distanceMatrix.length > 0) {
             // 解析为二维数组（用于分析）
@@ -1078,7 +1129,8 @@ export default {
               distanceMatrixPreview,
               distanceMatrixCols,
               sampleDataPreview,
-              sampleDataCols
+              sampleDataCols,
+              formula
             };
             console.log('[Import] Preview set:', this.importPreview);
             console.log('[Import] distanceMatrixPreview:', distanceMatrixPreview);
@@ -1087,7 +1139,8 @@ export default {
             // 保存导入的数据（使用二维数组）
             this.importedData = {
               distanceMatrix: distanceMatrixArray,
-              sampleData: sampleDataPreview.length > 0 ? sampleDataPreview : null
+              sampleData: sampleDataPreview.length > 0 ? sampleDataPreview : null,
+              formula: formula || null
             };
             console.log('[Import] Imported data saved, matrix size:', this.importedData.distanceMatrix.length);
             console.log('[Import] Imported matrix rows:', this.importedData.distanceMatrix.length, 'cols:', this.importedData.distanceMatrix[0]?.length);
@@ -1188,8 +1241,13 @@ export default {
       }
 
       // 填充距离矩阵
+      console.log('[Import] Imported distance matrix:', this.importedData.distanceMatrix);
+      console.log('[Import] Imported matrix type:', typeof this.importedData.distanceMatrix);
+      console.log('[Import] Imported matrix is array:', Array.isArray(this.importedData.distanceMatrix));
+      console.log('[Import] Imported matrix dimensions:', this.importedData.distanceMatrix?.length, 'x', this.importedData.distanceMatrix?.[0]?.length);
+      
       this.permanovaParams.distanceMatrixStr = JSON.stringify(this.importedData.distanceMatrix, null, 2);
-      console.log('[Import] distanceMatrixStr set:', this.permanovaParams.distanceMatrixStr.substring(0, 100));
+      console.log('[Import] distanceMatrixStr set, length:', this.permanovaParams.distanceMatrixStr.length);
 
       // 填充样本数据（如果有）
       if (this.importedData.sampleData && this.importedData.sampleData.length > 0) {
@@ -1202,8 +1260,13 @@ export default {
         });
 
         this.permanovaParams.sampleDataStr = JSON.stringify(sampleDataObj, null, 2);
-        this.permanovaParams.mode = 'advanced';
         console.log('[Import] sampleDataStr set:', this.permanovaParams.sampleDataStr.substring(0, 100));
+      }
+
+      // 填充模型公式（如果有）
+      if (this.importedData.formula) {
+        this.permanovaParams.formula = this.importedData.formula;
+        console.log('[Import] Formula set:', this.permanovaParams.formula);
       }
 
       // 验证数据
@@ -1225,62 +1288,105 @@ export default {
         });
       }
 
-      this.showImportDialog = false;
-      this.importPreview = null;
-      this.importedData = null;
-
+      // 关闭对话框并清除文件列表
+      this.closeImportDialog();
       this.$message.success('数据导入成功！');
+    },
+
+    // 关闭导入对话框
+    closeImportDialog() {
+      this.showImportDialog = false;
+      this.uploadFileList = [];  // 清除文件列表
+      this.importPreview = null;
+      this.importError = '';
+      // 清除上传组件的文件列表
+      if (this.$refs.uploadRef) {
+        this.$refs.uploadRef.clearFiles();
+      }
     },
 
     async downloadTemplate() {
       try {
+        console.log('[Download Template] Starting...');
         const XLSX = await import('xlsx');
 
         // 创建工作簿
         const wb = XLSX.utils.book_new();
+        console.log('[Download Template] Workbook created');
 
-        // 距离矩阵 sheet
+        // 距离矩阵 sheet（示例数据：5 样本 Bray-Curtis 距离）
+        console.log('[Download Template] Creating distance matrix sheet...');
         const distanceMatrix = [
-          ['样本', ...Array.from({ length: this.permanovaParams.matrixSize }, (_, i) => `Sample${i + 1}`)]
+          ['样本', 'Sample1', 'Sample2', 'Sample3', 'Sample4', 'Sample5'],
+          ['Sample1', 0.00, 0.35, 0.42, 0.28, 0.51],
+          ['Sample2', 0.35, 0.00, 0.38, 0.45, 0.33],
+          ['Sample3', 0.42, 0.38, 0.00, 0.52, 0.47],
+          ['Sample4', 0.28, 0.45, 0.52, 0.00, 0.39],
+          ['Sample5', 0.51, 0.33, 0.47, 0.39, 0.00]
         ];
-        for (let i = 0; i < this.permanovaParams.matrixSize; i++) {
-          const row = [`Sample${i + 1}`, ...this.permanovaParams.distanceMatrix[i]];
-          distanceMatrix.push(row);
-        }
         const wsDistance = XLSX.utils.aoa_to_sheet(distanceMatrix);
         XLSX.utils.book_append_sheet(wb, wsDistance, '距离矩阵');
+        console.log('[Download Template] Distance matrix sheet added, rows:', distanceMatrix.length);
 
-        // 样本数据 sheet（如果有）
-        if (this.permanovaParams.mode === 'advanced' && this.permanovaParams.sampleData) {
-          const sampleData = [];
-          const keys = Object.keys(this.permanovaParams.sampleData);
+        // 样本数据 sheet（示例数据）
+        console.log('[Download Template] Creating sample data sheet...');
+        const sampleData = [
+          ['样本', 'Group', 'Age', 'Weight'],
+          ['Sample1', 'Control', 25, 65],
+          ['Sample2', 'Control', 28, 68],
+          ['Sample3', 'Treatment', 30, 70],
+          ['Sample4', 'Treatment', 27, 66],
+          ['Sample5', 'Control', 26, 67]
+        ];
+        const wsSample = XLSX.utils.aoa_to_sheet(sampleData);
+        XLSX.utils.book_append_sheet(wb, wsSample, '样本数据');
+        console.log('[Download Template] Sample data sheet added, rows:', sampleData.length);
 
-          // 表头
-          sampleData.push(['样本', ...keys]);
-
-          // 数据行
-          for (let i = 0; i < this.permanovaParams.sampleDataRows; i++) {
-            const row = [`Sample${i + 1}`];
-            for (const key of keys) {
-              row.push(this.permanovaParams.sampleData[key][i]);
-            }
-            sampleData.push(row);
-          }
-
-          const wsSample = XLSX.utils.aoa_to_sheet(sampleData);
-          XLSX.utils.book_append_sheet(wb, wsSample, '样本数据');
-        }
+        // 模型公式 sheet
+        console.log('[Download Template] Creating formula sheet...');
+        const formulaData = [
+          ['模型公式'],
+          ['Y ~ Group + Age + Weight'],
+          [''],
+          ['公式说明：'],
+          ['Y: 响应变量（距离矩阵）'],
+          ['Group: 分组变量'],
+          ['Age, Weight: 协变量'],
+          ['使用 + 连接多个变量'],
+          ['使用 * 表示交互作用，如 Group*Age']
+        ];
+        const wsFormula = XLSX.utils.aoa_to_sheet(formulaData);
+        XLSX.utils.book_append_sheet(wb, wsFormula, '模型公式');
+        console.log('[Download Template] Formula sheet added');
 
         // 填写说明 sheet
         const instructions = [
-          ['填写说明'],
-          ['1. 距离矩阵：第一行和第一列为样本名称，其余为距离值'],
-          ['2. 样本数据：第一列为样本名称，其余为变量值'],
-          ['3. 距离矩阵必须为对称矩阵，对角线为 0'],
-          ['4. 样本数据的样本数必须与距离矩阵一致']
+          ['PERMANOVA 分析模板填写说明'],
+          [''],
+          ['📄 距离矩阵（必需）：'],
+          ['  - 第一行和第一列为样本名称，其余为距离值'],
+          ['  - 必须为对称矩阵，对角线为 0'],
+          ['  - 示例：Bray-Curtis 距离、Euclidean 距离'],
+          [''],
+          ['📋 样本数据（必需）：'],
+          ['  - 第一列为样本名称（与距离矩阵一致）'],
+          ['  - 其余列为变量（分组、协变量等）'],
+          ['  - 示例：Group, Age, Weight'],
+          [''],
+          ['🧮 模型公式（必需）：'],
+          ['  - 格式：Y ~ Group + Age + Weight'],
+          ['  - 使用 + 连接多个变量'],
+          ['  - 使用 * 表示交互作用，如 Group*Age'],
+          [''],
+          ['⚙️ 置换次数：'],
+          ['  - 建议 ≥ 999 以获得稳定的 p 值'],
+          ['  - 范围：99 - 9999']
         ];
         const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
         XLSX.utils.book_append_sheet(wb, wsInstructions, '填写说明');
+        console.log('[Download Template] Instructions sheet added');
+        console.log('[Download Template] Total sheets:', wb.SheetNames.length);
+        console.log('[Download Template] Sheet names:', wb.SheetNames);
 
         // 下载文件
         const XLSX_write = XLSX.write;
@@ -1987,12 +2093,10 @@ export default {
     checkCanRunPosthoc() {
       const result = this.analysisResult &&
         this.permanovaParams &&
-        this.permanovaParams.mode === 'advanced' &&
         this.permanovaParams.sampleDataValid;
 
       console.log('[Posthoc] checkCanRunPosthoc:', result, {
         hasAnalysisResult: !!this.analysisResult,
-        mode: this.permanovaParams?.mode,
         sampleDataValid: this.permanovaParams?.sampleDataValid
       });
 
@@ -2012,11 +2116,8 @@ export default {
       if (!this.analysisResult) {
         reasons.push('① 需要先运行 PERMANOVA 分析');
       }
-      if (!this.permanovaParams || this.permanovaParams.mode !== 'advanced') {
-        reasons.push('② 需要使用高级模式（添加样本数据）');
-      }
       if (!this.permanovaParams || !this.permanovaParams.sampleDataValid) {
-        reasons.push('③ 样本数据无效或与距离矩阵不匹配');
+        reasons.push('② 样本数据无效或与距离矩阵不匹配');
       }
 
       const content = '当前无法运行：\n' + reasons.join('\n');
@@ -2494,12 +2595,6 @@ export default {
   color: white;
 }
 
-.config-form {
-  background: #fafafa;
-  padding: 20px;
-  border-radius: 8px;
-}
-
 .form-group {
   margin-bottom: 24px;
   width: 100%;
@@ -2643,6 +2738,90 @@ export default {
   border-left: 4px solid #1890ff;
 }
 
+/* 数据输入区域样式 */
+.data-input-section {
+  width: 100%;
+  margin: 0 auto 30px;
+}
+
+.input-hint-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-radius: 12px;
+  border: 2px solid #bae6fd;
+  margin-bottom: 24px;
+  font-size: 15px;
+  color: #0369a1;
+}
+
+.input-hint-card .el-icon {
+  font-size: 20px;
+  color: #0284c7;
+}
+
+.data-input-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.data-input-card {
+  background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+  border: 2px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 24px;
+  transition: all 0.3s ease;
+}
+
+.data-input-card:hover {
+  border-color: #667eea;
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.15);
+}
+
+.data-input-card h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a202c;
+  margin: 0 0 8px;
+}
+
+.input-hint {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0 0 12px;
+}
+
+.validation-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.error-text {
+  font-size: 13px;
+  color: #ef4444;
+}
+
+.formula-hint {
+  font-size: 13px;
+  color: #64748b;
+  margin: 12px 0 0;
+}
+
+.formula-hint code {
+  background: rgba(102, 126, 234, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  color: #667eea;
+  font-weight: 600;
+}
+
 .template-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -2696,22 +2875,6 @@ export default {
   padding: 8px;
   border-radius: 4px;
   border-left: 3px solid #1890ff;
-}
-
-.simple-hint {
-  margin: 12px 0;
-}
-
-.simple-hint .hint {
-  background: #f0f5ff;
-  /* 与 advanced-section 相同的蓝色背景 */
-  padding: 16px 20px;
-  border-radius: 8px;
-  border: 1px solid #d6e4ff;
-  color: #0369a1;
-  font-size: 14px;
-  line-height: 1.6;
-  box-shadow: 0 2px 8px rgba(3, 105, 161, 0.08);
 }
 
 /* 当前选择的模板卡片 */
@@ -2805,22 +2968,13 @@ export default {
 }
 
 .formula-code {
-  display: inline-flex;
-  /* 使用 inline-flex 以便更好地垂直居中 */
-  align-items: center;
-  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-  padding: 8px 14px;
-  border-radius: 8px;
-  border: 2px solid #e2e8f0;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 14px;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
   color: #0369a1;
-  font-weight: 600;
-  box-shadow: 0 2px 8px rgba(3, 105, 161, 0.08);
-  margin: 0;
-  /* 移除默认 margin */
-  line-height: 1.5;
-  /* 调整行高以匹配标签 */
+  border: 1px solid #bae6fd;
 }
 
 .template-tip {
@@ -2829,23 +2983,15 @@ export default {
   gap: 8px;
   margin-top: 8px;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.6);
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
   border-radius: 8px;
+  border: 1px solid #fde68a;
   font-size: 13px;
-  color: #64748b;
-  border: 1px dashed #cbd5e1;
+  color: #92400e;
 }
 
 .tip-icon {
   font-size: 16px;
-}
-
-.advanced-section {
-  background: #f0f5ff;
-  padding: 16px;
-  border-radius: 8px;
-  margin: 16px 0;
-  border: 1px solid #d6e4ff;
 }
 
 .error-msg {
@@ -2900,13 +3046,33 @@ export default {
   transform: translateY(-1px);
 }
 
+/* 运行分析按钮容器 */
+.run-button-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 2px solid #e2e8f0;
+}
+
+.run-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+  color: #f59e0b;
+  font-weight: 500;
+  padding: 6px 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 8px;
+}
+
 .result-section {
-  margin-top: 40px;
-  padding: 32px 40px;
-  background: rgba(255, 255, 255, 0.98);
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  margin-top: 30px;
 }
 
 .result-content {
@@ -3250,6 +3416,10 @@ export default {
 
 .import-preview {
   margin-top: 16px;
+}
+
+.formula-preview {
+  padding: 16px;
 }
 
 .preview-table-container {

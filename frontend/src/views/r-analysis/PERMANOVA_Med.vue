@@ -194,6 +194,47 @@
           </el-collapse-transition>
         </div>
 
+        <!-- 数据模板：选中后直接填入可运行的合成数据 -->
+        <div class="template-section">
+          <div class="template-header">
+            <div class="template-header-title">
+              <span class="template-icon">🧬</span>
+              <span class="template-label">数据模板（{{ medDataCount }} 个 · 含可运行数据）</span>
+            </div>
+            <el-button class="template-toggle-btn" @click="medDataCollapsed = !medDataCollapsed">
+              <el-icon class="toggle-icon">
+                <component :is="medDataCollapsed ? 'CaretRight' : 'CaretBottom'" />
+              </el-icon>
+              <span class="toggle-text">{{ medDataCollapsed ? '展开数据模板' : '收起数据模板' }}</span>
+            </el-button>
+          </div>
+
+          <div v-if="medDataSummary" class="med-data-current">
+            <span>📌 当前数据模板：<b>{{ selectedMedDataLabel }}</b>（{{ medDataSummary }}）</span>
+            <el-button link type="primary" size="small" @click="clearMedDataTemplate">清除</el-button>
+          </div>
+
+          <el-collapse-transition>
+            <div v-show="!medDataCollapsed">
+              <div class="med-data-note">
+                点击后自动将 M / X / Y / Z 写入下方输入框，可直接点「运行分析」。
+                数据为程序合成的演示数据（非实测数据），已经便携版 R 实测：25/25 中介效应 p &lt; 0.05。
+              </div>
+              <div v-for="group in medDataGroups" :key="group.title">
+                <div class="template-section-title">{{ group.title }}</div>
+                <div class="template-buttons">
+                  <el-tooltip v-for="item in group.items" :key="item.id" :content="item.tip" placement="top">
+                    <button type="button" @click="loadMedDataTemplate(item.id)"
+                      :class="['btn-template', { selected: selectedMedDataId === item.id }]">
+                      {{ item.icon }} {{ item.label }}
+                    </button>
+                  </el-tooltip>
+                </div>
+              </div>
+            </div>
+          </el-collapse-transition>
+        </div>
+
         <!-- 数据输入区域 -->
         <div class="data-input-section">
           <h2 class="section-title">📊 数据输入</h2>
@@ -209,15 +250,16 @@
             <div class="data-input-card">
               <h3>📈 结果变量 (Y)</h3>
               <p class="input-hint">因变量矩阵，n 个样本 × m 个变量</p>
-              <el-input v-model="permanovaMedParams.outcomeDataStr" type="textarea" :rows="6" placeholder='请输入 JSON 格式，例如：
-{
-  "Sample1": [1.2, 3.4, 2.1],
-  "Sample2": [2.3, 4.5, 3.2],
-  "Sample3": [1.8, 3.9, 2.7]
-}' @change="onOutcomeDataChange" />
+              <el-input v-model="permanovaMedParams.outcomeDataStr" type="textarea" :rows="6" placeholder='推荐二维数组 [[...],[...]]（每行一个样本）：
+[
+  [1.2, 3.4],
+  [2.3, 4.5],
+  [1.8, 3.9]
+]
+也支持 {"Sample1": [1.2, 3.4]} 行字典与 {"Y1": [1.2, 2.3, 1.8]} 列字典' @change="onOutcomeDataChange" />
               <div class="validation-status">
                 <el-tag :type="permanovaMedParams.outcomeDataValid ? 'success' : 'info'" size="small">
-                  {{ permanovaMedParams.outcomeDataValid ? '✓ 数据有效' : '等待输入' }}
+                  {{ permanovaMedParams.outcomeDataValid ? ('✓ 数据有效 ' + permanovaMedParams.outcomeInfo) : '等待输入' }}
                 </el-tag>
                 <span v-if="permanovaMedParams.outcomeDataError" class="error-text">
                   {{ permanovaMedParams.outcomeDataError }}
@@ -229,15 +271,15 @@
             <div class="data-input-card">
               <h3>🔗 中介变量 (M)</h3>
               <p class="input-hint">中介变量矩阵，n 个样本 × p 个变量</p>
-              <el-input v-model="permanovaMedParams.mediatorDataStr" type="textarea" :rows="6" placeholder='请输入 JSON 格式，例如：
-{
-  "Sample1": [0.5, 1.2],
-  "Sample2": [0.7, 1.5],
-  "Sample3": [0.6, 1.3]
-}' @change="onMediatorDataChange" />
+              <el-input v-model="permanovaMedParams.mediatorDataStr" type="textarea" :rows="6" placeholder='推荐二维数组 [[...],[...]]（微生物组为 样本 × OTU 非负计数）：
+[
+  [0.5, 1.2, 0.8],
+  [0.7, 1.5, 0.9]
+]
+也支持 {"Sample1": [0.5, 1.2]} 行字典与 {"OTU1": [0.5, 0.7]} 列字典' @change="onMediatorDataChange" />
               <div class="validation-status">
                 <el-tag :type="permanovaMedParams.mediatorDataValid ? 'success' : 'info'" size="small">
-                  {{ permanovaMedParams.mediatorDataValid ? '✓ 数据有效' : '等待输入' }}
+                  {{ permanovaMedParams.mediatorDataValid ? ('✓ 数据有效 ' + permanovaMedParams.mediatorInfo) : '等待输入' }}
                 </el-tag>
                 <span v-if="permanovaMedParams.mediatorDataError" class="error-text">
                   {{ permanovaMedParams.mediatorDataError }}
@@ -249,15 +291,16 @@
             <div class="data-input-card">
               <h3>📊 预测变量 (X)</h3>
               <p class="input-hint">自变量矩阵，n 个样本 × q 个变量</p>
-              <el-input v-model="permanovaMedParams.predictorDataStr" type="textarea" :rows="6" placeholder='请输入 JSON 格式，例如：
-{
-  "Sample1": [1, 0],
-  "Sample2": [0, 1],
-  "Sample3": [1, 1]
-}' @change="onPredictorDataChange" />
+              <el-input v-model="permanovaMedParams.predictorDataStr" type="textarea" :rows="6" placeholder='推荐二维数组 [[...],[...]]（每行一个样本的暴露值）：
+[
+  [1, 0],
+  [0, 1],
+  [1, 1]
+]
+也支持 {"Sample1": [1, 0]} 行字典与 {"X1": [1, 0, 1]} 列字典' @change="onPredictorDataChange" />
               <div class="validation-status">
                 <el-tag :type="permanovaMedParams.predictorDataValid ? 'success' : 'info'" size="small">
-                  {{ permanovaMedParams.predictorDataValid ? '✓ 数据有效' : '等待输入' }}
+                  {{ permanovaMedParams.predictorDataValid ? ('✓ 数据有效 ' + permanovaMedParams.predictorInfo) : '等待输入' }}
                 </el-tag>
                 <span v-if="permanovaMedParams.predictorDataError" class="error-text">
                   {{ permanovaMedParams.predictorDataError }}
@@ -269,125 +312,174 @@
             <div class="data-input-card optional">
               <h3>🔧 协变量（可选）</h3>
               <p class="input-hint">需要控制的混杂变量</p>
-              <el-input v-model="permanovaMedParams.covariatesStr" type="textarea" :rows="6" placeholder='请输入 JSON 格式，例如：
-{
-  "Age": [25, 30, 35],
-  "BMI": [22.5, 25.0, 23.5]
-}
-如不需要，留空即可' @change="onCovariatesChange" />
+              <el-input v-model="permanovaMedParams.covariatesStr" type="textarea" :rows="6" placeholder='推荐二维数组 [[...],[...]]（每行一个样本）：
+[
+  [25, 22.5],
+  [30, 25.0],
+  [35, 23.5]
+]
+也支持 {"Age": [25, 30, 35]} 列字典；如不需要，留空即可' @change="onCovariatesChange" />
               <div class="validation-status">
                 <el-tag :type="permanovaMedParams.covariatesValid ? 'success' : 'info'" size="small">
-                  {{ permanovaMedParams.covariatesValid ? '✓ 数据有效' : '可选' }}
+                  {{ permanovaMedParams.covariatesValid ? ('✓ 数据有效 ' + permanovaMedParams.covariatesInfo) : '可选' }}
                 </el-tag>
+                <span v-if="permanovaMedParams.covariatesError" class="error-text">
+                  {{ permanovaMedParams.covariatesError }}
+                </span>
               </div>
             </div>
           </div>
 
-          <!-- 分析参数 -->
-          <div class="analysis-params-card">
-            <h3>⚙️ 分析参数</h3>
-            <div class="params-grid">
-              <div class="param-item">
-                <label>置换次数：</label>
-                <el-input-number v-model="permanovaMedParams.permutations" :min="99" :max="9999" :step="100"
-                  controls-position="right" />
-                <el-tooltip content="置换检验次数，越多越准确但越慢" placement="top">
-                  <el-icon class="help-icon">
-                    <QuestionFilled />
-                  </el-icon>
-                </el-tooltip>
-              </div>
-            </div>
+          <!-- 置换次数 -->
+          <div class="data-input-card">
+            <h3>🔄 置换次数</h3>
+            <p class="input-hint">统计显著性检验的置换次数</p>
+            <el-input-number v-model="permanovaMedParams.permutations" :min="100" :max="10000" :step="100"
+              step-strictly controls-position="right" style="width: 100%;"
+              @change="onPermutationsChange" />
+            <p class="formula-hint">
+              💡 LDM 要求置换次数为 <b>100 的整数倍</b>（控件已限步长 100）；建议 ≥ 1000 以获得稳定 p 值。
+              若填入非 100 倍数的值，R 侧会自动上调并在结果中告知实际使用次数。
+            </p>
           </div>
         </div>
-      </div>
+        <!-- 样本数不一致时先在前端提示，避免白跑一次 R -->
+        <div v-if="permanovaMedParams.sampleMismatch" class="sample-mismatch">
+          <el-icon><WarningFilled /></el-icon>
+          <span>{{ permanovaMedParams.sampleMismatch }}</span>
+        </div>
 
-      <!-- 运行分析按钮 -->
-      <div class="run-section">
-        <el-button type="primary" size="large" class="btn-run" @click="runPERMANOVAMed" :disabled="!canRunAnalysis">
-          <el-icon>
-            <VideoPlay />
-          </el-icon>
-          运行分析
-        </el-button>
-        <span v-if="!canRunAnalysis" class="run-hint">
-          请确保所有数据有效
-        </span>
-      </div>
-    </div>
+        <!-- 运行分析按钮 -->
+        <div class="run-button-container">
+          <button @click="runPERMANOVAMed" class="btn-run" :disabled="!canRunAnalysis">
+            <el-icon>
+              <VideoPlay />
+            </el-icon>
+            运行分析
+          </button>
+          <span v-if="!canRunAnalysis" class="run-hint">
+            <el-icon>
+              <InfoFilled />
+            </el-icon>
+            <span>请确保所有数据有效</span>
+          </span>
+        </div>
 
-    <!-- 分析结果 -->
-    <div v-if="analysisResult" class="result-section">
-      <h2 class="section-title">📊 分析结果</h2>
+        <!-- 结果展示（与 PERMANOVA 一致：放在 config-section 内部，共用同一张白卡片） -->
+        <div v-if="analysisResult" class="result-section">
+        <h2 class="section-title">📊 分析结果</h2>
 
-      <!-- 全局效应 -->
-      <div class="global-effect-card">
-        <h3>🌍 全局效应</h3>
-        <div class="effect-stats">
-          <div class="stat-item">
-            <div class="stat-label">统计量</div>
-            <div class="stat-value">{{ analysisResult.global_effect?.statistic?.toFixed(4) || 'N/A' }}</div>
+        <!-- 中介效应结论 -->
+        <div :class="['med-headline-card', analysisResult.significant_mediation ? 'sig' : 'nsig']">
+          <div class="med-headline-left">
+            <div class="med-p-big">{{ fmtP(analysisResult.mediation_p) }}</div>
+            <div class="med-p-caption">中介效应 p 值（LDM 置换检验）</div>
           </div>
-          <div class="stat-item">
-            <div class="stat-label">p 值</div>
-            <div class="stat-value" :class="getSignificanceClass(analysisResult.global_effect?.p_value)">
-              {{ analysisResult.global_effect?.p_value?.toFixed(4) || 'N/A' }}
-            </div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-label">R²</div>
-            <div class="stat-value">{{ analysisResult.global_effect?.R2?.toFixed(4) || 'N/A' }}</div>
+          <div class="med-headline-right">
+            <el-tag :type="analysisResult.significant_mediation ? 'success' : 'info'" size="large" effect="dark">
+              {{ analysisResult.significant_mediation ? '✓ 中介效应显著' : '× 中介效应不显著' }}
+            </el-tag>
+            <p class="med-interp">{{ analysisResult.interpretation }}</p>
+            <p class="med-sub">
+              样本数 {{ analysisResult.sample_size }}｜完成置换 {{ analysisResult.n_perm_completed || analysisResult.n_perm_used }} 次（请求 {{ analysisResult.n_perm_requested }}，实际使用 {{ analysisResult.n_perm_used }}）
+              <template v-if="analysisResult.mediation_p_omni">｜omni p = {{ fmtP(analysisResult.mediation_p_omni) }}</template>
+              <template v-if="analysisResult.ldm_version">｜LDM {{ analysisResult.ldm_version }}</template>
+            </p>
           </div>
         </div>
-      </div>
 
-      <!-- 中介效应 -->
-      <div class="mediator-effects-card">
-        <h3>🔗 中介效应</h3>
-        <el-table :data="analysisResult.mediator_effects || []" border style="width: 100%"
-          :header-cell-style="{ background: '#f0f9ff', color: '#0369a1', fontWeight: 600 }">
-          <el-table-column prop="variable" label="中介变量" min-width="150" />
-          <el-table-column prop="indirect_effect" label="间接效应" min-width="100">
-            <template #default="scope">
-              {{ scope.row.indirect_effect?.toFixed(4) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="direct_effect" label="直接效应" min-width="100">
-            <template #default="scope">
-              {{ scope.row.direct_effect?.toFixed(4) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="total_effect" label="总效应" min-width="100">
-            <template #default="scope">
-              {{ scope.row.total_effect?.toFixed(4) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="p_value" label="p 值" min-width="100">
-            <template #default="scope">
-              <span :class="getSignificanceClass(scope.row.p_value)">
-                {{ scope.row.p_value?.toFixed(4) }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="proportion_mediated" label="中介比例" min-width="100">
-            <template #default="scope">
-              {{ (scope.row.proportion_mediated * 100)?.toFixed(2) }}%
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
+        <!-- 分组置换检验（LDM 的序贯检验结果） -->
+        <div class="mediator-effects-card">
+          <h3>🔗 分组置换检验（序贯）</h3>
+          <el-table :data="analysisResult.covariate_tests || []" border style="width: 100%"
+            :header-cell-style="{ background: '#f0f9ff', color: '#0369a1', fontWeight: 600 }">
+            <el-table-column prop="term" label="协变量组（角色）" min-width="160" />
+            <el-table-column prop="label" label="公式项" min-width="90" />
+            <el-table-column label="F 统计量" min-width="110">
+              <template #default="scope">{{ fmt(scope.row.F_statistic, 4) }}</template>
+            </el-table-column>
+            <el-table-column label="R²" min-width="100">
+              <template #default="scope">{{ fmt(scope.row.R2, 4) }}</template>
+            </el-table-column>
+            <el-table-column label="p 值" min-width="110">
+              <template #default="scope">
+                <span :class="getSignificanceClass(scope.row.p_value)">{{ fmtP(scope.row.p_value) }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <p class="table-note">
+            LDM 按公式顺序逐组检验：第 1 组（暴露 X）看中介矩阵能被 X 解释多少；第 2 组（结局 Y）是在 X 已入模后，Y 还能多解释多少。
+            中介统计量取两组 F 之积，因此两组都要有一定解释力才会显著。
+          </p>
+        </div>
 
-      <!-- 可视化图表 -->
-      <div class="visualization-section">
-        <h3>📈 数据可视化</h3>
-        <el-tabs v-model="activeChartType" @tab-click="handleChartTypeChange">
-          <el-tab-pane v-for="chart in chartTypes" :key="chart.id" :label="chart.name" :name="chart.id">
-            <div ref="pcoaChart" class="chart-container" style="height: 500px;"></div>
-          </el-tab-pane>
-        </el-tabs>
-      </div>
-    </div>
-  </div>
+        <!-- 路径分解（标量可视化口径） -->
+        <div v-if="pathData" class="global-effect-card">
+          <h3>🧭 路径分解（标准化系数）</h3>
+          <div class="effect-stats">
+            <div class="stat-item">
+              <div class="stat-label">a：X → M轴</div>
+              <div class="stat-value">{{ fmt(pathData.a, 4) }}</div>
+              <div class="stat-sub" :class="getSignificanceClass(pathData.a_p)">p = {{ fmtP(pathData.a_p) }}</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">b：M轴 → Y｜X</div>
+              <div class="stat-value">{{ fmt(pathData.b, 4) }}</div>
+              <div class="stat-sub" :class="getSignificanceClass(pathData.b_p)">p = {{ fmtP(pathData.b_p) }}</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">间接效应 a×b</div>
+              <div class="stat-value">{{ fmt(pathData.indirect, 4) }}</div>
+              <div class="stat-sub">95%CI {{ fmt(pathData.indirect_ci?.[0], 3) }} ~ {{ fmt(pathData.indirect_ci?.[1], 3) }}</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">直接效应 c′</div>
+              <div class="stat-value">{{ fmt(pathData.c_prime, 4) }}</div>
+              <div class="stat-sub" :class="getSignificanceClass(pathData.c_prime_p)">p = {{ fmtP(pathData.c_prime_p) }}</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">总效应</div>
+              <div class="stat-value">{{ fmt(pathData.total, 4) }}</div>
+              <div class="stat-sub">中介比例 {{ fmt((pathData.proportion_mediated ?? 0) * 100, 2) }}%</div>
+            </div>
+          </div>
+          <p class="table-note">{{ chartData?.note }}</p>
+        </div>
+
+        <!-- 模型信息 -->
+        <div v-if="analysisResult.model_info" class="model-info-card">
+          <h3>🧩 模型信息</h3>
+          <div class="info-grid">
+            <div class="info-item"><span class="info-label">LDM 公式</span>
+              <code class="formula-code">{{ analysisResult.model_info.formula }}</code></div>
+            <div class="info-item"><span class="info-label">中介矩阵规模</span>
+              <span class="info-value">{{ analysisResult.model_info.mediator_dim }}</span></div>
+            <div class="info-item"><span class="info-label">中介矩阵类型</span>
+              <span class="info-value">{{ analysisResult.model_info.mediator_is_distance ? '对称距离矩阵' : '变量矩阵（OTU/丰度）' }}</span></div>
+            <div class="info-item"><span class="info-label">暴露 / 结局变量数</span>
+              <span class="info-value">{{ analysisResult.model_info.exposure_vars }} / {{ analysisResult.model_info.outcome_vars }}</span></div>
+            <div class="info-item"><span class="info-label">混杂校正变量数</span>
+              <span class="info-value">{{ analysisResult.model_info.confounder_vars }}</span></div>
+            <div class="info-item"><span class="info-label">是否校正 OTU 表尺度</span>
+              <span class="info-value">{{ analysisResult.model_info.scale_otu_table ? '是' : '否' }}</span></div>
+            <div class="info-item"><span class="info-label">运行时间</span>
+              <span class="info-value">{{ analysisResult.timestamp }}</span></div>
+          </div>
+        </div>
+
+        <!-- 可视化图表 -->
+        <div class="visualization-section">
+          <h3>📈 数据可视化</h3>
+          <el-tabs v-model="activeChartType" @tab-click="handleChartTypeChange">
+            <el-tab-pane v-for="chart in chartTypes" :key="chart.id" :label="chart.name" :name="chart.id" />
+          </el-tabs>
+          <div v-if="!chartData" class="chart-empty">本次结果未包含图表数据（请更新 r-scripts/permanova_med.R 后重试）。</div>
+          <div v-else ref="medChart" class="chart-container" style="height: 500px;"></div>
+        </div>
+        </div><!-- result-section -->
+      </div><!-- config-section -->
+    </div><!-- main-content -->
+  </div><!-- permanova-med-container -->
 
   <!-- 导入对话框 -->
   <el-dialog v-model="showImportDialog" title="📥 导入数据" width="900px" :close-on-click-modal="false">
@@ -451,10 +543,10 @@
             <el-checkbox label="json">完整结果 (JSON)</el-checkbox>
           </div>
           <div class="checkbox-wrapper">
-            <el-checkbox label="globalEffect">全局效应 (Excel)</el-checkbox>
+            <el-checkbox label="globalEffect">分组置换检验 (Excel)</el-checkbox>
           </div>
           <div class="checkbox-wrapper">
-            <el-checkbox label="mediatorEffects">中介效应 (Excel)</el-checkbox>
+            <el-checkbox label="mediatorEffects">路径分解 (Excel)</el-checkbox>
           </div>
           <div class="checkbox-wrapper">
             <el-checkbox label="chartPNG">当前图表 (PNG)</el-checkbox>
@@ -476,28 +568,49 @@
 import { defineComponent } from 'vue';
 import {
   ArrowLeft, Document, Connection, DataLine, TrendCharts,
-  Histogram, Filter, InfoFilled, QuestionFilled, VideoPlay, UploadFilled,
-  Download, Upload, FolderOpened, Setting, CaretRight, CaretBottom
+  Histogram, Filter, InfoFilled, VideoPlay, UploadFilled,
+  Download, Upload, FolderOpened, Setting, CaretRight, CaretBottom, WarningFilled
 } from '@element-plus/icons-vue';
 import { ElLoading, ElMessage } from 'element-plus';
+import { checkR, runPERMANOVA_Med } from '@/api/r';
 import TemplateCategory from '../../components/r-analysis/TemplateCategory.vue';
 import templateData from '../../data/permanova-med-templates.json';
 import chartConfig from '../../data/permanova-med-charts.json';
+// 25 个「数据模板」：一键生成可直接运行的合成数据（已经便携版 R 实测 25/25 中介 p<0.05）
+import { MED_TEMPLATE_GROUPS, MED_TEMPLATE_MAP, buildMedTemplateData } from '@/utils/medTemplates';
+// 输入格式解析（与 R 侧 permanova_med.R 的 to_num_matrix 同一套语义）
+import {
+  inspectMatrix as parseMatrix,
+  refSampleNFrom,
+  sampleMismatchMessage
+} from '@/utils/matrixInput';
+// 图表配置生成（纯函数，可在 node 侧用真实 R 输出做单测）
+import { MED_CHART_BUILDERS, makeFormatters } from '@/utils/medCharts';
+
+const FORMATTERS = makeFormatters();
 
 export default defineComponent({
   name: 'PERMANOVA_Med',
   components: {
     TemplateCategory,
     ArrowLeft, Document, Connection, DataLine, TrendCharts,
-    Histogram, Filter, InfoFilled, QuestionFilled, VideoPlay, UploadFilled,
-    Download, Upload, FolderOpened, Setting, CaretRight, CaretBottom
+    Histogram, Filter, InfoFilled, VideoPlay, UploadFilled,
+    Download, Upload, FolderOpened, Setting, CaretRight, CaretBottom, WarningFilled
   },
   data() {
     return {
       // 模板相关
       selectedTemplateId: null,
       selectedTemplate: null,
-      templateCollapsed: false,
+      templateCollapsed: true, // 初始收缩
+
+      // 数据模板（含可运行合成数据）
+      medDataGroups: MED_TEMPLATE_GROUPS,
+      medDataCount: MED_TEMPLATE_GROUPS.reduce((s, g) => s + g.items.length, 0),
+      medDataCollapsed: true,
+      selectedMedDataId: null,
+      selectedMedDataLabel: '',
+      medDataSummary: '',
 
       // 分析参数
       permanovaMedParams: {
@@ -513,7 +626,13 @@ export default defineComponent({
         mediatorDataError: '',
         predictorDataError: '',
         covariatesError: '',
-        permutations: 999
+        outcomeInfo: '',
+        mediatorInfo: '',
+        predictorInfo: '',
+        covariatesInfo: '',
+        sampleMismatch: '',
+        mediatorN: null,
+        permutations: 1000
       },
 
       // 分析结果
@@ -523,7 +642,7 @@ export default defineComponent({
       activeChartType: 'path',
 
       // 侧边栏
-      isToolbarExpanded: true,
+      isToolbarExpanded: false, // 初始收缩
 
       // 导入相关
       showImportDialog: false,
@@ -535,7 +654,10 @@ export default defineComponent({
       // 导出相关
       showExportDialog: false,
       exportOptions: ['json', 'globalEffect', 'mediatorEffects', 'chartPNG'],
-      exportError: ''
+      exportError: '',
+
+      // R 环境状态
+      rAvailable: false
     };
   },
 
@@ -548,18 +670,43 @@ export default defineComponent({
       return chartConfig.chartTypes.filter(c => c.enabled);
     },
 
+    // R 侧新输出的图表数据（旧版本 R 脚本可能没有，故容错）
+    chartData() {
+      return this.analysisResult?.chart_data || null;
+    },
+
+    pathData() {
+      return this.chartData?.path || null;
+    },
+
     canRunAnalysis() {
       return this.permanovaMedParams.outcomeDataValid &&
         this.permanovaMedParams.mediatorDataValid &&
-        this.permanovaMedParams.predictorDataValid;
+        this.permanovaMedParams.predictorDataValid &&
+        !this.permanovaMedParams.sampleMismatch;
     }
   },
 
   mounted() {
     console.log('[PERMANOVA-med] mounted');
+    // 滚动到页面顶部
+    window.scrollTo(0, 0);
+    // 检查 R 环境
+    this.checkRStatus();
   },
 
   methods: {
+    // 检查 R 环境
+    async checkRStatus() {
+      try {
+        const result = await checkR();
+        this.rAvailable = result.available;
+      } catch (error) {
+        console.error('R check failed:', error);
+        this.rAvailable = false;
+      }
+    },
+
     // 返回主页
     goBack() {
       this.$router.push('/');
@@ -591,11 +738,54 @@ export default defineComponent({
         const tmpl = cat.templates.find(t => t.id === templateId);
         if (tmpl) {
           this.selectedTemplate = { ...tmpl, color: cat.color };
+          // 回填数据到输入框
+          this.fillTemplateData(tmpl);
           break;
         }
       }
 
       console.log('[PERMANOVA-med] Loaded template:', this.selectedTemplate);
+    },
+
+    // 回填模板数据
+    fillTemplateData(template) {
+      // 生成示例数据格式提示
+      const outcomeExample = {
+        'Sample1': [1.2, 3.4, 2.1],
+        'Sample2': [2.3, 4.5, 3.2],
+        'Sample3': [1.8, 3.9, 2.7]
+      };
+
+      const mediatorExample = {
+        'Sample1': [0.5, 1.2],
+        'Sample2': [0.7, 1.5],
+        'Sample3': [0.6, 1.3]
+      };
+
+      const predictorExample = {
+        'Sample1': [1, 0],
+        'Sample2': [0, 1],
+        'Sample3': [1, 1]
+      };
+
+      const covariatesExample = {
+        'Age': [25, 30, 35],
+        'BMI': [22.5, 25.0, 23.5]
+      };
+
+      // 填充输入框（示例格式）
+      this.permanovaMedParams.outcomeDataStr = JSON.stringify(outcomeExample, null, 2);
+      this.permanovaMedParams.mediatorDataStr = JSON.stringify(mediatorExample, null, 2);
+      this.permanovaMedParams.predictorDataStr = JSON.stringify(predictorExample, null, 2);
+      this.permanovaMedParams.covariatesStr = JSON.stringify(covariatesExample, null, 2);
+
+      // 触发验证
+      this.validateOutcomeData();
+      this.validateMediatorData();
+      this.validatePredictorData();
+      this.validateCovariates();
+
+      ElMessage.success(`已加载模板：${template.name}`);
     },
 
     // 清除选择
@@ -605,7 +795,100 @@ export default defineComponent({
     },
 
     // 数据验证
-    validateOutcomeData() {
+    // 回填模板数据
+    // 公式预设只描述研究设计（X→M→Y 的角色与变量名），本身不包含数据。
+    // 以前这里会写入 3 行假矩阵：既不是模板描述的结构，又让直接运行必然失败，
+    // 因此改为保留用户已有数据，并提示如何拿到可运行数据。
+    fillTemplateData(template) {
+      const empty = !this.permanovaMedParams.mediatorDataStr.trim();
+      if (empty) {
+        ElMessage.info({
+          message: `已应用公式预设「${template.name}」（中介：${template.mediator || 'M'}）。`
+            + '该预设不含数据，请再点一个「数据模板」生成可运行数据，或用 Excel 导入自己的数据。',
+          duration: 7000
+        });
+      } else {
+        ElMessage.success(`已应用公式预设：${template.name}（当前数据保持不变）`);
+      }
+    },
+
+    // 载入数据模板（生成并回填可直接运行的合成数据）
+    loadMedDataTemplate(id) {
+      const item = MED_TEMPLATE_MAP[id];
+      if (!item) {
+        ElMessage.error(`未知数据模板：${id}`);
+        return;
+      }
+      if (this.selectedMedDataId === id) {
+        this.clearMedDataTemplate();
+        return;
+      }
+      try {
+        const d = buildMedTemplateData(item.spec);
+        const p = this.permanovaMedParams;
+        p.mediatorDataStr = JSON.stringify(d.mediatorData);
+        p.predictorDataStr = JSON.stringify(d.predictorData);
+        p.outcomeDataStr = JSON.stringify(d.outcomeData);
+        p.covariatesStr = d.covariates ? JSON.stringify(d.covariates) : '';
+
+        // 先算中介（定义样本数），再校验其他，用于行/列字典消歧
+        this.validateMediatorData();
+        this.validatePredictorData();
+        this.validateOutcomeData();
+        this.validateCovariates();
+
+        this.selectedMedDataId = id;
+        this.selectedMedDataLabel = item.label;
+        this.medDataSummary = `${d.n} 样本 × ${d.taxa} 中介变量｜LDM 公式 ${d.formula}｜${item.spec.note || item.tip}`;
+        this.analysisResult = null;
+        ElMessage.success(`已载入数据模板：${item.label}，可直接运行分析`);
+      } catch (e) {
+        ElMessage.error('数据模板生成失败：' + e.message);
+      }
+    },
+
+    clearMedDataTemplate() {
+      const p = this.permanovaMedParams;
+      p.mediatorDataStr = '';
+      p.predictorDataStr = '';
+      p.outcomeDataStr = '';
+      p.covariatesStr = '';
+      p.mediatorN = null;
+      p.mediatorInfo = p.predictorInfo = p.outcomeInfo = p.covariatesInfo = '';
+      p.mediatorDataValid = false;
+      p.predictorDataValid = false;
+      p.outcomeDataValid = false;
+      p.covariatesValid = true;
+      p.sampleMismatch = '';
+      this.selectedMedDataId = null;
+      this.selectedMedDataLabel = '';
+      this.medDataSummary = '';
+      this.analysisResult = null;
+    },
+
+    // 从其他矩阵推出参照样本数（用于判别对象格式是行还是列）
+    refSampleN(excludeField) {
+      // 解析语义统一由 @/utils/matrixInput 提供，避免与 R 侧 to_num_matrix 漂移
+      return refSampleNFrom(this.permanovaMedParams, excludeField);
+    },
+
+    // 三种历史写法 -> 「样本 × 变量」二维数组
+    inspectMatrix(str, refN) {
+      return parseMatrix(str, refN);
+    },
+
+    // 四个矩阵样本数一致性检查（前端先拦住，不等到 R 报错）
+    checkSampleConsistency() {
+      const p = this.permanovaMedParams;
+      p.sampleMismatch = sampleMismatchMessage([
+        ['中介 M', p.mediatorDataStr],
+        ['暴露 X', p.predictorDataStr],
+        ['结局 Y', p.outcomeDataStr],
+        ['协变量 Z', p.covariatesStr],
+      ], p.mediatorN);
+    },
+
+        validateOutcomeData() {
       try {
         if (!this.permanovaMedParams.outcomeDataStr.trim()) {
           this.permanovaMedParams.outcomeDataValid = false;
@@ -613,26 +896,12 @@ export default defineComponent({
           return;
         }
 
-        const data = JSON.parse(this.permanovaMedParams.outcomeDataStr);
-        const keys = Object.keys(data);
-
-        if (keys.length === 0) {
-          this.permanovaMedParams.outcomeDataValid = false;
-          this.permanovaMedParams.outcomeDataError = '至少需要一个样本';
-          return;
-        }
-
-        const firstLength = data[keys[0]].length;
-        for (const key of keys) {
-          if (!Array.isArray(data[key]) || data[key].length !== firstLength) {
-            this.permanovaMedParams.outcomeDataValid = false;
-            this.permanovaMedParams.outcomeDataError = '所有变量的数组长度必须一致';
-            return;
-          }
-        }
-
-        this.permanovaMedParams.outcomeDataValid = true;
-        this.permanovaMedParams.outcomeDataError = '';
+        const ref = this.permanovaMedParams.mediatorN ?? this.refSampleN('outcomeDataStr');
+        const info = this.inspectMatrix(this.permanovaMedParams.outcomeDataStr, ref);
+        this.permanovaMedParams.outcomeDataValid = info.ok;
+        this.permanovaMedParams.outcomeDataError = info.ok ? '' : info.error;
+        this.permanovaMedParams.outcomeInfo = info.ok ? `${info.n} 样本 × ${info.p} 变量` : '';
+        this.checkSampleConsistency();
       } catch (e) {
         this.permanovaMedParams.outcomeDataValid = false;
         this.permanovaMedParams.outcomeDataError = 'JSON 格式错误：' + e.message;
@@ -647,26 +916,13 @@ export default defineComponent({
           return;
         }
 
-        const data = JSON.parse(this.permanovaMedParams.mediatorDataStr);
-        const keys = Object.keys(data);
-
-        if (keys.length === 0) {
-          this.permanovaMedParams.mediatorDataValid = false;
-          this.permanovaMedParams.mediatorDataError = '至少需要一个样本';
-          return;
-        }
-
-        const firstLength = data[keys[0]].length;
-        for (const key of keys) {
-          if (!Array.isArray(data[key]) || data[key].length !== firstLength) {
-            this.permanovaMedParams.mediatorDataValid = false;
-            this.permanovaMedParams.mediatorDataError = '所有变量的数组长度必须一致';
-            return;
-          }
-        }
-
-        this.permanovaMedParams.mediatorDataValid = true;
-        this.permanovaMedParams.mediatorDataError = '';
+        const ref = this.refSampleN('mediatorDataStr');
+        const info = this.inspectMatrix(this.permanovaMedParams.mediatorDataStr, ref);
+        this.permanovaMedParams.mediatorDataValid = info.ok;
+        this.permanovaMedParams.mediatorDataError = info.ok ? '' : info.error;
+        this.permanovaMedParams.mediatorInfo = info.ok ? `${info.n} 样本 × ${info.p} 变量` : '';
+        this.permanovaMedParams.mediatorN = info.ok ? info.n : null;
+        this.checkSampleConsistency();
       } catch (e) {
         this.permanovaMedParams.mediatorDataValid = false;
         this.permanovaMedParams.mediatorDataError = 'JSON 格式错误：' + e.message;
@@ -681,26 +937,12 @@ export default defineComponent({
           return;
         }
 
-        const data = JSON.parse(this.permanovaMedParams.predictorDataStr);
-        const keys = Object.keys(data);
-
-        if (keys.length === 0) {
-          this.permanovaMedParams.predictorDataValid = false;
-          this.permanovaMedParams.predictorDataError = '至少需要一个样本';
-          return;
-        }
-
-        const firstLength = data[keys[0]].length;
-        for (const key of keys) {
-          if (!Array.isArray(data[key]) || data[key].length !== firstLength) {
-            this.permanovaMedParams.predictorDataValid = false;
-            this.permanovaMedParams.predictorDataError = '所有变量的数组长度必须一致';
-            return;
-          }
-        }
-
-        this.permanovaMedParams.predictorDataValid = true;
-        this.permanovaMedParams.predictorDataError = '';
+        const ref = this.permanovaMedParams.mediatorN ?? this.refSampleN('predictorDataStr');
+        const info = this.inspectMatrix(this.permanovaMedParams.predictorDataStr, ref);
+        this.permanovaMedParams.predictorDataValid = info.ok;
+        this.permanovaMedParams.predictorDataError = info.ok ? '' : info.error;
+        this.permanovaMedParams.predictorInfo = info.ok ? `${info.n} 样本 × ${info.p} 变量` : '';
+        this.checkSampleConsistency();
       } catch (e) {
         this.permanovaMedParams.predictorDataValid = false;
         this.permanovaMedParams.predictorDataError = 'JSON 格式错误：' + e.message;
@@ -714,25 +956,12 @@ export default defineComponent({
           return;
         }
 
-        const data = JSON.parse(this.permanovaMedParams.covariatesStr);
-        const keys = Object.keys(data);
-
-        if (keys.length === 0) {
-          this.permanovaMedParams.covariatesValid = true;
-          return;
-        }
-
-        const firstLength = data[keys[0]].length;
-        for (const key of keys) {
-          if (!Array.isArray(data[key]) || data[key].length !== firstLength) {
-            this.permanovaMedParams.covariatesValid = false;
-            this.permanovaMedParams.covariatesError = '所有变量的数组长度必须一致';
-            return;
-          }
-        }
-
-        this.permanovaMedParams.covariatesValid = true;
-        this.permanovaMedParams.covariatesError = '';
+        const ref = this.permanovaMedParams.mediatorN ?? this.refSampleN('covariatesStr');
+        const info = this.inspectMatrix(this.permanovaMedParams.covariatesStr, ref);
+        this.permanovaMedParams.covariatesValid = info.ok;
+        this.permanovaMedParams.covariatesError = info.ok ? '' : info.error;
+        this.permanovaMedParams.covariatesInfo = info.ok ? `${info.n} 样本 × ${info.p} 变量` : '';
+        this.checkSampleConsistency();
       } catch (e) {
         this.permanovaMedParams.covariatesValid = false;
         this.permanovaMedParams.covariatesError = 'JSON 格式错误：' + e.message;
@@ -766,39 +995,48 @@ export default defineComponent({
       });
 
       try {
-        // 使用用户输入的数据
+        // 统一转成「样本 × 变量」二维数组再发送，避开历史三种格式在 R 侧的歧义
+        const toRows = (field) => {
+          const ref = field === 'mediatorDataStr' ? this.refSampleN('mediatorDataStr') : this.permanovaMedParams.mediatorN;
+          const r = this.inspectMatrix(this.permanovaMedParams[field], ref);
+          if (!r.ok) throw new Error(r.error);
+          return r.rows;
+        };
+
         const params = {
-          outcomeData: JSON.parse(this.permanovaMedParams.outcomeDataStr),
-          mediatorData: JSON.parse(this.permanovaMedParams.mediatorDataStr),
-          predictorData: JSON.parse(this.permanovaMedParams.predictorDataStr),
-          covariates: this.permanovaMedParams.covariatesStr.trim() ?
-            JSON.parse(this.permanovaMedParams.covariatesStr) : null,
+          outcomeData: toRows('outcomeDataStr'),
+          mediatorData: toRows('mediatorDataStr'),
+          predictorData: toRows('predictorDataStr'),
+          covariates: this.permanovaMedParams.covariatesStr.trim() ? toRows('covariatesStr') : null,
           permutations: this.permanovaMedParams.permutations
         };
 
         console.log('[PERMANOVA-med] Running analysis with params:', params);
 
-        const result = await window.electron.ipc.invoke(
-          'controller/r/runPERMANOVAMed',
-          JSON.parse(JSON.stringify(params))
-        );
+        const result = await runPERMANOVA_Med(params);
 
         console.log('[PERMANOVA-med] Analysis result:', result);
 
-        if (result.success) {
-          this.analysisResult = result;
-          ElMessage.success('PERMANOVA-med 分析完成！');
+        this.analysisResult = result;
+        ElMessage.success('PERMANOVA-med 分析完成！');
 
-          // 自动切换到结果区域
-          this.$nextTick(() => {
-            document.querySelector('.result-section')?.scrollIntoView({ behavior: 'smooth' });
-          });
-        } else {
-          ElMessage.error('分析失败：' + (result.error || '未知错误'));
-        }
+        // 自动切换到结果区域并立即渲染图表（之前只在切 tab 时渲染，导致运行后图表空白）
+        this.$nextTick(() => {
+          document.querySelector('.result-section')?.scrollIntoView({ behavior: 'smooth' });
+          this.renderCurrentChart();
+        });
       } catch (error) {
         console.error('[PERMANOVA-med] Analysis error:', error);
-        ElMessage.error('分析失败：' + error.message);
+        
+        // 检查是否是 Electron 环境
+        if (error.message.includes('ipcRenderer') || !window.electron) {
+          ElMessage.error({
+            message: '请在 Electron 窗口中运行（不是浏览器）',
+            duration: 5000
+          });
+        } else {
+          ElMessage.error('分析失败：' + error.message);
+        }
       } finally {
         loadingInstance.close();
       }
@@ -812,34 +1050,34 @@ export default defineComponent({
       });
     },
 
-    // 渲染当前图表
+    // 渲染当前图表（配置生成在 @/utils/medCharts 里，便于单测）
     renderCurrentChart() {
-      const chartContainer = this.$refs.pcoaChart;
-      if (!chartContainer || !this.analysisResult) return;
+      const el = this.$refs.medChart;
+      if (!el || !this.chartData) return;
 
-      const echarts = require('echarts');
-      let myChart = echarts.getInstanceByDom(chartContainer);
+      import('echarts').then((echarts) => {
+        const chart = echarts.getInstanceByDom(el) || echarts.init(el);
+        const build = MED_CHART_BUILDERS[this.activeChartType] || MED_CHART_BUILDERS.bar;
+        chart.setOption(build(this.chartData, FORMATTERS), true);
+        chart.resize();
+      }).catch((e) => {
+        console.error('[PERMANOVA-med] 图表加载失败:', e);
+        ElMessage.error('图表库加载失败：' + e.message);
+      });
+    },
 
-      if (!myChart) {
-        myChart = echarts.init(chartContainer);
-      } else {
-        myChart.clear();
-      }
+    // ---- 数值格式化（表格与图表共用）----
+    fmt(v, d = 4) {
+      return FORMATTERS.fmt(v, d);
+    },
 
-      const chartType = this.activeChartType;
-      console.log('[PERMANOVA-med] Rendering chart:', chartType);
+    fmtP(v) {
+      return FORMATTERS.fmtP(v);
+    },
 
-      // TODO: 实现各种图表渲染
-      // 暂时显示占位
-      const option = {
-        title: {
-          text: '图表开发中...',
-          left: 'center',
-          top: 'center'
-        }
-      };
-
-      myChart.setOption(option);
+    onPermutationsChange(v) {
+      const n = Math.max(100, Math.round((Number(v) || 100) / 100) * 100);
+      if (n !== v) this.permanovaMedParams.permutations = n;
     },
 
     // 下载模板
@@ -1040,29 +1278,42 @@ export default defineComponent({
           saveAs(blob, `PERMANOVA-med 结果_${timestamp}.json`);
         }
 
-        // 导出全局效应
+        // 导出分组置换检验（LDM 的真实输出）
         if (this.exportOptions.includes('globalEffect')) {
-          const ws = XLSX.utils.json_to_sheet([this.analysisResult.global_effect]);
+          const rows = (this.analysisResult.covariate_tests || []).map((t) => ({
+            协变量组: t.term, 公式项: t.label,
+            F统计量: t.F_statistic, R2: t.R2, p值: t.p_value,
+          }));
+          const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 说明: '本次结果无分组检验数据' }]);
           const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, 'Global_Effect');
+          XLSX.utils.book_append_sheet(wb, ws, 'Covariate_Tests');
           const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
           const blob = new Blob([wbout], { type: 'application/octet-stream' });
-          saveAs(blob, `全局效应_${timestamp}.xlsx`);
+          saveAs(blob, `分组置换检验_${timestamp}.xlsx`);
         }
 
-        // 导出中介效应
+        // 导出路径分解
         if (this.exportOptions.includes('mediatorEffects')) {
-          const ws = XLSX.utils.json_to_sheet(this.analysisResult.mediator_effects);
+          const p = this.pathData;
+          const rows = p ? [
+            { 路径: 'a: X → M轴', 估计: p.a, p值: p.a_p, CI下: p.a_ci?.[0], CI上: p.a_ci?.[1] },
+            { 路径: 'b: M轴 → Y｜X', 估计: p.b, p值: p.b_p, CI下: p.b_ci?.[0], CI上: p.b_ci?.[1] },
+            { 路径: "c': X → Y｜M轴", 估计: p.c_prime, p值: p.c_prime_p, CI下: p.c_prime_ci?.[0], CI上: p.c_prime_ci?.[1] },
+            { 路径: '间接效应 a×b', 估计: p.indirect, p值: null, CI下: p.indirect_ci?.[0], CI上: p.indirect_ci?.[1] },
+            { 路径: '总效应', 估计: p.total, p值: p.total_p, CI下: null, CI上: null },
+            { 路径: '中介比例', 估计: p.proportion_mediated, p值: null, CI下: null, CI上: null },
+          ] : [{ 说明: '本次结果无路径分解数据（请更新 r-scripts/permanova_med.R）' }];
+          const ws = XLSX.utils.json_to_sheet(rows);
           const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, 'Mediator_Effects');
+          XLSX.utils.book_append_sheet(wb, ws, 'Path_Decomposition');
           const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
           const blob = new Blob([wbout], { type: 'application/octet-stream' });
-          saveAs(blob, `中介效应_${timestamp}.xlsx`);
+          saveAs(blob, `路径分解_${timestamp}.xlsx`);
         }
 
         // 导出图表
         if (this.exportOptions.includes('chartPNG')) {
-          const chartContainer = this.$refs.pcoaChart;
+          const chartContainer = this.$refs.medChart;
           if (chartContainer) {
             const echarts = await import('echarts');
             const myChart = echarts.getInstanceByDom(chartContainer);
@@ -1161,7 +1412,7 @@ export default defineComponent({
 
 /* 主内容区域 */
 .main-content {
-  max-width: 1400px;
+  width: 100%;
   margin: 0 auto;
 }
 
@@ -1171,7 +1422,6 @@ export default defineComponent({
   padding: 36px 40px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
   border: 2px solid rgba(255, 255, 255, 0.3);
-  margin-bottom: 30px;
 }
 
 /* 模板区域样式（与 PERMANOVA 保持一致） */
@@ -1224,6 +1474,46 @@ export default defineComponent({
   background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(14, 165, 233, 0.5);
+}
+
+.sample-mismatch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #c45656;
+  background: #fef0f0;
+  border: 1px solid #fbc4c4;
+  border-left: 4px solid #f56c6c;
+  border-radius: 6px;
+}
+
+.med-data-note {
+  margin: 8px 0 4px 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #606266;
+  background: #fdf6ec;
+  border: 1px solid #f5dab1;
+  border-radius: 6px;
+}
+
+.med-data-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #1f2937;
+  background: #f0f9eb;
+  border: 1px solid #b3e19d;
+  border-left: 4px solid #67c23a;
+  border-radius: 6px;
 }
 
 .template-section-title {
@@ -1425,7 +1715,7 @@ export default defineComponent({
 
 /* 数据输入区域 */
 .data-input-section {
-  max-width: 1400px;
+  width: 100%;
   margin: 0 auto 30px;
 }
 
@@ -1496,65 +1786,66 @@ export default defineComponent({
   color: #ef4444;
 }
 
-/* 分析参数 */
-.analysis-params-card {
-  background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
-  border: 2px solid #e2e8f0;
-  border-radius: 16px;
-  padding: 24px;
-  margin-top: 24px;
+.formula-hint {
+  font-size: 13px;
+  color: #64748b;
+  margin: 12px 0 0;
 }
 
-.analysis-params-card h3 {
-  font-size: 18px;
-  font-weight: 700;
-  color: #1a202c;
-  margin: 0 0 16px;
+.formula-hint code {
+  background: rgba(102, 126, 234, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  color: #667eea;
+  font-weight: 600;
 }
 
-.params-grid {
+/* 运行分析按钮容器 */
+.run-button-container {
   display: flex;
-  gap: 24px;
-  flex-wrap: wrap;
-}
-
-.param-item {
-  display: flex;
+  flex-direction: column;
+  justify-content: center;
   align-items: center;
   gap: 12px;
-}
-
-.param-item label {
-  font-size: 15px;
-  color: #475569;
-  font-weight: 500;
-}
-
-.help-icon {
-  color: #94a3b8;
-  cursor: help;
-}
-
-/* 运行按钮 */
-.run-section {
   margin-top: 32px;
-  text-align: center;
+  padding-top: 24px;
+  border-top: 2px solid #e2e8f0;
+}
+
+.run-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+  color: #f59e0b;
+  font-weight: 500;
+  padding: 6px 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 8px;
 }
 
 .btn-run {
-  padding: 16px 64px;
-  font-size: 18px;
-  font-weight: 700;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
   border: none;
+  padding: 16px 48px;
   border-radius: 12px;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 600;
   box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
   transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .btn-run:hover:not(:disabled) {
   transform: translateY(-3px);
   box-shadow: 0 8px 24px rgba(102, 126, 234, 0.5);
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
 }
 
 .btn-run:active:not(:disabled) {
@@ -1562,25 +1853,16 @@ export default defineComponent({
 }
 
 .btn-run:disabled {
-  opacity: 0.5;
+  background: linear-gradient(135deg, #e0e0e0 0%, #d0d0d0 100%);
   cursor: not-allowed;
-}
-
-.run-hint {
-  display: block;
-  margin-top: 12px;
-  font-size: 14px;
-  color: #64748b;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: none;
 }
 
 /* 结果区域 */
 .result-section {
-  max-width: 1400px;
-  margin: 0 auto 30px;
-  background: rgba(255, 255, 255, 0.98);
-  border-radius: 20px;
-  padding: 32px 40px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  margin-top: 30px;
 }
 
 .global-effect-card,
@@ -1714,19 +1996,73 @@ export default defineComponent({
 }
 
 .toolbar-btn {
-  width: 100%;
+  width: calc(100% - 24px);
+  margin: 0 12px;
+  justify-content: flex-start;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  border: 2px solid transparent;
+  height: 48px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 16px;
-  border-radius: 8px;
-  transition: all 0.3s ease;
+}
+
+.toolbar-btn .el-icon {
+  font-size: 18px;
+  margin-right: 10px;
+  flex-shrink: 0;
 }
 
 .toolbar-btn .btn-text {
-  font-size: 14px;
-  font-weight: 500;
+  white-space: nowrap;
+}
+
+.toolbar-btn:hover {
+  transform: translateX(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.toolbar-btn[type="success"] {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border-color: #86efac;
+  color: #166534;
+}
+
+.toolbar-btn[type="success"]:hover {
+  background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+  border-color: #4ade80;
+}
+
+.toolbar-btn[type="primary"] {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-color: #93c5fd;
+  color: #1e40af;
+}
+
+.toolbar-btn[type="primary"]:hover {
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  border-color: #60a5fa;
+}
+
+.toolbar-btn[type="warning"] {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.toolbar-btn[type="warning"]:hover {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-color: #fbbf24;
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 /* 导入/导出对话框 */
@@ -1764,5 +2100,126 @@ export default defineComponent({
   .effect-stats {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+/* ===== 中介分析结果（对齐 LDM 真实输出）===== */
+.med-headline-card {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 18px 22px;
+  border-radius: 12px;
+  border: 1px solid #dcdfe6;
+  background: #fff;
+}
+
+.med-headline-card.sig {
+  border-color: #b3e19d;
+  background: linear-gradient(135deg, #f0f9eb 0%, #ffffff 60%);
+}
+
+.med-headline-card.nsig {
+  border-color: #f5dab1;
+  background: linear-gradient(135deg, #fdf6ec 0%, #ffffff 60%);
+}
+
+.med-headline-left {
+  min-width: 150px;
+  text-align: center;
+}
+
+.med-p-big {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #303133;
+}
+
+.med-p-caption {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.med-headline-right {
+  flex: 1;
+}
+
+.med-interp {
+  margin: 10px 0 4px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #303133;
+}
+
+.med-sub {
+  margin: 0;
+  font-size: 12px;
+  color: #909399;
+}
+
+.global-effect-card,
+.model-info-card,
+.mediator-effects-card {
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border: 1px solid #ebeef5;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.global-effect-card h3,
+.model-info-card h3,
+.mediator-effects-card h3 {
+  margin: 0 0 12px 0;
+  font-size: 15px;
+  color: #303133;
+}
+
+.stat-sub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #909399;
+}
+
+.stat-sub.significance-high,
+.stat-sub.significance-medium,
+.stat-sub.significance-low {
+  color: #67c23a;
+  font-weight: 600;
+}
+
+.table-note {
+  margin: 10px 0 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #606266;
+  background: #f5f7fa;
+  border-left: 3px solid #c0c4cc;
+  border-radius: 4px;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px 18px;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.chart-empty {
+  padding: 18px;
+  font-size: 13px;
+  color: #909399;
+  text-align: center;
+  background: #f5f7fa;
+  border: 1px dashed #dcdfe6;
+  border-radius: 8px;
 }
 </style>

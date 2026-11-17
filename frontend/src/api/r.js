@@ -75,7 +75,7 @@ export async function runPERMANOVA_Med(params) {
   const ipc = getIpcRenderer();
   const cleanParams = JSON.parse(JSON.stringify(params));
   try {
-    return await ipc.invoke(ipcApiRoute.rRunPERMANOVA_Med, cleanParams);
+    return await ipc.invoke(ipcApiRoute.rRunPERMANOVAMed, cleanParams);
   } catch (error) {
     console.error('[R API] runPERMANOVA_Med error:', error);
     throw error;

@@ -1,5 +1,22 @@
-# PERMANOVA-med 中介分析脚本
-# 基于 LDM 包的 permanovaFL 函数
+# PERMANOVA-med 中介分析脚本（修正版）
+# 基于 LDM::permanovaFL，test.mediation = TRUE
+#
+# ============ 两个关键坑（务必注意） ============
+# 坑 1：置换次数必须是 100 的整数倍！
+#   LDM 内部 n.perm.block = 100 为硬编码，而 permanova.perm 数组最后一维
+#   只分配了 n.perm.max。当 n.perm.max 不是 100 的整数倍时
+#   (如 99、999)，nblock = ceiling(n.perm.max/100) 会让 i.perm 超出
+#   数组边界，报 "subscript out of bounds / 下标出界"。
+#
+# 坑 2：LDM 的中介语义与直觉相反 —— 左侧矩阵才是"中介变量"！
+#   官方文档：testing of the mediation effect of the microbiome in the
+#   pathway between the exposure(s) and the outcome(s), where the
+#   exposure(s) and outcome(s) are specified as the FIRST and SECOND
+#   (sets of) covariates.
+#   即公式为：  mediator_matrix ~ exposure(X) + outcome(Y)
+#
+# 组的语法：每个 '+' 分隔的项是一「组」；一组内多个变量需加括号
+#   例：MEDMAT ~ (X1 + X2) + (Y1 + Y2)
 
 args <- commandArgs(trailingOnly = TRUE)
 
@@ -7,118 +24,420 @@ if (length(args) < 3) {
   stop("Usage: Rscript permanova_med.R <input.json> <output.json> <error.txt>")
 }
 
-input_file <- args[1]
+input_file  <- args[1]
 output_file <- args[2]
-error_file <- args[3]
+error_file  <- args[3]
+
+`%|||%` <- function(x, y) if (is.null(x) || length(x) == 0 || all(is.na(x))) y else x
 
 tryCatch({
-  # 加载必要包
-  if (!require("jsonlite", character.only = TRUE, quietly = TRUE)) {
+
+  # ---------- 依赖 ----------
+  if (!require("jsonlite", character.only = TRUE, quietly = TRUE))
     stop("jsonlite package not installed")
-  }
-  
-  if (!require("LDM", character.only = TRUE, quietly = TRUE)) {
+  if (!require("LDM", character.only = TRUE, quietly = TRUE))
     stop("LDM package not installed. Install from: https://github.com/yijuanhu/LDM")
-  }
-  
-  # 读取输入参数
+
+  cat("[PERMANOVA-med] LDM version:", as.character(packageVersion("LDM")), "\n")
+
   params <- jsonlite::fromJSON(input_file)
-  cat("[PERMANOVA-med] Input loaded successfully\n")
-  
-  # 提取并转换数据
-  outcome_data <- as.matrix(params$outcomeData)
-  mediator_data <- as.matrix(params$mediatorData)
-  predictor_data <- as.matrix(params$predictorData)
-  covariates <- if (!is.null(params$covariates) && nrow(params$covariates) > 0) {
-    as.matrix(params$covariates)
-  } else {
-    NULL
-  }
-  permutations <- as.numeric(params$permutations %||% 999)
-  
-  cat("[PERMANOVA-med] Data dimensions:\n")
-  cat("  Outcome:", nrow(outcome_data), "x", ncol(outcome_data), "\n")
-  cat("  Mediator:", nrow(mediator_data), "x", ncol(mediator_data), "\n")
-  cat("  Predictor:", nrow(predictor_data), "x", ncol(predictor_data), "\n")
-  if (!is.null(covariates)) {
-    cat("  Covariates:", nrow(covariates), "x", ncol(covariates), "\n")
-  }
-  cat("  Permutations:", permutations, "\n")
-  
-  # 执行 PERMANOVA-med 分析
-  # LDM::permanovaFL 返回中介效应分析结果
-  cat("[PERMANOVA-med] Running permanovaFL...\n")
-  
-  result <- tryCatch({
-    LDM::permanovaFL(
-      Y = outcome_data,
-      X = predictor_data,
-      M = mediator_data,
-      Z = covariates,
-      nperm = permutations,
-      verbose = TRUE
-    )
-  }, error = function(e) {
-    cat("[PERMANOVA-med] Error in permanovaFL:", conditionMessage(e), "\n")
-    NULL
-  })
-  
-  if (is.null(result)) {
-    stop("permanovaFL analysis failed")
-  }
-  
-  # 提取结果
-  cat("[PERMANOVA-med] Extracting results...\n")
-  
-  # 全局效应
-  global_effect <- list(
-    statistic = result$global$statistic %||% 0,
-    p_value = result$global$p_value %||% 1,
-    R2 = result$global$R2 %||% 0
-  )
-  
-  # 中介效应
-  mediator_effects <- list()
-  if (!is.null(result$mediator)) {
-    for (i in seq_len(nrow(result$mediator))) {
-      mediator_effects[[i]] <- list(
-        variable = rownames(result$mediator)[i],
-        indirect_effect = result$mediator$indirect[i] %||% 0,
-        direct_effect = result$mediator$direct[i] %||% 0,
-        total_effect = result$mediator$total[i] %||% 0,
-        p_value = result$mediator$p_value[i] %||% 1,
-        proportion_mediated = result$mediator$prop[i] %||% 0
-      )
+
+  # ---------- 输入格式归一化 ----------
+  # 历史上前端存在三种互不兼容的写法，此处全部接受（避免用户白准备数据）：
+  #   1) 二维数组 [[...],[...]]           -> 本就是 样本 × 变量
+  #   2) 行字典 {"Sample1":[...], ...}     -> 键=样本（Excel 导入 convertImportData 即此式）
+  #   3) 列字典 {"Age":[...], "BMI":[...]} -> 键=变量（协变量常用此式）
+  # 2/3 的消歧依据：元素个数 == 参照样本数 n_ref 视为行字典；否则看每条长度是否 == n_ref。
+  # mediator 本身无参照，按行字典解释（与前端示例、导入行为一致）。
+  # 注意：之前用 as.matrix(list) 会得到 storage.mode="list" 的 n×1 矩阵，
+  #       下游报 "'list' object cannot be coerced to type 'double'"，完全不可读。
+  to_numeric_matrix <- function(m, label) {
+    if (is.numeric(m)) return(m)
+    out <- tryCatch({ storage.mode(m) <- "double"; m }, error = function(e) NULL)
+    if (is.null(out) || !is.numeric(out))
+      stop(sprintf("%s: 含无法转为数字的内容（分类变量请先编码为 0/1 或数值）", label))
+    if (anyNA(out)) {
+      bad <- which(is.na(out)); first <- out[bad[1L]]
+      stop(sprintf("%s: 共 %d 个值无法转为数值（例如第 %d 个为空或含文字），请清理后重试",
+                   label, length(bad), bad[1L]))
     }
+    out
   }
-  
-  # 构建输出
-  output <- list(
-    success = TRUE,
-    method = "PERMANOVA-med",
-    permutations = permutations,
-    sample_size = nrow(outcome_data),
-    global_effect = global_effect,
-    mediator_effects = mediator_effects,
-    model_info = list(
-      outcome_vars = ncol(outcome_data),
-      mediator_vars = ncol(mediator_data),
-      predictor_vars = ncol(predictor_data),
-      covariates_vars = if (!is.null(covariates)) ncol(covariates) else 0
+
+  to_num_matrix <- function(x, label, n_ref = NULL) {
+    if (is.matrix(x)) {
+      m <- to_numeric_matrix(x, label)
+      if (!is.null(n_ref) && nrow(m) != n_ref)
+        stop(sprintf("%s: 样本数不一致（本矩阵 %d 行，参照 %d 个样本）",
+                     label, nrow(m), n_ref))
+      return(m)
+    }
+    if (is.atomic(x) && is.null(dim(x))) {
+      m <- to_numeric_matrix(matrix(x, ncol = 1), label)   # 单变量裸向量
+      if (!is.null(n_ref) && nrow(m) != n_ref)
+        stop(sprintf("%s: 样本数不一致（给了 %d 个值，参照 %d 个样本）", label, nrow(m), n_ref))
+      return(m)
+    }
+    if (is.data.frame(x)) return(to_numeric_matrix(as.matrix(x), label))
+    if (!is.list(x) || length(x) == 0)
+      stop(sprintf(paste0("%s: 数据为空或 JSON 结构无法识别。可用格式：",
+                          "[[...],[...]] 二维数组 / {\"Sample1\":[...]} 行字典 / ",
+                          "{\"Age\":[...]} 列字典"), label))
+    if (!all(vapply(x, function(v) is.atomic(v) && !is.null(v), logical(1))))
+      stop(sprintf("%s: 含嵌套结构，请改用二维数组 [[...],[...]]", label))
+    lens <- vapply(x, length, integer(1))
+    if (any(lens != lens[1L]))
+      stop(sprintf("%s: 各记录长度不一致(%s)，请检查是否有缺失列或漏填值",
+                   label, paste(unique(lens), collapse = "/")))
+    k <- length(x); L <- lens[1L]
+    as_rowdict <- if (is.null(n_ref)) TRUE else (k == n_ref)
+    if (!as_rowdict) {
+      if (L != n_ref)
+        stop(sprintf(paste0("%s: 样本数无法对齐（记录数=%d, 每条长度=%d, 期望样本数=%d）。",
+                            "行字典请让记录数等于样本数；列字典请让每条数组长度等于样本数"),
+                     label, k, L, n_ref))
+      # 列字典：键=变量 -> 每个向量成为一列，天然 n × p
+      return(to_numeric_matrix(
+        as.matrix(as.data.frame(x, check.names = FALSE, stringsAsFactors = FALSE)), label))
+    }
+    # 行字典：键=样本 -> 先拼成 p × k 再转置为 k × p
+    m <- as.matrix(as.data.frame(x, check.names = FALSE, stringsAsFactors = FALSE))
+    return(to_numeric_matrix(t(m), label))
+  }
+
+  # 中介矩阵用对象格式时，“记录数”与“每条长度”谁是样本数存在二义，
+  # 靠 X/Y/Z 的已知维度反推；都推不出时逐个候选尝试，取能全部对齐的那个。
+  med_candidates <- function(x) {
+    if (is.matrix(x)) return(nrow(x))
+    if (is.atomic(x) && is.null(dim(x))) return(length(x))
+    if (is.list(x) && length(x) > 0) {
+      lens <- vapply(x, function(v) if (is.atomic(v)) length(v) else -1L, integer(1))
+      if (any(lens < 0L) || any(lens != lens[1L])) return(length(x))
+      return(unique(c(length(x), lens[1L])))   # 优先行字典（与前端示例/导入一致）
+    }
+    NULL
+  }
+
+  resolve_mats <- function(params) {
+    fixed_n <- NULL
+    for (v in list(params$predictorData, params$outcomeData, params$covariates)) {
+      if (is.matrix(v)) { fixed_n <- nrow(v); break }
+      if (is.atomic(v) && is.null(dim(v))) { fixed_n <- length(v); break }
+    }
+    cands <- if (!is.null(fixed_n)) fixed_n else med_candidates(params$mediatorData)
+    if (is.null(cands) || length(cands) == 0)
+      stop("mediatorData 为空或结构无法识别")
+    last_err <- NULL
+    for (n_try in cands) {
+      r <- tryCatch(list(
+        med  = to_num_matrix(params$mediatorData,  "mediatorData (中介 M)", n_try),
+        pred = to_num_matrix(params$predictorData, "predictorData (暴露 X)", n_try),
+        out  = to_num_matrix(params$outcomeData,   "outcomeData (结局 Y)",   n_try),
+        z    = if (is.null(params$covariates)) NULL
+               else to_num_matrix(params$covariates, "covariates (协变量 Z)", n_try)),
+        error = function(e) e)
+      if (!inherits(r, "error")) {
+        if (length(cands) > 1)
+          cat("[PERMANOVA-med] 对象格式中介矩阵按 样本数=", n_try, "解析（", ncol(r$med), " 个变量）\n")
+        return(r)
+      }
+      last_err <- r
+    }
+    stop(paste0("输入数据无法解析为「样本 × 变量」矩阵",
+               "（尝试过的样本数候选：", paste(cands, collapse = " / "), "）。",
+               "最后一次错误：", conditionMessage(last_err),
+               "。可用格式：[[...],[...]] 二维数组 / {\"Sample1\":[...]} 行字典 / {\"Age\":[...]} 列字典"))
+  }
+
+  # ---------- 读取数据 ----------
+  # 语义映射（符合 LDM 的中介定义）：
+  #   mediatorData  -> 公式左侧矩阵 = 中介（如微生物组 OTU 表 / 距离矩阵）
+  #   predictorData -> 第 1 组协变量 = 暴露 X
+  #   outcomeData   -> 第 2 组协变量 = 结局 Y
+  parsed    <- resolve_mats(params)
+  med_mat   <- parsed$med
+  pred_mat  <- parsed$pred
+  out_mat   <- parsed$out
+  z_mat     <- parsed$z
+  n_samples <- nrow(med_mat)
+
+  if (n_samples < 4)
+    stop(sprintf("样本数过少（%d），LDM 置换检验至少需要 4 个样本", n_samples))
+
+  # ---------- 坑 1：规整置换次数到 100 的整数倍 ----------
+  n_perm_req <- suppressWarnings(as.numeric(params$permutations %|||% 999))
+  if (is.na(n_perm_req) || n_perm_req < 100) n_perm_req <- 100
+  n_perm <- ceiling(n_perm_req / 100) * 100
+  if (n_perm != n_perm_req)
+    cat("[PERMANOVA-med] 注意：置换次数由", n_perm_req, "调整为", n_perm,
+        "(LDM 要求 100 的整数倍)\n")
+
+  cat("[PERMANOVA-med] mediator 矩阵:", nrow(med_mat), "x", ncol(med_mat), "\n")
+  cat("[PERMANOVA-med] exposure   (X):", ncol(pred_mat), "个变量\n")
+  cat("[PERMANOVA-med] outcome    (Y):", ncol(out_mat), "个变量\n")
+  cat("[PERMANOVA-med] 置换次数:", n_perm, "\n")
+
+  # ---------- 距离矩阵 vs 计数矩阵 ----------
+  # 若传入的是对称方阵，LDM 会直接当距离矩阵用
+  is_dist <- (nrow(med_mat) == ncol(med_mat)) && isSymmetric(unname(med_mat))
+
+  # scale.otu.table：含负值时必须为 FALSE
+  scale_otu <- TRUE
+  if (!is_dist && any(med_mat < 0, na.rm = TRUE)) {
+    scale_otu <- FALSE
+    cat("[PERMANOVA-med] 中介矩阵含负值 -> scale.otu.table = FALSE\n")
+  }
+  if (is_dist) scale_otu <- FALSE
+
+  # ---------- 构造 data.frame（协变量） ----------
+  df <- data.frame(row.names = paste0("S", seq_len(n_samples)))
+
+  encode_var <- function(v) {
+    if (is.logical(v)) v <- as.numeric(v)
+    if (is.character(v)) {
+      u <- unique(v[!is.na(v)])
+      return(if (length(u) == 2) as.numeric(factor(v)) else factor(v))
+    }
+    if (!is.numeric(v)) return(factor(v))
+    u <- unique(v[!is.na(v)])
+    if (length(u) <= 10 && all(v == floor(v), na.rm = TRUE)) {
+      return(if (length(u) == 2) as.numeric(factor(v)) else factor(v))
+    }
+    as.numeric(v)
+  }
+
+  fmt_block <- function(mat, prefix) {
+    nms <- character(0)
+    for (i in seq_len(ncol(mat))) {
+      nm <- paste0(prefix, i)
+      df[[nm]] <<- encode_var(mat[, i])
+      nms <- c(nms, nm)
+    }
+    nms
+  }
+
+  x_names <- fmt_block(pred_mat, "X")
+  y_names <- fmt_block(out_mat,  "Y")
+
+  # 协变量 Z（可选，作为混杂项放在 | 之后）
+  conf_names <- character(0)
+  if (!is.null(z_mat)) {
+    # 协变量不再静默丢弃：格式错误直接报错，避免用户以为做了混杂校正
+    for (i in seq_len(ncol(z_mat))) {
+      nm <- paste0("Z", i)
+      df[[nm]] <- encode_var(z_mat[, i])
+      conf_names <- c(conf_names, nm)
+    }
+    cat("[PERMANOVA-med] 协变量 Z:", length(conf_names), "个\n")
+  }
+
+  # ---------- 坑 2：组语法，一组内多变量需加括号 ----------
+  grp <- function(nms) if (length(nms) == 1) nms else paste0("(", paste(nms, collapse = " + "), ")")
+
+  lhs <- "MEDMAT"
+  # 混杂项写在左侧矩阵之后： MEDMAT | Z1 + Z2 ~ X + Y
+  if (length(conf_names) > 0)
+    lhs <- paste0(lhs, "|", paste(conf_names, collapse = "+"))
+
+  formula_str <- paste(lhs, "~", grp(x_names), "+", grp(y_names))
+  # 打印时还原空格方便阅读
+  cat("[PERMANOVA-med] 公式:", gsub("\\s*", "", formula_str), "\n")
+
+  # MEDMAT 必须能在 LDM 的查找路径中找到
+  MEDMAT <- med_mat
+  assign("MEDMAT", med_mat, envir = .GlobalEnv)
+
+  # ---------- 运行 ----------
+  cat("[PERMANOVA-med] 运行 permanovaFL (test.mediation = TRUE) ...\n")
+  res <- tryCatch(
+    LDM::permanovaFL(
+      formula          = as.formula(formula_str),
+      data             = df,
+      scale.otu.table  = scale_otu,
+      n.perm.max       = n_perm,
+      test.mediation   = TRUE,
+      seed             = if (is.null(params$seed)) 12345L else as.integer(params$seed),
+      verbose          = FALSE
     ),
+    error = function(e) {
+      cat("[PERMANOVA-med] permanovaFL 错误:", conditionMessage(e), "\n"); NULL
+    }
+  )
+
+  if (is.null(res))
+    stop("permanovaFL 分析失败。请确认：(1) 置换次数为 100 的整数倍；(2) mediatorData 是中介矩阵（非负计数或对称距离矩阵）。")
+
+  # ---------- 提取结果 ----------
+  cat("[PERMANOVA-med] 提取结果...\n")
+  fs  <- suppressWarnings(as.numeric(res$F.statistics))
+  rs  <- suppressWarnings(as.numeric(res$R.squared))
+  pv  <- suppressWarnings(as.numeric(res$p.permanova))
+  nmn <- names(res$F.statistics)
+  if (is.null(nmn)) nmn <- paste0("cov", seq_along(fs))
+
+  cov_terms <- lapply(seq_along(fs), function(i) {
+    list(
+      term        = if (i == 1) "exposure (X)" else if (i == 2) "outcome (Y)" else nmn[i],
+      label       = nmn[i],
+      F_statistic = fs[i] %|||% NA,
+      R2          = rs[i] %|||% NA,
+      p_value     = pv[i] %|||% NA
+    )
+  })
+
+  med_p   <- suppressWarnings(as.numeric(res$med.p.permanova))[1] %|||% NA
+  med_pom <- suppressWarnings(as.numeric(res$med.p.permanova.omni))[1]
+
+  # ---------- 图表数据（全部现算，不编造） ----------
+  # LDM 的 permanovaFL 只返回 p 值，不返回置换零分布，所以不做“置换分布直方图”；
+  # 改用可在本数据上真实计算的：Bray-Curtis PCoA 排序、标准化路径系数与其
+  # 普通理论 CI、bootstrap 间接效应 CI、相关矩阵。路径系数用群落第一轴（PCoA axis1）
+  # 作为中介变量的标量代表，这是组成型数据常用的降维做法。
+  build_chart_data <- function(med_mat, pred_mat, out_mat, n_perm) {
+    cd <- list()
+    x1 <- as.numeric(pred_mat[, 1])
+    y1 <- as.numeric(out_mat[, 1])
+
+    # -- Bray-Curtis PCoA (cmdscale) --
+    pcoa_pts <- NULL; ax_pct <- NULL
+    dist_mat <- NULL
+    if (requireNamespace("vegan", quietly = TRUE)) {
+      dist_mat <- tryCatch(vegan::vegdist(med_mat, method = "bray"), error = function(e) NULL)
+    }
+    if (is.null(dist_mat)) dist_mat <- tryCatch(dist(med_mat), error = function(e) NULL)
+    if (!is.null(dist_mat)) {
+      fit <- tryCatch(stats::cmdscale(dist_mat, k = 2, eig = TRUE), error = function(e) NULL)
+      if (!is.null(fit)) {
+        ev <- pmax(fit$eig, 0)
+        ax_pct <- as.numeric(round(100 * ev / sum(ev), 2))[1:2]
+        pcoa_pts <- as.matrix(fit$points)
+      }
+    }
+
+    # -- 中介标量轴：优先用 PCoA axis1，失败则用第一个主成分 --
+    m_axis <- if (!is.null(pcoa_pts)) pcoa_pts[, 1] else {
+      pc <- stats::prcomp(scale(med_mat, center = TRUE, scale. = FALSE), retx = TRUE)$x[, 1]
+      pc
+    }
+    # 方指向与 X 一致，保证 a 路径符号可读
+    # 注意：cor(向量, 向量) 在本 R 版本里是无 dim 的标量，不能用 [1,1] 索引
+    cv <- suppressWarnings(as.numeric(stats::cor(m_axis, x1))[1L])
+    if (is.finite(cv) && cv < 0) m_axis <- -m_axis
+    if (!is.null(pcoa_pts)) pcoa_pts[, 1] <- m_axis
+
+    # 标准化（R 里多条语句必须分行或加花括号，写成一行会被当成函数调用）
+    z <- function(v) {
+      s <- stats::sd(v)
+      if (!is.finite(s) || s == 0) return(v * 0)
+      (v - mean(v)) / s
+    }
+    xs <- z(x1); ys <- z(y1); ms <- z(m_axis)
+
+    fit_a  <- tryCatch(stats::lm(ms ~ xs), error = function(e) NULL)
+    fit_bc <- tryCatch(stats::lm(ys ~ ms + xs), error = function(e) NULL)
+    fit_c  <- tryCatch(stats::lm(ys ~ xs), error = function(e) NULL)
+    cf <- function(f, nm) {
+      if (is.null(f)) return(c(est = NA, se = NA, p = NA))
+      s <- summary(f)$coefficients
+      if (!nm %in% rownames(s)) return(c(est = NA, se = NA, p = NA))
+      c(est = unname(s[nm, "Estimate"]), se = unname(s[nm, "Std. Error"]), p = unname(s[nm, 4]))
+    }
+    a  <- cf(fit_a,  "xs")
+    b  <- cf(fit_bc, "ms")
+    cp <- cf(fit_bc, "xs")
+    ct <- cf(fit_c,  "xs")
+    ci <- function(c_) c(lo = c_["est"] - 1.96 * c_["se"], hi = c_["est"] + 1.96 * c_["se"])
+
+    # -- 间接效应 a*b 的 bootstrap CI（固定种子，保证可复现） --
+    indirect <- a["est"] * b["est"]
+    set.seed(if (is.null(params$seed)) 12345L else as.integer(params$seed))
+    boot <- replicate(500L, {
+      i <- sample.int(length(xs), length(xs), replace = TRUE)
+      ba <- tryCatch(as.numeric(stats::coef(stats::lm(ms[i] ~ xs[i]))[2]), error = function(e) NA)
+      bb <- tryCatch(as.numeric(stats::coef(stats::lm(ys[i] ~ ms[i] + xs[i]))[2]), error = function(e) NA)
+      ba * bb
+    })
+    boot <- boot[is.finite(boot)]
+    boot_ci <- if (length(boot) >= 100)
+      as.numeric(quantile(boot, c(0.025, 0.975))) else c(NA, NA)
+
+    cd$path <- list(
+      a = unname(a["est"]), a_p = unname(a["p"]), a_ci = ci(a),
+      b = unname(b["est"]), b_p = unname(b["p"]), b_ci = ci(b),
+      c_prime = unname(cp["est"]), c_prime_p = unname(cp["p"]), c_prime_ci = ci(cp),
+      total = unname(ct["est"]), total_p = unname(ct["p"]),
+      indirect = unname(indirect), indirect_ci = boot_ci,
+      proportion_mediated = if (is.finite(ct["est"]) && abs(ct["est"]) > 1e-8)
+        as.numeric(indirect / ct["est"]) else NA
+    )
+
+    cors <- stats::cor(data.frame(X1 = x1, M_axis = m_axis, Y1 = y1), use = "pairwise.complete.obs")
+    cd$correlation <- list(labels = colnames(cors), matrix = unname(round(cors, 4)))
+    cd$samples <- list(
+      x  = round(as.numeric(x1), 6),
+      y  = round(as.numeric(y1), 6),
+      m  = round(as.numeric(m_axis), 6),
+      pcoa = if (is.null(pcoa_pts)) NULL else lapply(seq_len(nrow(pcoa_pts)), function(i) round(pcoa_pts[i, ], 4))
+    )
+    cd$pcoa_axes <- if (is.null(ax_pct)) NULL else round(ax_pct, 2)
+    cd$x_var_name <- names(x_names)[1] %|||% "X1"
+    cd$y_var_name <- names(y_names)[1] %|||% "Y1"
+    cd$note <- "路径系数为标准化回归系数，中介变量用 Bray-Curtis PCoA 第一轴代表；LDM 不提供置换零分布，故未画置换分布图。"
+    cd
+  }
+
+  chart_data <- tryCatch(build_chart_data(med_mat, pred_mat, out_mat, n_perm),
+                         error = function(e) {
+                           cat("[PERMANOVA-med] 图表数据生成失败（不影响主结果）:", conditionMessage(e), "\n")
+                           NULL
+                         })
+
+  output <- list(
+    success      = TRUE,
+    method       = "PERMANOVA-med (LDM permanovaFL)",
+    ldm_version  = as.character(packageVersion("LDM")),
+    sample_size  = n_samples,
+    n_perm_requested = n_perm_req,
+    n_perm_used  = n_perm,
+    n_perm_completed = as.numeric(res$n.perm.completed %|||% NA),
+    mediation_p  = med_p,
+    mediation_p_omni = if (length(med_pom) && !is.na(med_pom)) med_pom else NULL,
+    significant_mediation = if (!is.na(med_p)) med_p < 0.05 else NA,
+    covariate_tests = cov_terms,
+    chart_data   = chart_data,
+    model_info = list(
+      formula              = gsub("\\s*", "", formula_str),
+      role_left            = "mediator (matrix / distance)",
+      role_cov1            = "exposure X",
+      role_cov2            = "outcome Y",
+      mediator_is_distance = is_dist,
+      scale_otu_table      = scale_otu,
+      mediator_dim         = paste(nrow(med_mat), "x", ncol(med_mat)),
+      exposure_vars        = length(x_names),
+      outcome_vars         = length(y_names),
+      confounder_vars      = length(conf_names)
+    ),
+    interpretation = if (!is.na(med_p) && med_p < 0.05) {
+      "检测到显著的中介效应：中介变量（左侧矩阵所代表的组群/多变量）在 X -> Y 通路中起显著中介作用。"
+    } else if (!is.na(med_p)) {
+      "中介效应不显著 (p >= 0.05)。"
+    } else {
+      "无法判定中介效应。"
+    },
     timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
   )
-  
-  # 输出 JSON
-  output_json <- jsonlite::toJSON(output, auto_unbox = TRUE, pretty = TRUE)
-  writeLines(output_json, output_file)
-  
-  cat("[PERMANOVA-med] Analysis completed successfully\n")
-  cat("[PERMANOVA-med] Output written to:", output_file, "\n")
-  
+
+  # jsonlite 默认 digits=4（4 位有效数字）会让 c'+a*b 与 total 差出 1e-4，
+  # 前端做分解自洽校验与绘制时精度不够，故取 10 位有效数字。
+  writeLines(jsonlite::toJSON(output, auto_unbox = TRUE, pretty = TRUE, null = "null", digits = 10),
+             output_file)
+
+  cat("[PERMANOVA-med] 完成 -> ", output_file, "\n")
+  cat("[PERMANOVA-med] 中介效应 p =", med_p, "\n")
+
 }, error = function(e) {
-  error_msg <- paste("[PERMANOVA-med] Error:", conditionMessage(e))
-  cat(error_msg, "\n")
-  writeLines(error_msg, error_file)
+  msg <- paste("[PERMANOVA-med] Error:", conditionMessage(e))
+  cat(msg, "\n")
+  writeLines(msg, error_file)
   quit(status = 1)
 })
