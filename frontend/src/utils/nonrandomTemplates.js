@@ -222,6 +222,7 @@ export function buildNonrandomTemplateData(spec) {
 
   return {
     payload,
+    spec,          // 原设计规格：视图要显示混淆度/区组数，测试也靠它分支
     n,
     taxa,
     scheme,

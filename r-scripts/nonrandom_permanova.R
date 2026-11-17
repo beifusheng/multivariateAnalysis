@@ -479,10 +479,17 @@ main <- function() {
   }, error = function(e) NULL)
 
   hist_values <- f_null_constrained[!is.na(f_null_constrained)]
-  if (length(hist_values) > 500) hist_values <- hist_values[seq(1, length(hist_values), by = ceiling(length(hist_values) / 500))]
+  # 零分布只用于画直方图，超过 500 点就等间隔抽样（保留 n_used 记录真实置换次数，
+  # 前端拿到的永远是「抽样后的点 + 真实总数」，不会把抽样当成置换次数）
+  thin <- function(v, cap = 500L) {
+    if (length(v) <= cap) return(as.numeric(v))
+    as.numeric(v[seq(1, length(v), by = ceiling(length(v) / cap))])
+  }
+  if (length(hist_values) > 500) hist_values <- thin(hist_values)
 
   chart_data <- list(
     pcoa = pcoa,
+    distance = dist_label,
     null = list(
       observed = obs_global[1],
       values = as.numeric(hist_values),
@@ -490,10 +497,22 @@ main <- function() {
       n_used = as.integer(sum(!is.na(f_null_constrained))),
       scheme = plan$scheme
     ),
+    # 自由置换的零分布单独给一份：两条分布叠在一起才能看出
+    # 「同一个 F，在两种零分布下落在完全不同的位置」，这正是本模块的全部卖点
+    null_free = if (is.null(f_null_free)) NULL else list(
+      observed = obs_global[1],
+      values = thin(f_null_free[!is.na(f_null_free)]),
+      p = p_free,
+      n_used = as.integer(sum(!is.na(f_null_free))),
+      scheme = "free"
+    ),
     variance = lapply(obs_table, function(r) list(
       term = r$term, R2 = r$R2, F = r$F_model, df = r$df
     )),
-    comparison = if (is.null(f_null_free)) NULL else list(
+    # 结论对比：只跑了一种方案时也给一行，否则前端「结论对比」图会整块空白
+    comparison = if (is.null(f_null_free)) list(
+      list(scheme = "free", p = p_free, F = obs_global[1])
+    ) else list(
       list(scheme = "free", p = p_free, F = obs_global[1]),
       list(scheme = plan$scheme, p = p_constrained, F = obs_global[1])
     ),

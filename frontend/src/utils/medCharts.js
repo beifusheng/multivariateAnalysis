@@ -5,18 +5,10 @@
  *       以免 ECharts 把它们画成"看不见的点"（沉默失败）。
  */
 
-export function makeFormatters() {
-  const fmt = (v, d = 4) =>
-    v === null || v === undefined || !Number.isFinite(Number(v)) ? 'N/A' : Number(v).toFixed(d);
-  const fmtP = (v) => {
-    if (v === null || v === undefined || !Number.isFinite(Number(v))) return 'N/A';
-    const p = Number(v);
-    if (p <= 0) return '< 0.0001';
-    return p < 0.0001 ? p.toExponential(2) : p.toFixed(4);
-  };
-  const num = (v, d = 6) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(Number(v).toFixed(d)));
-  return { fmt, fmtP, num };
-}
+import { makeFormatters } from './format.js';
+
+export { makeFormatters };
+
 
 /** 最小二乘拟合线 */
 export function ols(xs, ys) {
