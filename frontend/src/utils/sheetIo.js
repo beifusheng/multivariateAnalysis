@@ -23,7 +23,8 @@ export const SHEET_ALIASES = {
   community: ['物种矩阵', '群落矩阵', '丰度矩阵', 'OTU表', '物种', 'community', 'otu', 'abundance'],
   sample: ['样本信息', '样本数据', '分组信息', '样本表', 'metadata', 'sample', 'samples', 'grouping'],
   coordinate: ['坐标', '空间坐标', '经纬度', 'coordinate', 'coordinates', 'xy', 'space'],
-  distance: ['距离矩阵', '相异度矩阵', 'distance', 'dissimilarity', 'bray']
+  distance: ['距离矩阵', '相异度矩阵', 'distance', 'dissimilarity', 'bray'],
+  formula: ['模型公式', '公式', '模型', 'formula', 'model']
 };
 
 const SAMPLE_ID_KEYS = ['样本', '样本id', '样品', '样本编号', 'id', 'sample', 'sampleid', 'samples', 'row', '站点'];
@@ -166,11 +167,31 @@ export function parseDistanceSheet(aoa) {
 
 // ---------------------------------------------------------------- 通用映射：spec 驱动
 
+/**
+ * 模型公式表：整张表里第一个含“~”的单元格就是公式。
+ * 公式必须含因变量（Y ~ …）；只写右边是错的，这里不替用户猜。
+ */
+export function parseFormulaSheet(aoa) {
+  if (!Array.isArray(aoa) || !aoa.length) return { ok: false, error: '模型公式表是空的' };
+  let formula = '';
+  for (const row of aoa) {
+    for (const cell of row || []) {
+      const s = String(cell ?? '').trim();
+      if (s.includes('~')) { formula = s; break; }
+    }
+    if (formula) break;
+  }
+  if (!formula) return { ok: false, error: '没找到含“~”的公式（如 Y ~ group）' };
+  if (!formula.split('~')[0].trim()) return { ok: false, error: `缺因变量：「${formula}」应写成 Y ~ …` };
+  return { ok: true, formula };
+}
+
 const PARSERS = {
   community: parseCommunitySheet,
   sample: parseSampleSheet,
   coordinate: parseCoordinateSheet,
-  distance: parseDistanceSheet
+  distance: parseDistanceSheet,
+  formula: parseFormulaSheet
 };
 
 /**
@@ -300,6 +321,9 @@ export function previewFromFields(primaryIds, primary, fields, opts = {}) {
       cols: ['样本', 'x', 'y'],
       rows: primaryIds.map((id, r) => ({ 样本: id, x: fields.coordinate_aligned[r][0], y: fields.coordinate_aligned[r][1] }))
     });
+  }
+  if (fields.formula && fields.formula.formula) {
+    tabs.push({ name: 'formula', label: '模型公式', cols: ['公式'], rows: [{ 公式: fields.formula.formula }] });
   }
   return tabs;
 }

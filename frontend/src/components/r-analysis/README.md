@@ -35,9 +35,15 @@
 **不要把三个模块合成一个带 `if (module === 'med')` 的大对话框**：分支会越长越肥，
 任何模块的新需求都要动共用组件，等于把三个模块焊在同一文件里。
 
-迁移进度：S1 Non-random 已上（dogfood：3 张表 + 6 个导出项）；S2 PERMANOVA.vue（距离矩阵/样本数据/模型公式，
-先补 render 冒烟再动）；S3 PERMANOVA_Med.vue（顺带修 `Sheets['Outcome']` 精确取表——表名不对时
-现在报的是一句跟表名无关的错）。
+迁移进度：**S1 Non-random 已上**（dogfood：3 张表 + 6 个导出项）；**S2 PERMANOVA.vue 已上**（距离矩阵/样本数据/模型公式 + 5 个导出项，-439 行）；
+S3 PERMANOVA_Med.vue 待动（顺带修 `Sheets['Outcome']` 精确取表——表名不对时现在报的是一句跟表名无关的错）。
+
+S2 选了“严格语义”（行为会变，已得到同意）：表名走别名而不是位置、缺必需表指名拒绝、
+样本一律按**距离矩阵的样本 ID** 重排。理由不是洁癖：旧版把样本数据表按行号对齐，
+在 Excel 里排一下序就会让 Group/Age 跟错样本，而图上一点异常都看不出来
+（test_pm_view 里这条用例在改动前确实是红的：产出 `S4,S2,S1,S3` 配 `27,28,25,30`）。
+顺带发现并清理：`validateDistanceMatrix` / `validateSampleData` 在同一个 `methods` 里
+**各有两份定义**（对象字面量后者覆盖前者，前面那 100 行从来没被执行过）。
 
 工具栏（`AnalysisToolbar` 里摆的按钮）四个动作固定同一语义、同一颜色，新模块不要自创：
 
@@ -91,13 +97,15 @@
 
 ```
 node r-scripts/tools/test_nr_options.mjs      # 界面选项 ↔ R 白名单 ↔ 模板 一致（75 项）
-node r-scripts/tools/test_sheet_io.mjs        # 模板写出→读回整链 + 脏表拒绝（52 项）
+node r-scripts/tools/test_sheet_io.mjs        # 模板写出→读回整链 + 脏表拒绝（55 项）
 node r-scripts/tools/test_nr_spec.mjs         # 导入声明 + 导出计划器（纯函数，41 项）
 node r-scripts/tools/verify_nonrandom_templates.mjs   # 26 模板真跑 R，p 方向逐条断言
 Rscript r-scripts/tools/verify_nonrandom_engine.R     # F/R² 对齐 adonis2；连续变量必须报错
 node r-scripts/tools/test_nr_charts.mjs       # 4 张图 × 5 个设计（162 项，含 formatter 真调用）
 node r-scripts/tools/test_nr_view.mjs         # canRun / payload / 导入导出（68 项）
 node r-scripts/tools/test_nr_render.mjs       # SSR 渲染 5 状态 + 告警/吞错必须为 0（42 项）
+node r-scripts/tools/test_pm_spec.mjs         # PERMANOVA 导入声明 + 导出计划器（48 项）
+node r-scripts/tools/test_pm_view.mjs         # PERMANOVA 视图：校验器/导入对齐/参数/导出（51 项）
 node r-scripts/tools/test_home_status.mjs    # 首页卡片状态 ↔ 真实代码（28 项）
 ```
 

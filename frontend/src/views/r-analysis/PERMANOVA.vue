@@ -24,34 +24,10 @@
         </el-icon>
       </div>
 
-      <div class="toolbar-content">
-        <el-tooltip content="下载 Excel 模板" placement="top">
-          <el-button @click="downloadTemplate" type="success" class="toolbar-btn">
-            <el-icon>
-              <Download />
-            </el-icon>
-            <span class="btn-text">下载模板</span>
-          </el-button>
-        </el-tooltip>
-
-        <el-tooltip content="导入 Excel/CSV 数据" placement="top">
-          <el-button @click="showImportDialog = true" type="primary" class="toolbar-btn">
-            <el-icon>
-              <Upload />
-            </el-icon>
-            <span class="btn-text">导入数据</span>
-          </el-button>
-        </el-tooltip>
-
-        <el-tooltip content="导出分析结果" placement="top">
-          <el-button @click="showExportDialog = true" type="warning" class="toolbar-btn" :disabled="!analysisResult">
-            <el-icon>
-              <FolderOpened />
-            </el-icon>
-            <span class="btn-text">导出结果</span>
-          </el-button>
-        </el-tooltip>
-      </div>
+      <ToolbarActions
+        :has-result="!!analysisResult" :show-input="true"
+        @template="downloadTemplate" @import="openImport" @export="openExport" @input="downloadInput"
+      />
     </div>
 
     <!-- 参数配置区域 -->
@@ -464,133 +440,14 @@
   </div>
 
   <!-- 导入数据对话框 -->
-  <el-dialog v-model="showImportDialog" title="📁 导入数据" width="700px" :close-on-click-modal="false">
-    <div class="import-dialog-content">
-      <div class="import-instruction-card">
-        <div class="instruction-header">
-          <span class="instruction-icon">📋</span>
-          <span class="instruction-title">数据格式说明</span>
-        </div>
-        <div class="instruction-content">
-          <div class="instruction-row">
-            <span class="instruction-label">距离矩阵：</span>
-            <span class="instruction-value">对称矩阵，对角线为 0，行列名称为样本 ID</span>
-          </div>
-          <div class="instruction-row">
-            <span class="instruction-label">样本数据：</span>
-            <span class="instruction-value">至少包含样本 ID 和分组变量</span>
-          </div>
-          <div class="instruction-row">
-            <span class="instruction-label">支持格式：</span>
-            <span class="instruction-value">Excel (.xlsx, .xls) 或 CSV (.csv)</span>
-          </div>
-        </div>
-      </div>
+  <ImportDialog v-model="showImportDialog" :sheets="importSheets" :tabs="importTabs"
+    :error="importError" :warnings="importWarnings" @file-change="handleFileChange" @apply="applyImport" />
 
-      <el-upload ref="uploadRef" drag :auto-upload="false" :on-change="handleFileChange" :limit="1"
-        accept=".xlsx,.xls,.csv" class="upload-demo" :file-list="uploadFileList">
-        <el-icon class="el-icon--upload">
-          <UploadFilled />
-        </el-icon>
-        <div class="el-upload__text">
-          将文件拖到此处，或<em>点击上传</em>
-        </div>
-        <template #tip>
-          <div class="el-upload__tip">
-            支持 .xlsx / .xls / .csv 文件
-          </div>
-        </template>
-      </el-upload>
-
-      <div v-if="importPreview" class="import-preview">
-        <el-divider>数据预览</el-divider>
-
-        <el-tabs v-model="importPreviewActiveTab">
-          <el-tab-pane label="距离矩阵" name="distance">
-            <div class="preview-table-container">
-              <el-table :data="importPreview.distanceMatrixPreview" border size="small" max-height="300">
-                <el-table-column type="index" width="50" label="行号" />
-                <el-table-column v-for="col in importPreview.distanceMatrixCols" :key="col.key" :prop="col.key"
-                  :label="col.label" />
-              </el-table>
-            </div>
-          </el-tab-pane>
-
-          <el-tab-pane label="样本数据" name="sample">
-            <div class="preview-table-container">
-              <el-table :data="importPreview.sampleDataPreview" border size="small" max-height="300">
-                <el-table-column type="index" width="50" />
-                <el-table-column v-for="col in importPreview.sampleDataCols" :key="col.key" :prop="col.key"
-                  :label="col.label" />
-              </el-table>
-            </div>
-          </el-tab-pane>
-
-          <el-tab-pane v-if="importPreview.formula" label="模型公式" name="formula">
-            <div class="formula-preview">
-              <el-input v-model="importPreview.formula" type="textarea" :rows="3" readonly />
-            </div>
-          </el-tab-pane>
-        </el-tabs>
-      </div>
-
-      <div v-if="importError" class="error-msg" style="margin-top: 16px;">
-        <el-icon>
-          <CircleClose />
-        </el-icon>
-        {{ importError }}
-      </div>
-    </div>
-
-    <template #footer>
-      <span class="dialog-footer">
-        <el-button @click="closeImportDialog">取消</el-button>
-        <el-button type="primary" @click="confirmImport" :disabled="!importPreview">
-          导入到分析
-        </el-button>
-      </span>
-    </template>
-  </el-dialog>
 
   <!-- 导出结果对话框 -->
-  <el-dialog v-model="showExportDialog" title="💾 导出结果" width="500px">
-    <div class="export-dialog-content">
-      <p class="export-hint">选择要导出的内容：</p>
+  <ExportDialog v-model="showExportDialog" :options="exportOptions2" :selected="exportOptions"
+    :error="exportError" @update:selected="(v) => (exportOptions = v)" @confirm="confirmExport" />
 
-      <div class="export-options">
-        <el-checkbox-group v-model="exportOptions">
-          <div class="checkbox-wrapper">
-            <el-checkbox label="json">完整结果 (JSON)</el-checkbox>
-          </div>
-          <div class="checkbox-wrapper">
-            <el-checkbox label="permanovaTable">PERMANOVA 表格 (Excel)</el-checkbox>
-          </div>
-          <div class="checkbox-wrapper">
-            <el-checkbox label="pcoaCoords">PCoA 坐标 (Excel)</el-checkbox>
-          </div>
-          <div class="checkbox-wrapper">
-            <el-checkbox label="chartPNG">当前图表 (PNG)</el-checkbox>
-          </div>
-        </el-checkbox-group>
-      </div>
-
-      <div v-if="exportError" class="error-msg" style="margin-top: 16px;">
-        <el-icon>
-          <CircleClose />
-        </el-icon>
-        {{ exportError }}
-      </div>
-    </div>
-
-    <template #footer>
-      <span class="dialog-footer">
-        <el-button @click="showExportDialog = false">取消</el-button>
-        <el-button type="warning" @click="confirmExport" :disabled="exportOptions.length === 0">
-          导出
-        </el-button>
-      </span>
-    </template>
-  </el-dialog>
 
   <!-- 事后检验对话框 -->
   <el-dialog v-model="showPosthocDialog" title="🔬 事后检验配置" width="500px">
@@ -677,6 +534,18 @@ import {
   runPERMANOVA
 } from '@/api/r';
 
+import ToolbarActions from '@/components/r-analysis/ToolbarActions.vue';
+import ImportDialog from '@/components/r-analysis/ImportDialog.vue';
+import ExportDialog from '@/components/r-analysis/ExportDialog.vue';
+import { readWorkbook, mapWorkbook, previewFromFields, writeWorkbook } from '@/utils/sheetIo';
+import {
+  PM_IMPORT_SHEETS,
+  PM_EXPORT_OPTIONS,
+  pmToFormPatch,
+  pmTemplateSheets,
+  planExport
+} from '@/utils/permanovaSheetSpec';
+
 import {
   ArrowLeft,
   Refresh,
@@ -702,6 +571,9 @@ import TemplateCategory from '@/components/r-analysis/TemplateCategory.vue';
 export default {
   name: 'PERMANOVA',
   components: {
+  ToolbarActions,
+  ImportDialog,
+  ExportDialog,
     ArrowLeft,
     Refresh,
     CaretRight,
@@ -729,11 +601,11 @@ export default {
 
       // 导入相关
       showImportDialog: false,
-      uploadFileList: [],  // 上传文件列表
-      importPreview: null,
-      importPreviewActiveTab: 'distance',
+      importTabs: null,
+      importFields: null,
+      importIds: null,
+      importWarnings: [],
       importError: '',
-      importedData: null,
 
       // 导出相关
       showExportDialog: false,
@@ -771,6 +643,12 @@ export default {
   },
 
   computed: {
+    importSheets() {
+      return PM_IMPORT_SHEETS;
+    },
+    exportOptions2() {
+      return PM_EXPORT_OPTIONS.map((o) => ({ key: o.key, label: o.label }));
+    },
     // 页面信息
     pageInfo() {
       return {
@@ -854,102 +732,9 @@ export default {
       }
     },
 
-    validateDistanceMatrix() {
-      try {
-        console.log('[Validate] validateDistanceMatrix called');
-        const matrix = JSON.parse(this.permanovaParams.distanceMatrixStr);
-        console.log('[Validate] Parsed matrix, rows:', matrix.length);
-
-        if (!Array.isArray(matrix) || matrix.length < 3) {
-          this.permanovaParams.matrixValid = false;
-          this.permanovaParams.matrixError = '至少需要 3 个样本';
-          this.permanovaParams.matrixSize = 0;
-          console.log('[Validate] Failed: not enough samples');
-          return;
-        }
-
-        // 验证是否为方阵
-        const n = matrix.length;
-        console.log('[Validate] Checking if matrix is square, n =', n);
-        for (let i = 0; i < n; i++) {
-          const rowLength = matrix[i]?.length || 0;
-          console.log('[Validate] Row', i, 'length:', rowLength, '(expected:', n + ')');
-          if (!Array.isArray(matrix[i]) || rowLength !== n) {
-            this.permanovaParams.matrixValid = false;
-            this.permanovaParams.matrixError = `距离矩阵必须是方阵 (第${i + 1}行有${rowLength}列，需要${n}列)`;
-            this.permanovaParams.matrixSize = 0;
-            console.log('[Validate] Failed: not square at row', i);
-            return;
-          }
-        }
-
-        this.permanovaParams.matrixValid = true;
-        this.permanovaParams.matrixError = '';
-        this.permanovaParams.matrixSize = n;
-        this.permanovaParams.distanceMatrix = matrix;
-        console.log('[Validate] Success! Matrix is valid, size:', n);
-        console.log('[Validate] distanceMatrix type:', typeof matrix);
-        console.log('[Validate] distanceMatrix[0] type:', typeof matrix[0]);
-        console.log('[Validate] distanceMatrix[0][0] type:', typeof matrix[0][0]);
-        console.log('[Validate] distanceMatrix[0][0] value:', matrix[0][0]);
-
-        // 距离矩阵变化后，重新验证样本数据
-        this.validateSampleData();
-      } catch (e) {
-        this.permanovaParams.matrixValid = false;
-        this.permanovaParams.matrixError = 'JSON 格式错误：' + e.message;
-        this.permanovaParams.matrixSize = 0;
-      }
-    },
-
-    validateSampleData() {
-      try {
-        if (!this.permanovaParams.sampleDataStr.trim()) {
-          this.permanovaParams.sampleDataValid = false;
-          this.permanovaParams.sampleDataError = '';
-          this.permanovaParams.sampleDataRows = 0;
-          this.permanovaParams.sampleDataCols = 0;
-          return;
-        }
-
-        const data = JSON.parse(this.permanovaParams.sampleDataStr);
-        const keys = Object.keys(data);
-
-        if (keys.length === 0) {
-          this.permanovaParams.sampleDataValid = false;
-          this.permanovaParams.sampleDataError = '至少需要一个变量';
-          return;
-        }
-
-        // 检查所有变量长度一致
-        const firstLength = data[keys[0]].length;
-        for (const key of keys) {
-          if (!Array.isArray(data[key]) || data[key].length !== firstLength) {
-            this.permanovaParams.sampleDataValid = false;
-            this.permanovaParams.sampleDataError = '所有变量的数组长度必须一致';
-            return;
-          }
-        }
-
-        // 检查与距离矩阵匹配
-        if (this.permanovaParams.matrixValid && firstLength !== this.permanovaParams.matrixSize) {
-          this.permanovaParams.sampleDataValid = false;
-          this.permanovaParams.sampleDataError = `样本数 (${firstLength}) 与距离矩阵 (${this.permanovaParams.matrixSize}) 不匹配`;
-          return;
-        }
-
-        this.permanovaParams.sampleDataValid = true;
-        this.permanovaParams.sampleDataError = '';
-        this.permanovaParams.sampleDataRows = firstLength;
-        this.permanovaParams.sampleDataCols = keys.length;
-        this.permanovaParams.sampleData = data;
-      } catch (e) {
-        this.permanovaParams.sampleDataValid = false;
-        this.permanovaParams.sampleDataError = 'JSON 格式错误：' + e.message;
-        this.permanovaParams.sampleDataRows = 0;
-        this.permanovaParams.sampleDataCols = 0;
-      }
-    },
+    // validateDistanceMatrix / validateSampleData 原先在这里还各有一份定义：
+    // 同一个 methods 对象里同名后者覆盖前者，那两份从来没被执行过，已删。
+    // 生效的定义在文件后面（按名字搜索应当只命中一处）。
 
     async runPERMANOVA() {
       this.analysisResult = null;
@@ -981,10 +766,7 @@ export default {
         console.log('[PERMANOVA]   permutations:', this.permanovaParams.permutations);
         
         // 构建参数
-        const params = {
-          distanceMatrix: this.permanovaParams.distanceMatrix,
-          permutations: this.permanovaParams.permutations
-        };
+        const params = this.buildRunParams();
         
         console.log('[PERMANOVA] Params to send to R:');
         console.log('[PERMANOVA]   matrix dimensions:', params.distanceMatrix?.length, 'x', params.distanceMatrix?.[0]?.length);
@@ -1035,373 +817,155 @@ export default {
     },
 
     // 处理文件导入
-    async handleFileChange(file) {
-      console.log('[Import] File selected:', file);
+    openImport() {
+      this.importTabs = null;
+      this.importFields = null;
+      this.importIds = null;
       this.importError = '';
-      this.importPreview = null;
+      this.importWarnings = [];
+      this.showImportDialog = true;
+    },
 
-      const rawFile = file.raw;
-      if (!rawFile) {
-        console.error('[Import] No raw file');
+    /**
+     * 解析整个交给 sheetIo.mapWorkbook 按声明跑：表名走别名、缺必需表指名拒绝、
+     * 样本一律按「距离矩阵」的样本 ID 对齐重排。
+     * 以前这里按表的位置猜第一张是矩阵、按行号对齐样本数据 —— 用户在 Excel 里
+     * 排一下序，Group/Age 就跟错了样本，图上一点异常都看不出来。
+     */
+    async handleFileChange(file) {
+      this.importError = '';
+      this.importWarnings = [];
+      this.importTabs = null;
+      this.importFields = null;
+      this.importIds = null;
+      let sheets;
+      try {
+        sheets = await readWorkbook(file);
+      } catch (e) {
+        this.importError = '这个文件读不出来：' + (e.message || e) + '（要 .xlsx / .xls / .csv）';
         return;
       }
-
-      const fileName = rawFile.name;
-      const fileExtension = fileName.split('.').pop().toLowerCase();
-      console.log('[Import] File name:', fileName, 'Extension:', fileExtension);
-
-      const reader = new FileReader();
-
-      reader.onload = async (e) => {
-        try {
-          const data = new Uint8Array(e.target.result);
-          console.log('[Import] File data loaded, size:', data.length);
-
-          const XLSX = await import('xlsx');
-          const workbook = XLSX.read(data, { type: 'array' });
-          console.log('[Import] Workbook loaded, sheets:', workbook.SheetNames);
-
-          // 读取距离矩阵
-          let distanceMatrix = [];
-          if (workbook.SheetNames.includes('距离矩阵')) {
-            const ws = workbook.Sheets['距离矩阵'];
-            distanceMatrix = XLSX.utils.sheet_to_json(ws, { header: 1 });
-            console.log('[Import] Distance matrix loaded from "距离矩阵" sheet, rows:', distanceMatrix.length);
-            console.log('[Import] Distance matrix row lengths:', distanceMatrix.map(r => r.length));
-          } else if (workbook.SheetNames.length > 0) {
-            const ws = workbook.Sheets[workbook.SheetNames[0]];
-            distanceMatrix = XLSX.utils.sheet_to_json(ws, { header: 1 });
-            console.log('[Import] Distance matrix from first sheet, rows:', distanceMatrix.length);
-            console.log('[Import] Distance matrix row lengths:', distanceMatrix.map(r => r.length));
-          }
-
-          console.log('[Import] Raw distance matrix:', distanceMatrix);
-
-          // 读取样本数据
-          let sampleData = [];
-          if (workbook.SheetNames.includes('样本数据')) {
-            const ws = workbook.Sheets['样本数据'];
-            sampleData = XLSX.utils.sheet_to_json(ws, { header: 1 });
-            console.log('[Import] Sample data loaded, rows:', sampleData.length);
-          } else if (workbook.SheetNames.length > 1) {
-            const ws = workbook.Sheets[workbook.SheetNames[1]];
-            sampleData = XLSX.utils.sheet_to_json(ws, { header: 1 });
-            console.log('[Import] Sample data from second sheet, rows:', sampleData.length);
-          }
-
-          // 读取模型公式
-          let formula = '';
-          if (workbook.SheetNames.includes('模型公式')) {
-            const ws = workbook.Sheets['模型公式'];
-            const formulaData = XLSX.utils.sheet_to_json(ws, { header: 1 });
-            // 查找公式行（格式：Y ~ ...）
-            for (const row of formulaData) {
-              if (row[0] && row[0].includes('~')) {
-                formula = row[0].trim();
-                break;
-              }
-            }
-            console.log('[Import] Formula loaded:', formula);
-          }
-
-          // 解析距离矩阵
-          if (distanceMatrix.length > 0) {
-            // 解析为二维数组（用于分析）
-            const distanceMatrixArray = this.parseDistanceMatrix(distanceMatrix);
-            console.log('[Import] Distance matrix parsed, size:', distanceMatrixArray.length);
-
-            // 解析为表格格式（用于预览）
-            const distanceMatrixPreviewResult = this.parseDistanceMatrixForPreview(distanceMatrix);
-            const distanceMatrixPreview = distanceMatrixPreviewResult.preview;
-            const distanceMatrixCols = distanceMatrixPreviewResult.cols;
-
-            // 解析样本数据
-            let sampleDataPreview = [];
-            let sampleDataCols = [];
-            if (sampleData.length > 0) {
-              const result = this.parseSampleData(sampleData);
-              sampleDataPreview = result.preview || [];
-              sampleDataCols = result.cols || [];
-              console.log('[Import] Sample data parsed, rows:', sampleDataPreview.length, 'cols:', sampleDataCols.length);
-            }
-
-            this.importPreview = {
-              distanceMatrixPreview,
-              distanceMatrixCols,
-              sampleDataPreview,
-              sampleDataCols,
-              formula
-            };
-            console.log('[Import] Preview set:', this.importPreview);
-            console.log('[Import] distanceMatrixPreview:', distanceMatrixPreview);
-            console.log('[Import] sampleDataPreview:', sampleDataPreview);
-
-            // 保存导入的数据（使用二维数组）
-            this.importedData = {
-              distanceMatrix: distanceMatrixArray,
-              sampleData: sampleDataPreview.length > 0 ? sampleDataPreview : null,
-              formula: formula || null
-            };
-            console.log('[Import] Imported data saved, matrix size:', this.importedData.distanceMatrix.length);
-            console.log('[Import] Imported matrix rows:', this.importedData.distanceMatrix.length, 'cols:', this.importedData.distanceMatrix[0]?.length);
-          }
-        } catch (error) {
-          console.error('导入失败:', error);
-          this.importError = '文件解析失败：' + error.message;
-        }
-      };
-
-      reader.onerror = () => {
-        this.importError = '文件读取失败';
-        console.error('[Import] File read error');
-      };
-
-      reader.readAsArrayBuffer(rawFile);
-    },
-
-    // 解析距离矩阵（返回二维数组用于分析）
-    parseDistanceMatrix(matrix) {
-      console.log('[Import] parseDistanceMatrix input:', matrix);
-      console.log('[Import] parseDistanceMatrix input rows:', matrix.length);
-
-      const result = [];
-      for (let i = 1; i < matrix.length; i++) {
-        const row = [];
-        console.log('[Import] Row', i, 'length:', matrix[i].length);
-        for (let j = 1; j < matrix[i].length; j++) {
-          row.push(parseFloat(matrix[i][j]) || 0);
-        }
-        result.push(row);
-      }
-
-      const rows = result.length;
-      const cols = result[0]?.length || 0;
-      console.log('[Import] parseDistanceMatrix result:', {
-        rows,
-        cols,
-        isSquare: rows === cols,
-        firstRow: result[0],
-        lastRow: result[result.length - 1]
-      });
-
-      return result;
-    },
-
-    // 解析距离矩阵为表格格式（用于预览）
-    parseDistanceMatrixForPreview(matrix) {
-      console.log('[Import] parseDistanceMatrixForPreview input rows:', matrix.length);
-      const headers = matrix[0] || [];
-      const result = [];
-      for (let i = 1; i < matrix.length; i++) {
-        const rowObj = {};
-        rowObj.id = i;  // 行号
-        for (let j = 1; j < matrix[i].length; j++) {
-          rowObj['col' + (j - 1)] = parseFloat(matrix[i][j]) || 0;
-        }
-        result.push(rowObj);
-      }
-      console.log('[Import] parseDistanceMatrixForPreview result rows:', result.length);
-      return {
-        preview: result,
-        cols: headers.slice(1).map((h, i) => ({ key: 'col' + i, label: h }))
-      };
-    },
-
-    // 解析样本数据
-    parseSampleData(data) {
-      console.log('[Import] parseSampleData input:', data);
-      const headers = data[0] || [];
-      const preview = [];
-
-      for (let i = 1; i < data.length; i++) {
-        const row = {};
-        for (let j = 0; j < headers.length; j++) {
-          row[headers[j]] = data[i][j];
-        }
-        preview.push(row);
-      }
-
-      const cols = headers.map(h => ({ key: h, label: h }));
-      console.log('[Import] parseSampleData result:', { preview, cols });
-
-      return {
-        preview,
-        cols
-      };
-    },
-
-    // 确认导入
-    confirmImport() {
-      console.log('[Import] confirmImport called');
-      console.log('[Import] importedData:', this.importedData);
-
-      if (!this.importedData) {
-        console.error('[Import] No imported data');
+      const res = mapWorkbook(sheets, PM_IMPORT_SHEETS, { primary: 'distance', sampleKey: 'sample' });
+      this.importWarnings = res.warnings || [];
+      if (!res.ok) {
+        this.importError = res.error;
         return;
       }
+      this.importFields = res.fields;
+      this.importIds = res.ids;
+      this.importTabs = previewFromFields(res.ids, res.fields.distance, res.fields, {});
+    },
 
-      // 填充距离矩阵
-      console.log('[Import] Imported distance matrix:', this.importedData.distanceMatrix);
-      console.log('[Import] Imported matrix type:', typeof this.importedData.distanceMatrix);
-      console.log('[Import] Imported matrix is array:', Array.isArray(this.importedData.distanceMatrix));
-      console.log('[Import] Imported matrix dimensions:', this.importedData.distanceMatrix?.length, 'x', this.importedData.distanceMatrix?.[0]?.length);
-      
-      this.permanovaParams.distanceMatrixStr = JSON.stringify(this.importedData.distanceMatrix, null, 2);
-      console.log('[Import] distanceMatrixStr set, length:', this.permanovaParams.distanceMatrixStr.length);
-
-      // 填充样本数据（如果有）
-      if (this.importedData.sampleData && this.importedData.sampleData.length > 0) {
-        const sampleDataObj = {};
-        const cols = Object.keys(this.importedData.sampleData[0]);
-        console.log('[Import] Sample data cols:', cols);
-
-        cols.forEach(col => {
-          sampleDataObj[col] = this.importedData.sampleData.map(row => row[col]);
-        });
-
-        this.permanovaParams.sampleDataStr = JSON.stringify(sampleDataObj, null, 2);
-        console.log('[Import] sampleDataStr set:', this.permanovaParams.sampleDataStr.substring(0, 100));
+    /** 先看后填：用户点头才动表单 */
+    applyImport() {
+      if (!this.importFields) {
+        // 已经报过的错优先（“距离矩阵不是方阵”比“先选一个文件”有用得多）
+        if (!this.importError) this.importError = '先选一个文件';
+        return;
       }
-
-      // 填充模型公式（如果有）
-      if (this.importedData.formula) {
-        this.permanovaParams.formula = this.importedData.formula;
-        console.log('[Import] Formula set:', this.permanovaParams.formula);
-      }
-
-      // 验证数据
-      console.log('[Import] About to validate distance matrix, distanceMatrixStr length:', this.permanovaParams.distanceMatrixStr?.length);
+      const patch = pmToFormPatch(this.importFields, this.importIds);
+      Object.assign(this.permanovaParams, patch);
       this.validateDistanceMatrix();
-      console.log('[Import] After validateDistanceMatrix:', {
-        matrixValid: this.permanovaParams.matrixValid,
-        matrixSize: this.permanovaParams.matrixSize,
-        matrixError: this.permanovaParams.matrixError,
-        distanceMatrix: this.permanovaParams.distanceMatrix
+      this.validateSampleData();
+      this.showImportDialog = false;
+      this.$message.success({
+        message: `已填入 ${this.importIds.length} 个样本${patch.formula ? '与模型公式' : ''}`,
+        duration: 2500
       });
-
-      if (this.importedData.sampleData) {
-        this.validateSampleData();
-        console.log('[Import] After validateSampleData:', {
-          sampleDataValid: this.permanovaParams.sampleDataValid,
-          sampleDataRows: this.permanovaParams.sampleDataRows,
-          sampleDataCols: this.permanovaParams.sampleDataCols
-        });
-      }
-
-      // 关闭对话框并清除文件列表
-      this.closeImportDialog();
-      this.$message.success('数据导入成功！');
     },
 
-    // 关闭导入对话框
     closeImportDialog() {
       this.showImportDialog = false;
-      this.uploadFileList = [];  // 清除文件列表
-      this.importPreview = null;
+      this.importTabs = null;
       this.importError = '';
-      // 清除上传组件的文件列表
-      if (this.$refs.uploadRef) {
-        this.$refs.uploadRef.clearFiles();
-      }
+      this.importWarnings = [];
     },
 
+    /** 下载模板：表结构由 spec 声明，这里只负责写出 */
     async downloadTemplate() {
       try {
-        console.log('[Download Template] Starting...');
-        const XLSX = await import('xlsx');
-
-        // 创建工作簿
-        const wb = XLSX.utils.book_new();
-        console.log('[Download Template] Workbook created');
-
-        // 距离矩阵 sheet（示例数据：5 样本 Bray-Curtis 距离）
-        console.log('[Download Template] Creating distance matrix sheet...');
-        const distanceMatrix = [
-          ['样本', 'Sample1', 'Sample2', 'Sample3', 'Sample4', 'Sample5'],
-          ['Sample1', 0.00, 0.35, 0.42, 0.28, 0.51],
-          ['Sample2', 0.35, 0.00, 0.38, 0.45, 0.33],
-          ['Sample3', 0.42, 0.38, 0.00, 0.52, 0.47],
-          ['Sample4', 0.28, 0.45, 0.52, 0.00, 0.39],
-          ['Sample5', 0.51, 0.33, 0.47, 0.39, 0.00]
-        ];
-        const wsDistance = XLSX.utils.aoa_to_sheet(distanceMatrix);
-        XLSX.utils.book_append_sheet(wb, wsDistance, '距离矩阵');
-        console.log('[Download Template] Distance matrix sheet added, rows:', distanceMatrix.length);
-
-        // 样本数据 sheet（示例数据）
-        console.log('[Download Template] Creating sample data sheet...');
-        const sampleData = [
-          ['样本', 'Group', 'Age', 'Weight'],
-          ['Sample1', 'Control', 25, 65],
-          ['Sample2', 'Control', 28, 68],
-          ['Sample3', 'Treatment', 30, 70],
-          ['Sample4', 'Treatment', 27, 66],
-          ['Sample5', 'Control', 26, 67]
-        ];
-        const wsSample = XLSX.utils.aoa_to_sheet(sampleData);
-        XLSX.utils.book_append_sheet(wb, wsSample, '样本数据');
-        console.log('[Download Template] Sample data sheet added, rows:', sampleData.length);
-
-        // 模型公式 sheet
-        console.log('[Download Template] Creating formula sheet...');
-        const formulaData = [
-          ['模型公式'],
-          ['Y ~ Group + Age + Weight'],
-          [''],
-          ['公式说明：'],
-          ['Y: 响应变量（距离矩阵）'],
-          ['Group: 分组变量'],
-          ['Age, Weight: 协变量'],
-          ['使用 + 连接多个变量'],
-          ['使用 * 表示交互作用，如 Group*Age']
-        ];
-        const wsFormula = XLSX.utils.aoa_to_sheet(formulaData);
-        XLSX.utils.book_append_sheet(wb, wsFormula, '模型公式');
-        console.log('[Download Template] Formula sheet added');
-
-        // 填写说明 sheet
-        const instructions = [
-          ['PERMANOVA 分析模板填写说明'],
-          [''],
-          ['📄 距离矩阵（必需）：'],
-          ['  - 第一行和第一列为样本名称，其余为距离值'],
-          ['  - 必须为对称矩阵，对角线为 0'],
-          ['  - 示例：Bray-Curtis 距离、Euclidean 距离'],
-          [''],
-          ['📋 样本数据（必需）：'],
-          ['  - 第一列为样本名称（与距离矩阵一致）'],
-          ['  - 其余列为变量（分组、协变量等）'],
-          ['  - 示例：Group, Age, Weight'],
-          [''],
-          ['🧮 模型公式（必需）：'],
-          ['  - 格式：Y ~ Group + Age + Weight'],
-          ['  - 使用 + 连接多个变量'],
-          ['  - 使用 * 表示交互作用，如 Group*Age'],
-          [''],
-          ['⚙️ 置换次数：'],
-          ['  - 建议 ≥ 999 以获得稳定的 p 值'],
-          ['  - 范围：99 - 9999']
-        ];
-        const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
-        XLSX.utils.book_append_sheet(wb, wsInstructions, '填写说明');
-        console.log('[Download Template] Instructions sheet added');
-        console.log('[Download Template] Total sheets:', wb.SheetNames.length);
-        console.log('[Download Template] Sheet names:', wb.SheetNames);
-
-        // 下载文件
-        const XLSX_write = XLSX.write;
-        const wbout = XLSX_write(wb, { bookType: 'xlsx', type: 'array' });
-        const blob = new Blob([wbout], { type: 'application/octet-stream' });
-
-        const FileSaver = await import('file-saver');
-        FileSaver.saveAs(blob, 'PERMANOVA 模板.xlsx');
-
-        this.$message.success('模板下载成功！');
-      } catch (error) {
-        console.error('下载模板失败:', error);
-        this.$message.error('下载模板失败：' + error.message);
+        await writeWorkbook(await this.xlsx(), pmTemplateSheets().map(([name, aoa]) => ({ name, aoa })), 'PERMANOVA 模板.xlsx');
+      } catch (e) {
+        this.$message.error('模板下载失败：' + (e.message || e));
       }
     },
+
+    /** 送给 R 的参数就一个来源：按钮可用性、运行、下载输入都用它，不再各拼一遍 */
+    buildRunParams() {
+      const p = this.permanovaParams;
+      const params = { distanceMatrix: p.distanceMatrix, permutations: p.permutations };
+      if (p.sampleDataValid && p.sampleData && p.formula) {
+        params.sampleData = p.sampleData;
+        params.formula = p.formula;
+      }
+      return params;
+    },
+
+    openExport() {
+      this.exportError = '';
+      this.showExportDialog = true;
+    },
+
+    /** 勾选 -> 任务表（内容与文件名全在 spec 里算，这里不拼） */
+    exportJobs(keys) {
+      return planExport(keys || this.exportOptions, { analysisResult: this.analysisResult, params: this.permanovaParams }, this.stamp());
+    },
+
+    async confirmExport() {
+      this.exportError = '';
+      if (!this.analysisResult) {
+        this.exportError = '还没有分析结果可导出';
+        return;
+      }
+      const jobs = this.exportJobs();
+      try {
+        for (const job of jobs) {
+          if (job.type === 'xlsx') await writeWorkbook(await this.xlsx(), job.sheets, job.filename);
+          else if (job.type === 'json') await this.saveJson(job.filename, job.data);
+          else await this.exportPng(job.filename);
+        }
+        this.showExportDialog = false;
+        this.$message.success(`已导出 ${jobs.length} 项`);
+      } catch (e) {
+        this.exportError = '导出失败：' + (e.message || e);
+      }
+    },
+
+    async downloadInput() {
+      try {
+        await this.saveJson(`PERMANOVA 输入_${this.stamp()}.json`, this.buildRunParams());
+      } catch (e) {
+        this.$message.error('导出输入失败：' + (e.message || e));
+      }
+    },
+
+    stamp() {
+      return new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    },
+
+    async xlsx() {
+      const m = await import('xlsx');
+      return m.utils ? m : m.default;
+    },
+
+    async saveJson(filename, data) {
+      const { saveAs } = await import('file-saver');
+      saveAs(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), filename);
+    },
+
+    /** 只导得出正在看的那张图：其它 tab 还没实例化 */
+    async exportPng(filename) {
+      const el = this.$refs.pcoaChart;
+      if (!el) throw new Error('图表还没渲染');
+      const echarts = await import('echarts');
+      const chart = echarts.getInstanceByDom(el);
+      if (!chart) throw new Error('当前没有可导出的图表实例');
+      const { saveAs } = await import('file-saver');
+      const url = chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#ffffff' });
+      const bytes = Uint8Array.from(atob(url.split(',')[1]), (c) => c.charCodeAt(0));
+      saveAs(new Blob([bytes], { type: 'image/png' }), filename);
+    },
+
 
     loadTemplate(templateName) {
       // 从 JSON 数据中查找模板
