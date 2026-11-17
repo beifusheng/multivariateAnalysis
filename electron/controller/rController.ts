@@ -170,17 +170,31 @@ export default class RController {
   }
 
   /**
-   * 执行 PERMANOVA-med 中介分析
+   * 执行 PERMANOVA-med 中介分析（基于 LDM::permanovaFL, test.mediation=TRUE）
+   *
+   * 角色约定（LDM 的语义与直觉相反，左侧矩阵才是中介）：
+   *   mediatorData  -> 公式左侧矩阵 = 起中介作用的多元变量，
+   *                    通常为微生物组 OTU 表（非负计数）或对称距离矩阵
+   *   predictorData -> 第 1 组协变量 = 暴露 X
+   *   outcomeData   -> 第 2 组协变量 = 结局 Y
+   *   covariates    -> 可选，作为混杂项校正（写在 `MEDMAT|Z1+Z2 ~ ...`）
+   *
+   * 注意：permutations 会被 R 脚本自动上调到 100 的整数倍。
+   * LDM 内部 n.perm.block 硬编码为 100，而 permanova.perm 数组只分配
+   * n.perm.max 长度，非 100 倍数（如 999）会导致写入越界，
+   * 报 "subscript out of bounds / 下标出界"。
    */
   async runPERMANOVA_Med(params: {
-    outcomeData: number[][];
-    mediatorData: number[][];
-    predictorData: number[][];
-    covariates?: number[][];
-    permutations?: number;
+    mediatorData: number[][];   // 中介：OTU 表或距离矩阵（样本 × 物种）
+    predictorData: number[][];  // 暴露 X（样本 × 变量）
+    outcomeData: number[][];    // 结局 Y（样本 × 变量）
+    covariates?: number[][];    // 协变量 Z（可选）
+    permutations?: number;      // 置换次数，自动规整为 100 的倍数
+    seed?: number;
   }): Promise<any> {
-    logger.info('[RController] Running PERMANOVA-med with params:', params);
-    
+    logger.info('[RController] Running PERMANOVA-med, mediator dims:',
+      params?.mediatorData?.length, 'x', params?.mediatorData?.[0]?.length);
+
     const result = await rService.runScript({
       scriptName: 'permanova_med.R',
       params,
