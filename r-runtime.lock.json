@@ -1,0 +1,1654 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-17T11:34:45+0800",
+  "generated_by": "r-scripts/tools/export_r_lockfile.R",
+  "r": {
+    "version": "4.6.1",
+    "min_required": "4.3.0",
+    "note": "4.3.3 与 4.6.1 已做过 A/B：25 个中介模板统计量逐条一致；脚本一律自带 %||% 兜底，不依赖 R>=4.4",
+    "library_path": "C:/Custom/CodeRepository/Demo/electron-egg/r-portable/library"
+  },
+  "package_count": 177,
+  "packages": [
+    {
+      "name": "ape",
+      "version": "5.8-1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["nlme", "lattice", "graphics", "methods", "stats", "utils", "parallel", "Rcpp", "digestR"]
+    },
+    {
+      "name": "askpass",
+      "version": "1.2.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "sys"
+    },
+    {
+      "name": "base",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "base64enc",
+      "version": "0.1-6",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "BH",
+      "version": "1.90.0-1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "BiocManager",
+      "version": "1.30.27",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "utils"
+    },
+    {
+      "name": "BiocParallel",
+      "version": "1.46.0",
+      "priority": null,
+      "source": "Bioconductor",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["stats", "utils", "futile.logger", "parallel", "snow", "codetoolsmethods"]
+    },
+    {
+      "name": "BiocVersion",
+      "version": "3.23.1",
+      "priority": null,
+      "source": "Bioconductor",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "boot",
+      "version": "1.3-32",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["graphics", "stats"]
+    },
+    {
+      "name": "brew",
+      "version": "1.0-10",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "brio",
+      "version": "1.1.5",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "bslib",
+      "version": "0.12.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["base64enc", "cachem", "fastmap", "grDevices", "htmltools", "jquerylib", "jsonlite", "lifecycle", "memoise", "mime", "rlang", "sass"]
+    },
+    {
+      "name": "cachem",
+      "version": "1.1.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["rlang", "fastmap"]
+    },
+    {
+      "name": "callr",
+      "version": "3.8.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["otel", "processx", "R6", "utilsR"]
+    },
+    {
+      "name": "castor",
+      "version": "1.8.7",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["parallel", "naturalsort", "stats", "Matrix", "RSpectra", "jsonlite", "methodsRcpp"]
+    },
+    {
+      "name": "class",
+      "version": "7.3-23",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["MASSR", "stats", "utils"]
+    },
+    {
+      "name": "cli",
+      "version": "3.6.6",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "utilsR"
+    },
+    {
+      "name": "clipr",
+      "version": "0.8.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "utils"
+    },
+    {
+      "name": "clue",
+      "version": "0.3-68",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["stats", "cluster", "graphics", "methodsR"]
+    },
+    {
+      "name": "cluster",
+      "version": "2.1.8.2",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["graphics", "grDevices", "stats", "utilsR"]
+    },
+    {
+      "name": "codetools",
+      "version": "0.2-20",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "commonmark",
+      "version": "2.0.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "compiler",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "cpp11",
+      "version": "0.5.5",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "crayon",
+      "version": "1.5.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["grDevices", "methods", "utils"]
+    },
+    {
+      "name": "credentials",
+      "version": "2.0.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["openssl", "sys", "curl", "jsonlite", "askpass"]
+    },
+    {
+      "name": "curl",
+      "version": "8.1.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "datasets",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "desc",
+      "version": "1.4.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "R6", "utilsR"]
+    },
+    {
+      "name": "devtools",
+      "version": "2.5.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "desc", "ellipsis", "fs", "lifecycle", "memoise", "miniUI", "pak", "pkgbuild", "pkgdown", "pkgload", "profvis", "rcmdcheck", "rlang", "roxygen2", "rversions", "sessioninfo", "testthat", "urlchecker", "withr", "usethis"]
+    },
+    {
+      "name": "diffobj",
+      "version": "0.3.9",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["crayon", "tools", "methods", "utils", "statsR"]
+    },
+    {
+      "name": "digest",
+      "version": "0.6.39",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "utilsR"
+    },
+    {
+      "name": "dirmult",
+      "version": "0.1.3-5",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "downlit",
+      "version": "0.4.5",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["brio", "desc", "digest", "evaluate", "fansi", "memoise", "rlang", "vctrs", "withr", "yamlR"]
+    },
+    {
+      "name": "ellipsis",
+      "version": "0.3.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "rlang"
+    },
+    {
+      "name": "evaluate",
+      "version": "1.0.5",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "fansi",
+      "version": "1.0.7",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["grDevices", "utilsR"]
+    },
+    {
+      "name": "farver",
+      "version": "2.1.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "fastmap",
+      "version": "1.2.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "fastmatch",
+      "version": "1.1-8",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "fBasics",
+      "version": "4052.98",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["timeDate", "timeSeries", "stats", "grDevices", "graphics", "methods", "utils", "MASS", "spatial", "gss", "stabledistR"]
+    },
+    {
+      "name": "fontawesome",
+      "version": "0.5.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["rlang", "htmltools"]
+    },
+    {
+      "name": "foreach",
+      "version": "1.5.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["codetools", "utils", "iteratorsR"]
+    },
+    {
+      "name": "foreign",
+      "version": "0.8-91",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["methods", "utils", "statsR"]
+    },
+    {
+      "name": "formatR",
+      "version": "1.14",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "fs",
+      "version": "2.1.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "methodsR"
+    },
+    {
+      "name": "futile.logger",
+      "version": "1.4.9",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["utils", "lambda.r", "futile.optionsR"]
+    },
+    {
+      "name": "futile.options",
+      "version": "1.0.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "generics",
+      "version": "0.1.4",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "methodsR"
+    },
+    {
+      "name": "gert",
+      "version": "2.5.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["askpass", "credentials", "openssl", "rstudioapi", "sys", "zip"]
+    },
+    {
+      "name": "ggplot2",
+      "version": "4.0.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "grDevices", "grid", "gtable", "isoband", "lifecycle", "rlang", "S7", "scales", "stats", "vctrs", "withr"]
+    },
+    {
+      "name": "ggrepel",
+      "version": "0.9.8",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["grid", "Rcpp", "rlang", "S7", "scales", "withr", "ggplot2"]
+    },
+    {
+      "name": "gh",
+      "version": "1.6.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "gitcreds", "glue", "httr2", "ini", "jsonlite", "lifecycle", "rlang"]
+    },
+    {
+      "name": "gitcreds",
+      "version": "0.1.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "glmnet",
+      "version": "5.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": "gmr4",
+      "depends": ["methods", "utils", "foreach", "shape", "survival", "RcppR", "Matrix"]
+    },
+    {
+      "name": "glue",
+      "version": "1.8.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "methodsR"
+    },
+    {
+      "name": "graphics",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "grDevices"
+    },
+    {
+      "name": "grDevices",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "grid",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["grDevices", "utils"]
+    },
+    {
+      "name": "gss",
+      "version": "3.0-0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "stats"
+    },
+    {
+      "name": "gtable",
+      "version": "0.3.6",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "glue", "grid", "lifecycle", "rlang", "statsR"]
+    },
+    {
+      "name": "GUniFrac",
+      "version": "1.9",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["Rcpp", "vegan", "ggplot2", "matrixStats", "Matrix", "ape", "parallel", "stats", "utils", "statmod", "rmutil", "dirmult", "MASS", "ggrepel", "foreach", "modeest", "inline", "methodsR"]
+    },
+    {
+      "name": "highr",
+      "version": "0.12",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "xfun"
+    },
+    {
+      "name": "htmltools",
+      "version": "0.5.9",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["base64enc", "digest", "fastmap", "grDevices", "rlang", "utilsR"]
+    },
+    {
+      "name": "htmlwidgets",
+      "version": "1.6.4",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["grDevices", "htmltools", "jsonlite", "knitr", "rmarkdown", "yaml"]
+    },
+    {
+      "name": "httpuv",
+      "version": "1.6.17",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["later", "promises", "R6", "Rcpp", "utilsR"]
+    },
+    {
+      "name": "httr2",
+      "version": "1.3.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "curl", "glue", "lifecycle", "magrittr", "openssl", "R6", "rlang", "vctrs", "withrR"]
+    },
+    {
+      "name": "igraph",
+      "version": "2.3.4",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "graphics", "grDevices", "lifecycle", "magrittr", "Matrix", "pkgconfig", "rlang", "stats", "utils", "vctrsmethods"]
+    },
+    {
+      "name": "ini",
+      "version": "0.3.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "inline",
+      "version": "0.3.21",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "methods"
+    },
+    {
+      "name": "isoband",
+      "version": "0.3.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "grid", "rlang", "utils"]
+    },
+    {
+      "name": "iterators",
+      "version": "1.0.14",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "utils"
+    },
+    {
+      "name": "jquerylib",
+      "version": "0.1.4",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "htmltools"
+    },
+    {
+      "name": "jsonlite",
+      "version": "2.0.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": "permanova,permanova_med,nonrandom_permanova,gmr4,bayesian_era",
+      "depends": "methods"
+    },
+    {
+      "name": "KernSmooth",
+      "version": "2.23-26",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "stats"
+    },
+    {
+      "name": "knitr",
+      "version": "1.52",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["evaluate", "highr", "methods", "tools", "xfun", "yaml"]
+    },
+    {
+      "name": "labeling",
+      "version": "0.4.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["stats", "graphics"]
+    },
+    {
+      "name": "lambda.r",
+      "version": "1.2.6",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "formatRR"
+    },
+    {
+      "name": "later",
+      "version": "1.4.8",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["Rcpp", "rlangR"]
+    },
+    {
+      "name": "lattice",
+      "version": "0.22-9",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["grid", "grDevices", "graphics", "stats", "utilsR"]
+    },
+    {
+      "name": "LDM",
+      "version": "6.0.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": "permanova_med",
+      "depends": ["GUniFrac", "vegan", "permute", "parallel", "BiocParallel", "matrixStats", "castor", "phangorn", "modeestR"]
+    },
+    {
+      "name": "lifecycle",
+      "version": "1.0.5",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "rlang"]
+    },
+    {
+      "name": "magrittr",
+      "version": "2.0.5",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "MASS",
+      "version": "7.3-65",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": "bayesian_era",
+      "depends": ["methodsR", "grDevices", "graphics", "stats", "utils"]
+    },
+    {
+      "name": "Matrix",
+      "version": "1.7-6",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": "gmr4",
+      "depends": ["grDevices", "graphics", "grid", "lattice", "stats", "utilsR", "methods"]
+    },
+    {
+      "name": "matrixStats",
+      "version": "1.5.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "memoise",
+      "version": "2.0.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["rlang", "cachem"]
+    },
+    {
+      "name": "methods",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["utils", "stats"]
+    },
+    {
+      "name": "mgcv",
+      "version": "1.9-4",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["methods", "stats", "graphics", "Matrix", "splines", "utilsR", "nlme"]
+    },
+    {
+      "name": "mime",
+      "version": "0.13",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "tools"
+    },
+    {
+      "name": "miniUI",
+      "version": "0.1.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["shiny", "htmltools", "utils"]
+    },
+    {
+      "name": "modeest",
+      "version": "2.5.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["fBasics", "stable", "stabledist", "stats", "statip"]
+    },
+    {
+      "name": "naturalsort",
+      "version": "0.1.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "nlme",
+      "version": "3.1-169",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["graphics", "stats", "utils", "latticeR"]
+    },
+    {
+      "name": "nnet",
+      "version": "7.3-20",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["stats", "utils"]
+    },
+    {
+      "name": "openssl",
+      "version": "2.4.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "askpass"
+    },
+    {
+      "name": "otel",
+      "version": "0.2.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "pak",
+      "version": "0.11.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["tools", "utilsR"]
+    },
+    {
+      "name": "parallel",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["tools", "compiler"]
+    },
+    {
+      "name": "permute",
+      "version": "0.9-10",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "statsR"
+    },
+    {
+      "name": "phangorn",
+      "version": "2.12.1",
+      "priority": null,
+      "source": "Bioconductor",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["digest", "fastmatch", "generics", "graphics", "grDevices", "igraph", "Matrix", "methods", "parallel", "quadprog", "Rcpp", "stats", "utilsape"]
+    },
+    {
+      "name": "pillar",
+      "version": "1.11.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "glue", "lifecycle", "rlang", "utf8", "utils", "vctrs"]
+    },
+    {
+      "name": "pkgbuild",
+      "version": "1.4.8",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["callr", "cli", "desc", "processx", "R6R"]
+    },
+    {
+      "name": "pkgconfig",
+      "version": "2.0.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "utils"
+    },
+    {
+      "name": "pkgdown",
+      "version": "2.2.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["bslib", "callr", "cli", "desc", "downlit", "fontawesome", "fs", "httr2", "jsonlite", "lifecycle", "openssl", "purrr", "ragg", "rlang", "rmarkdown", "tibble", "whisker", "withr", "xml2", "yaml"]
+    },
+    {
+      "name": "pkgload",
+      "version": "1.5.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "desc", "fs", "glue", "lifecycle", "methods", "pkgbuild", "processx", "rlang", "rprojroot", "utilsR"]
+    },
+    {
+      "name": "praise",
+      "version": "1.0.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "prettyunits",
+      "version": "1.2.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "processx",
+      "version": "3.9.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["ps", "R6", "utilsR"]
+    },
+    {
+      "name": "profvis",
+      "version": "0.4.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["htmlwidgets", "rlang", "vctrsR"]
+    },
+    {
+      "name": "promises",
+      "version": "1.5.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["fastmap", "later", "lifecycle", "magrittr", "otel", "R6", "rlangR"]
+    },
+    {
+      "name": "ps",
+      "version": "1.9.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "utilsR"
+    },
+    {
+      "name": "purrr",
+      "version": "1.2.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "lifecycle", "magrittr", "rlang", "vctrs"]
+    },
+    {
+      "name": "quadprog",
+      "version": "1.5-8",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "R6",
+      "version": "2.6.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "ragg",
+      "version": "1.5.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["systemfonts", "textshaping"]
+    },
+    {
+      "name": "rappdirs",
+      "version": "0.3.4",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "rcmdcheck",
+      "version": "1.4.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["callr", "cli", "curl", "desc", "digest", "pkgbuild", "prettyunits", "R6", "rprojroot", "sessioninfo", "utils", "withr", "xopen"]
+    },
+    {
+      "name": "RColorBrewer",
+      "version": "1.1-3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "Rcpp",
+      "version": "1.1.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["methods", "utilsR"]
+    },
+    {
+      "name": "RcppEigen",
+      "version": "0.3.4.0.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["Rcpp", "stats", "utilsR"]
+    },
+    {
+      "name": "rdtools",
+      "version": "0.1.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["stats", "toolsR"]
+    },
+    {
+      "name": "remotes",
+      "version": "2.5.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["methods", "stats", "tools", "utilsR"]
+    },
+    {
+      "name": "rlang",
+      "version": "1.3.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "utilsR"
+    },
+    {
+      "name": "rmarkdown",
+      "version": "2.32",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["bslib", "evaluate", "fontawesome", "htmltools", "jquerylib", "jsonlite", "knitr", "methods", "tinytex", "tools", "utils", "xfun", "yaml"]
+    },
+    {
+      "name": "rmutil",
+      "version": "1.1.10",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "roxygen2",
+      "version": "8.1.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["brew", "cli", "commonmark", "desc", "knitr", "lifecycle", "methods", "pkgload", "R6", "rdtools", "rlang", "stats", "utils", "withr", "xml2R"]
+    },
+    {
+      "name": "rpart",
+      "version": "4.1.27",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["graphics", "stats", "grDevices"]
+    },
+    {
+      "name": "rprojroot",
+      "version": "2.1.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "RSpectra",
+      "version": "0.16-2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["Matrix", "Rcpp"]
+    },
+    {
+      "name": "rstudioapi",
+      "version": "0.19.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "rversions",
+      "version": "3.0.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "curl"
+    },
+    {
+      "name": "S7",
+      "version": "0.2.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "utilsR"
+    },
+    {
+      "name": "sass",
+      "version": "0.4.10",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["fs", "rlang", "htmltools", "R6", "rappdirs"]
+    },
+    {
+      "name": "scales",
+      "version": "1.4.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "farver", "glue", "labeling", "lifecycle", "R6", "RColorBrewer", "rlang", "viridisLiteR"]
+    },
+    {
+      "name": "sessioninfo",
+      "version": "1.2.4",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "tools", "utilsR"]
+    },
+    {
+      "name": "shape",
+      "version": "1.4.6.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["stats", "graphics", "grDevicesR"]
+    },
+    {
+      "name": "shiny",
+      "version": "1.14.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["bslib", "cachem", "cli", "commonmark", "fastmap", "fontawesome", "glue", "grDevices", "htmltools", "httpuv", "jsonlite", "later", "lifecycle", "mime", "otel", "promises", "R6", "rlang", "sourcetools", "tools", "utils", "withr", "xtablemethods"]
+    },
+    {
+      "name": "snow",
+      "version": "0.4-4",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "utils"
+    },
+    {
+      "name": "sourcetools",
+      "version": "0.1.7-2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "spatial",
+      "version": "7.3-18",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["graphics", "stats", "utils"]
+    },
+    {
+      "name": "splines",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["graphics", "stats"]
+    },
+    {
+      "name": "stable",
+      "version": "1.1.7",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "rmutil"
+    },
+    {
+      "name": "stabledist",
+      "version": "0.7-2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "statsR"
+    },
+    {
+      "name": "statip",
+      "version": "0.2.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["clue", "graphics", "rpart", "statsR"]
+    },
+    {
+      "name": "statmod",
+      "version": "1.5.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["stats", "graphicsR"]
+    },
+    {
+      "name": "stats",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["utils", "grDevices", "graphics"]
+    },
+    {
+      "name": "stats4",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["graphics", "methods", "stats"]
+    },
+    {
+      "name": "stringi",
+      "version": "1.8.9",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["tools", "utils", "statsR"]
+    },
+    {
+      "name": "survival",
+      "version": "3.8-6",
+      "priority": "recommended",
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["graphics", "Matrix", "methods", "splines", "stats", "utilsR"]
+    },
+    {
+      "name": "sys",
+      "version": "3.4.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "systemfonts",
+      "version": "1.3.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["base64enc", "grid", "jsonlite", "lifecycle", "tools", "utilsR"]
+    },
+    {
+      "name": "tcltk",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "utils"
+    },
+    {
+      "name": "testthat",
+      "version": "3.3.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["brio", "callr", "cli", "desc", "evaluate", "jsonlite", "lifecycle", "magrittr", "methods", "pkgload", "praise", "processx", "ps", "R6", "rlang", "utils", "waldo", "withr"]
+    },
+    {
+      "name": "textshaping",
+      "version": "1.0.5",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["lifecycle", "stats", "stringi", "systemfonts", "utilsR"]
+    },
+    {
+      "name": "tibble",
+      "version": "3.3.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "lifecycle", "magrittr", "methods", "pillar", "pkgconfig", "rlang", "utils", "vctrs"]
+    },
+    {
+      "name": "timeDate",
+      "version": "4052.112",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["graphics", "utils", "statsR", "methods"]
+    },
+    {
+      "name": "timeSeries",
+      "version": "4052.112",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["graphics", "grDevices", "stats", "utilsR", "timeDate", "methods"]
+    },
+    {
+      "name": "tinytex",
+      "version": "0.61",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "xfun"
+    },
+    {
+      "name": "tools",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "translations",
+      "version": "4.6.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "urlchecker",
+      "version": "2.0.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "curl", "gitcreds", "rlang", "tools", "utils", "xml2R"]
+    },
+    {
+      "name": "usethis",
+      "version": "3.2.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "clipr", "crayon", "curl", "desc", "fs", "gert", "gh", "glue", "jsonlite", "lifecycle", "pak", "purrr", "rappdirs", "rlang", "rprojroot", "rstudioapi", "whisker", "withr", "yamlR"]
+    },
+    {
+      "name": "utf8",
+      "version": "1.2.6",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "utils",
+      "version": "4.6.1",
+      "priority": "base",
+      "source": "R-base",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "vctrs",
+      "version": "0.7.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "glue", "lifecycle", "rlang"]
+    },
+    {
+      "name": "vegan",
+      "version": "2.7-6",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": "permanova,permanova_med,nonrandom_permanova",
+      "depends": ["MASS", "cluster", "lattice", "mgcvpermute"]
+    },
+    {
+      "name": "viridisLite",
+      "version": "0.4.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "waldo",
+      "version": "0.6.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "diffobj", "glue", "methods", "rlang"]
+    },
+    {
+      "name": "whisker",
+      "version": "0.4.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "withr",
+      "version": "3.0.3",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["graphics", "grDevicesR"]
+    },
+    {
+      "name": "xfun",
+      "version": "0.62",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["grDevices", "stats", "toolsR"]
+    },
+    {
+      "name": "xml2",
+      "version": "1.6.0",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["cli", "methods", "rlang"]
+    },
+    {
+      "name": "xopen",
+      "version": "1.0.1",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": "processxR"
+    },
+    {
+      "name": "xtable",
+      "version": "1.8-8",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": ["stats", "utils", "methodsR"]
+    },
+    {
+      "name": "yaml",
+      "version": "2.3.12",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    },
+    {
+      "name": "zip",
+      "version": "3.0.2",
+      "priority": null,
+      "source": "CRAN",
+      "needs_compile": false,
+      "required_by": null,
+      "depends": []
+    }
+  ],
+  "required": {
+    "permanova": {
+      "script": "permanova.R",
+      "packages": ["jsonlite", "vegan"],
+      "note": "距离矩阵置换多元方差分析；自算 F 与 vegan::adonis2 已对齐验证"
+    },
+    "permanova_med": {
+      "script": "permanova_med.R",
+      "packages": ["jsonlite", "LDM", "vegan"],
+      "note": "中介分析依赖 LDM::permanovaFL；置换次数必须是 100 的整数倍（LDM 内部 n.perm.block=100）"
+    },
+    "nonrandom_permanova": {
+      "script": "nonrandom_permanova.R",
+      "packages": ["jsonlite", "vegan"],
+      "note": "受限/分层/空间置换，F 由本脚本自算，不需要 LDM"
+    },
+    "gmr4": {
+      "script": "gmr4.R",
+      "packages": ["jsonlite", "Matrix", "glmnet"],
+      "note": "glmnet 缺失时脚本会退化为内置坐标下降求解器，但精度与收敛性以 glmnet 为准"
+    },
+    "bayesian_era": {
+      "script": "bayesian_era_mediation.R",
+      "packages": ["jsonlite", "MASS"],
+      "note": "自写 Gibbs 采样，不依赖 rstan（rstan 需要 C++ 工具链，便携版装不了）"
+    }
+  },
+  "missing_required": null,
+  "declared_but_unused": [],
+  "verify": {
+    "script": "r-scripts/tools/verify_r_runtime.R",
+    "smoke": [
+      "node r-scripts/tools/verify_med_templates.mjs",
+      "node r-scripts/tools/test_med_charts.mjs",
+      "node r-scripts/tools/ab_r_version.mjs"
+    ]
+  },
+  "release": {
+    "kind": "github-release-asset",
+    "repo": "beifusheng/multivariateAnalysis",
+    "tag": null,
+    "asset": "r-portable-4.6.1-win-x64.zip",
+    "url": null,
+    "sha256": null,
+    "size_bytes": null,
+    "note": "运行时装 Release 附件而不是 LFS：不占 LFS 流量额度，且支持断点续传。上传后把 tag/url/sha256/size_bytes 填回本文件。"
+  }
+}

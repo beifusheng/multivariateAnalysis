@@ -8,3 +8,14 @@ data/
 .vscode/launch.json
 public/electron/
 pnpm-lock.yaml
+
+# ---- R 运行时：构建产物，不进仓库 --------------------------------------------
+# 用 scripts/setup-r-runtime.ps1 按 r-runtime.lock.json 装配（详见 r-scripts/PORTABLE_R_SETUP.md）
+# 历史里已有 309MB LFS 对象，但 LDM 从未提交成功，所以 clone 出来本来就不能跑
+r-portable/
+
+# 回归/校验脚本的临时工作目录与产物
+r-scripts/tools/.tmp_*
+r-scripts/**/*-output2.json
+r-scripts/**/*-output3.json
+r-scripts/**/*-output4.json
