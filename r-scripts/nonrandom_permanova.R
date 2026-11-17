@@ -17,9 +17,10 @@
 #   coordinates    : 可选，[[x,y],...]，scheme="spatial" 时用于定义邻域
 #   spatialBand    : 可选，空间邻域半径（与 coordinates 同单位，默认按 k-NN 中位数）
 #   scheme         : "free" | "stratified" | "spatial"（默认：有 strata 就 stratified）
-#   distance       : "bray"|"jaccard"|"euclidean"|"ws"（communityData 时用，默认 bray）
+#   distance       : communityData 时用；"ws" 由本脚本实现，其余见 VEGAN_METHODS
 #   presenceAbsence: true 时先把物种表二值化（存在/缺失）
-#   controlCoverage: true 时把测序深度（样本总和）作为协变量纳入模型
+#   controlCoverage: true 时先把每个样本按总丰度归一化（相对丰度）再算距离，
+#                  以此抵消测序深度差异；不重采样、不丢数据、可复现
 #   permutations   : 置换次数，默认 999（此处不要求 100 的倍数，与 LDM 不同）
 #   seed           : 随机种子，默认 12345
 #
@@ -50,6 +51,27 @@ error_file <- args[3]
 MIN_BLOCK_SIZE <- 2L
 
 # ---------------------------------------------------------------------------
+
+# WS（weighted Simpson / proportional overlap）：把每个样本标准化到相对丰度后，
+# 计算 1 - Σmin/Σmax。CANOVO 等流程会用到它，但本机 vegan 2.7.6 的 vegdist 没有
+# ws/wu 方法，因此按定义实现，避免把不支持的方法名透传下去报 "invalid distance method"。
+# 性质（tools/verify_nonrandom_templates.mjs 会验证）：相同样本 -> 0；无共有物种 -> 1；对称。
+vegdist_ws <- function(x) {
+  rs <- rowSums(x, na.rm = TRUE)
+  if (any(rs <= 0)) stop("存在总丰度为 0 的样本，无法计算 WS 距离（请先剔除空样本）")
+  p <- x / rs
+  n <- nrow(p)
+  d <- matrix(0, n, n)
+  for (i in seq_len(n - 1)) {
+    for (j in (i + 1):n) {
+      mn <- sum(pmin(p[i, ], p[j, ]))
+      mx <- sum(pmax(p[i, ], p[j, ]))
+      d[i, j] <- d[j, i] <- if (mx <= 0) 0 else 1 - mn / mx
+    }
+  }
+  as.dist(d)
+}
+
 # 核心：直接用距离阵算 PERMANOVA 的 F（Anderson 2001 的距离基分解）
 #   SST = Σ_{i<j} d²_ij / n
 #   SSW = Σ_g ( Σ_{i<j∈g} d²_ij / n_g )
@@ -57,6 +79,21 @@ MIN_BLOCK_SIZE <- 2L
 #   F   = (SSA / (a-1)) / (SSW / (n-a))
 # 自己实现而不是反复调用 vegan::adonis2，是为了能在受限方案下跑上千次置换。
 # ---------------------------------------------------------------------------
+# 距离阵 -> Gower 双中心化 -> 特征分解，取正特征值轴当响应矩阵。
+# 这就是 vegan::capscale 的内部做法：在这组坐标上做普通线性投影，得到的 SS/F
+# 与距离基 PERMANOVA 完全一致，且天然支持连续协变量（旧实现不支持，见 main 里注释）。
+make_pcoa_basis <- function(d2, tol_ratio = 1e-9) {
+  n <- nrow(d2)
+  J <- diag(n) - 1 / n
+  G <- -0.5 * J %*% d2 %*% J
+  G <- (G + t(G)) / 2                                    # 消除浮点不对称
+  ev <- eigen(G, symmetric = TRUE)
+  keep <- ev$values > max(1e-12, max(ev$values) * tol_ratio)
+  lam <- ev$values[keep]
+  list(Y = ev$vectors[, keep, drop = FALSE] %*% diag(sqrt(lam), nrow = length(lam)),
+       lambda = lam, n_neg = as.integer(sum(ev$values < -1e-12)))
+}
+
 permanova_f_from_dist <- function(d2, assign) {
   n <- length(assign)
   sst <- sum(d2) / 2 / n                      # sum(d2) 含上下三角两次
@@ -261,6 +298,9 @@ main <- function() {
   dist_matrix <- parse_matrix(params$distanceMatrix, "distanceMatrix")
   comm <- parse_matrix(params$communityData, "communityData")
 
+  # 必须在算距离之前决定：它改变的是喂给 vegdist 的矩阵本身
+  control_coverage <- isTRUE(params$controlCoverage)
+
   sample_data <- normalize_sample_data(params$sampleData)
   if (is.null(sample_data)) stop("必须提供 sampleData（含分组/分层变量）")
 
@@ -270,12 +310,29 @@ main <- function() {
     dmat <- as.dist(dist_matrix)
     dist_label <- "用户提供的距离矩阵"
   } else if (!is.null(comm)) {
+    # 测序深度校正：先按行归一化到相同总和（相对丰度），再算距离。
+    # 不选 rarefaction：随机抽平会丢数据、且同一份数据两次抽结果不同（不可复现）；
+    # 不选「把 log(深度) 当协变量进模型」：本模块的 F 只支持因子项（见下方注释）。
+    if (control_coverage) {
+      rs <- rowSums(comm, na.rm = TRUE)
+      if (any(rs <= 0)) stop("controlCoverage 要求每个样本总丰度 > 0（存在空样本，无法归一化）")
+      comm <- comm / rs
+    }
     if (isTRUE(params$presenceAbsence)) comm <- ifelse(comm > 0, 1, 0)
     method <- tolower(params$distance %||% "bray")
-    if (method %in% c("jaccard", "bray", "euclidean", "ws", "chisq", "gower", "aitchison")) {
-      dmat <- vegan::vegdist(comm, method = method, binary = (method == "jaccard" && isTRUE(params$presenceAbsence)))
+    # VEGAN_METHODS 是在本机 r-portable（vegan 2.7.6）上逐个 tryCatch 验过的，
+    # 新增方法请先确认能算出来，别让脚本在用户点「运行分析」时才报错。
+    VEGAN_METHODS <- c("bray", "jaccard", "euclidean", "gower", "chisq", "aitchison",
+                       "morisita", "horn", "cao", "chao", "raup", "manhattan",
+                       "kulczynski", "hellinger")
+    if (method == "ws") {
+      dmat <- vegdist_ws(comm)
+    } else if (method %in% VEGAN_METHODS) {
+      dmat <- vegan::vegdist(comm, method = method,
+                             binary = (method == "jaccard" && isTRUE(params$presenceAbsence)))
     } else {
-      stop(sprintf("不支持的距离方法：%s", method))
+      stop(sprintf("不支持的距离方法：%s；可选 ws（本脚本实现）或 %s",
+                   method, paste(VEGAN_METHODS, collapse = "/")))
     }
     dist_label <- sprintf("由物种表计算的 %s 距离", toupper(method))
   } else {
@@ -291,20 +348,6 @@ main <- function() {
 
   formula_str <- params$formula %||% "group"
   terms <- build_design_terms(formula_str, sample_data)
-
-  # 测序深度校正（rarefaction 的免重采样替代）：把 log(样本总和) 作为协变量
-  control_coverage <- isTRUE(params$controlCoverage)
-  if (control_coverage) {
-    if (is.null(comm)) stop("controlCoverage=true 需要提供 communityData 才能算测序深度")
-    cov_depth <- log(rowSums(comm, na.rm = TRUE) + 1)
-    sample_data$.coverage <- (cov_depth - mean(cov_depth)) / (sd(cov_depth) + 1e-12)
-    terms <- c(terms, ".coverage")
-  }
-
-  # 分类变量转因子（连续变量保留原样）
-  for (v in terms) {
-    if (!is.numeric(sample_data[[v]])) sample_data[[v]] <- factor(sample_data[[v]])
-  }
 
   # ---------------- 置换方案 ----------------
   scheme <- tolower(params$scheme %||% if (!is.null(params$strata)) "stratified" else "free")
@@ -326,40 +369,72 @@ main <- function() {
     stop("stratified 方案需要 strata 变量（或改用 scheme=\"free\" / \"spatial\"）")
   }
 
-  # ---------------- 观测值：多因素逐次 ANOVA（type-II 风格）----------------
-  # 设计矩阵（去掉截距），按术语分块
+  # ---------------- 观测值：按术语分组的距离基一元 ANOVA ----------------
+  # 统计量与 vegan::adonis2 同口径（tools/verify_nonrandom_engine.R 逐项对齐）。
+  # 只支持因子项：F 的定义是「样本按该术语的水平分成若干组，比较组间/组内离散度」，
+  # 连续变量没有水平可分。早先版本试过把连续协变量塞进模型（pH、以及
+  # controlCoverage 注入的 .coverage），实测会让 group 的 F 从 19.3 塌到 1.5 ——
+  # 因为按「设计列唯一组合」分组时组合数≈n，残差自由度被吃光。那是不出错的错，
+  # 所以这里直接拒绝，而不是给一个能跑但不能看的数。
   model_df <- sample_data[, terms, drop = FALSE]
-  design <- model.matrix(~ . - 1, data = model_df)
-  col_groups <- attr(design, "assign")
-
+  term_groups <- list()
   obs_table <- list()
   for (ti in seq_along(terms)) {
-    cols_i <- which(col_groups == ti)
-    assign_all <- design[, cols_i, drop = FALSE]
-    # 组间离散度：用最近邻划分（对连续协变量按其数值分位分箱）
-    if (length(cols_i) == 1 && is.numeric(model_df[[terms[ti]]]) && length(unique(assign_all)) > 6) {
-      grp <- cut(assign_all, breaks = 4, labels = FALSE)
-    } else {
-      grp <- as.integer(factor(apply(assign_all, 1, paste, collapse = "_")))
+    v <- terms[ti]
+    x <- model_df[[v]]
+    if (is.numeric(x)) {
+      stop(sprintf("术语 \"%s\" 是连续变量：%s", v, paste0(
+        "本模块按距离分组检验组间离散度差异，只支持因子（分类）变量。",
+        "请把连续变量分箱成区间后作为因子/区组，或用 vegan::adonis2 做协变量调整。")))
     }
-    res <- permanova_f_from_dist(d2, grp)
+    grp <- factor(as.character(x))
+    if (nlevels(grp) < 2) stop(sprintf("术语 \"%s\" 只有 1 个水平，无法检验", v))
+    if (nlevels(grp) >= n - 1) {
+      stop(sprintf("术语 \"%s\" 有 %d 个水平而样本只有 %d 个：水平数接近样本量会让残差自由度归零，请合并水平", v, nlevels(grp), n))
+    }
+    term_groups[[ti]] <- as.integer(grp)
+    res <- permanova_f_from_dist(d2, term_groups[[ti]])
     obs_table[[length(obs_table) + 1]] <- list(
-      term = terms[ti], df = length(unique(grp)) - 1,
+      term = v, df = nlevels(grp) - 1L,
       F_model = res[1], R2 = res[2], R2_within = res[3],
-      n_levels = length(unique(grp))
+      n_levels = nlevels(grp)
     )
   }
 
-  # 全局模型（所有术语合并）
-  full_grp <- as.integer(factor(apply(design, 1, paste, collapse = "_")))
-  obs_global <- permanova_f_from_dist(d2, full_grp)
+  # 主术语（公式首项）是受限置换的对象；其余术语给出各自的边际检验，供对照阅读
+  primary <- 1
+  tested_term <- terms[primary]
+  primary_group <- term_groups[[primary]]
+  obs_global <- permanova_f_from_dist(d2, primary_group)
+
+  balance_note <- NULL
+  # 交叉单元格联合检验：把所有术语的组合当成一个多水平因子（等价 adonis2(d ~ cell)，
+  # cell=interaction(...)).注意它**含交互作用**，与非平衡设计的可加模型 adonis2(d ~ a + b)
+  # 不是同一个量，所以字段名叫 F_cells 而不是 F_model。
+  joint_grp <- if (length(terms) > 1) {
+    as.integer(factor(interaction(model_df, drop = TRUE, sep = "|")))
+  } else primary_group
+  obs_joint <- permanova_f_from_dist(d2, joint_grp)
+  if (is.na(obs_joint[1]) && length(terms) > 1) {
+    balance_note <- paste0(balance_note %||% "",
+      "术语交叉后单元格数接近样本量，联合检验自由度不足，只报告逐术语边际检验。")
+  }
+  if (length(terms) > 1) {
+    xb <- table(factor(primary_group), factor(as.character(model_df[[terms[2]]])))
+    bal <- apply(xb, 1, function(r) r / sum(r))
+    balance_note <- sprintf(
+      "公式含 %d 个术语，表中为各自的边际检验（R2 不可相加）：首项各水平在第二术语上的占比范围 %.2f-%.2f%s",
+      length(terms), min(bal), max(bal),
+      if (any(xb == 0)) "，且存在空格子（设计不平衡，建议改用分层置换）" else "")
+  }
 
   # ---------------- 受限置换零分布 ----------------
+  # 置换的是「主术语标签与响应矩阵行的配对」，区组/空间限制体现在 idx 怎么生成
   run_perm <- function(block_vec) {
-    fs <- numeric(permutations)
+    fs <- rep(NA_real_, permutations)
     for (i in seq_len(permutations)) {
-      pgrp <- if (is.null(block_vec)) sample(full_grp) else permute_within_blocks(full_grp, block_vec)
-      fs[i] <- permanova_f_from_dist(d2, pgrp)[1]
+      idx <- if (is.null(block_vec)) sample.int(n) else permute_within_blocks(seq_len(n), block_vec)
+      fs[i] <- permanova_f_from_dist(d2, primary_group[idx])[1]
     }
     fs
   }
@@ -387,12 +462,15 @@ main <- function() {
 
   # ---------------- 图表数据（全部来自本次真实计算）----------------
   pcoa <- tryCatch({
-    pc <- vegan::wcmdscale(dmat, k = 2, eig = TRUE)
-    sc <- pc$points[, 1:2, drop = FALSE]
-    ev <- pc$eig[1:2]
-    tot <- sum(pmax(pc$eig, 0))
+    # 仅用于绘图：取 Gower 双中心化后的正特征值轴（非欧氏距离会有负特征值，
+    # 这里按惯例只画正轴，与 vegan::wcmdscale 的展示口径一致）
+    basis <- make_pcoa_basis(d2)
+    tot <- sum(basis$lambda)
+    k <- min(2, length(basis$lambda))
+    sc <- basis$Y[, seq_len(k), drop = FALSE]
+    ev <- basis$lambda[seq_len(k)]
     list(
-      x = as.numeric(sc[, 1]), y = as.numeric(sc[, 2]),
+      x = as.numeric(sc[, 1]), y = if (k >= 2) as.numeric(sc[, 2]) else as.numeric(rep(0, n)),
       var_explained = as.numeric(ev / tot),
       labels = rownames(sample_data) %||% paste0("S", seq_len(n)),
       group = if (length(terms)) as.character(model_df[[1]]) else rep("NA", n),
@@ -437,6 +515,9 @@ main <- function() {
     analysis = "nonrandom_permanova",
     observed = list(
       F_model = obs_global[1],
+      tested_term = tested_term,
+      F_cells = obs_joint[1],
+      R2_cells = obs_joint[2],
       R2 = obs_global[2],
       R2_within = obs_global[3],
       p_free = p_free,
@@ -445,6 +526,8 @@ main <- function() {
     anova_table = obs_table,
     permutation = list(
       scheme = plan$scheme,
+      tested_term = tested_term,
+      note_scheme = paste0("置换对象：公式首项 ", tested_term, " 的标签（其余术语与样本配对保持不变）"),
       requested = permutations,
       performed = as.integer(sum(!is.na(f_null_constrained))),
       strata_variable = strata_var %||% NA_character_,
@@ -459,7 +542,9 @@ main <- function() {
       terms = terms,
       distance = dist_label,
       presence_absence = isTRUE(params$presenceAbsence),
-      coverage_control = control_coverage,
+      coverage_control = if (control_coverage) "relative_abundance" else FALSE,
+      cell_levels = length(unique(joint_grp)),
+      balance_note = balance_note,
       n_samples = n
     ),
     chart_data = chart_data,
