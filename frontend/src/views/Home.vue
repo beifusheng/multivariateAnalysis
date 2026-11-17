@@ -108,7 +108,7 @@
         <el-card 
           class="method-card" 
           shadow="hover"
-          @click="$router.push('/r-analysis/permanova-med')"
+          @click="navigateTo('/r-analysis/permanova-med')"
         >
           <div class="method-card-content">
             <div class="method-icon">🧬</div>
@@ -129,9 +129,10 @@
           <div class="method-card-content">
             <div class="method-icon">📈</div>
             <h3 class="method-name">GMR⁴</h3>
-            <p class="method-desc">广义多水平回归模型</p>
+            <p class="method-desc">广义混合正则化降秩回归（Reduced Rank Regression）</p>
             <div class="method-tags">
               <el-tag size="small" type="info" effect="dark">🚧 开发中</el-tag>
+              <el-tag size="small" type="warning" effect="plain">算法未验收</el-tag>
             </div>
           </div>
           <div class="ribbon">开发中</div>
@@ -146,29 +147,31 @@
           <div class="method-card-content">
             <div class="method-icon">🎯</div>
             <h3 class="method-name">Bayesian ERA</h3>
-            <p class="method-desc">贝叶斯生态群落分析（含中介）</p>
+            <p class="method-desc">贝叶斯扩展冗余分析（含中介效应）</p>
             <div class="method-tags">
               <el-tag size="small" type="info" effect="dark">🚧 开发中</el-tag>
+              <el-tag size="small" type="warning" effect="plain">算法未验收</el-tag>
             </div>
           </div>
           <div class="ribbon">开发中</div>
         </el-card>
 
         <!-- Non-random PERMANOVA -->
-        <el-card 
-          class="method-card coming-soon-card" 
+        <el-card
+          class="method-card"
           shadow="hover"
-          @click="showComingSoon('Non-random PERMANOVA')"
+          @click="navigateTo('/r-analysis/nonrandom-permanova')"
         >
           <div class="method-card-content">
             <div class="method-icon">🎲</div>
             <h3 class="method-name">Non-random PERMANOVA</h3>
-            <p class="method-desc">非随机 PERMANOVA 扩展</p>
+            <p class="method-desc">分层 / 空间 / 处理梯度受限置换检验</p>
             <div class="method-tags">
-              <el-tag size="small" type="info" effect="dark">🚧 开发中</el-tag>
+              <el-tag size="small" type="success" effect="dark">✅ 可用</el-tag>
+              <el-tag size="small" effect="plain">对齐 vegan::adonis2</el-tag>
+              <el-tag size="small" effect="plain">26 套设计模板</el-tag>
             </div>
           </div>
-          <div class="ribbon">开发中</div>
         </el-card>
       </div>
     </section>
@@ -267,10 +270,15 @@ export default {
     },
     
     showComingSoon(methodName) {
+      // 不只说“敬请期待”：把缺什么说清楚，否则用户会以为点了就能等到
+      const detail = {
+        'GMR⁴': 'r-scripts/gmr4.R 目前是降秩回归的简化占位实现（源码里就标了“需根据论文完善”），还没和参考实现比对过 F/秩估计，也没有界面和路由。',
+        'Bayesian ERA': 'r-scripts/bayesian_era_mediation.R 同样是占位实现，未跑过后验采样收敛校验，也没有界面和路由。'
+      }[methodName] || '';
       this.$message({
-        message: `${methodName} 功能开发中，敬请期待！`,
+        message: `${methodName} 功能开发中，敬请期待！${detail ? '\n' + detail : ''}`,
         type: 'info',
-        duration: 3000,
+        duration: 8000,
         showClose: true
       });
     },
