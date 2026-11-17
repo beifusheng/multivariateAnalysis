@@ -19,7 +19,10 @@
  * 样式全部走 components/r-analysis/r-analysis.css（从 PERMANOVA_Med.vue 抽取），
  * 组件本身不写 style，避免「同一个按钮三处不同圆角」。
  */
+import { ArrowLeft } from '@element-plus/icons-vue';
+
 export default {
+  components: { ArrowLeft },
   name: 'AnalysisHeader',
   props: {
     icon: { type: String, default: '📊' },
@@ -28,3 +31,4 @@ export default {
   }
 }
 </script>
+

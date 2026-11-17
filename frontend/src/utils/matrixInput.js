@@ -115,3 +115,66 @@ export function sampleMismatchMessage(entries, refN = null) {
   if (!bad.length) return '';
   return '样本数不一致：' + seen.map((x) => `${x.label}=${x.n}`).join('，') + '（应以中介 M 的样本数为准）';
 }
+
+/**
+ * sampleData 输入解析：与非随机 PERMANOVA 的 R 侧约定一致，接受两种写法
+ *   1) 行对象数组 [{"sample":"S1","group":"A","strata":"B1"}, ...]（jsonlite 存 data.frame 的原样）
+ *   2) 列字典       {"group":["A","B"],"strata":["B1","B1"]}
+ * 统一转成行对象数组返回，UI 预览与发送都用同一种形态，避免两处理解不同。
+ * @param {string} str JSON 文本
+ * @param {number|null} refN 参照样本数（一般是物种矩阵的行数）
+ * @returns {{ok:boolean,n?:number,rows?:object[],columns?:string[],error?:string}}
+ */
+export function inspectSampleTable(str, refN = null) {
+  let data;
+  try {
+    data = JSON.parse(str);
+  } catch (e) {
+    return { ok: false, error: 'JSON 格式错误：' + e.message };
+  }
+  if (data === null || typeof data !== 'object') {
+    return { ok: false, error: 'sampleData 需要是「行对象数组」或「列字典」' };
+  }
+
+  let rows;
+  let columns;
+  if (Array.isArray(data)) {
+    if (!data.length) return { ok: false, error: 'sampleData 是空数组' };
+    if (!data.every((r) => r && typeof r === 'object' && !Array.isArray(r))) {
+      return { ok: false, error: 'sampleData 的每一项都必须是对象（如 {"group":"A","strata":"B1"}）' };
+    }
+    rows = data;
+    columns = [...new Set(data.flatMap((r) => Object.keys(r)))];
+    // 列集合不一致时明确报错：R 侧 jsonlite 会把缺项补 NA，静默补空更容易读错分组
+    const widths = new Set(data.map((r) => Object.keys(r).length));
+    if (widths.size > 1) {
+      return { ok: false, error: 'sampleData 各行的字段数不一致（发现 ' + [...widths].join('/') + ' 个字段），请补齐每行的列' };
+    }
+  } else {
+    const entries = Object.entries(data);
+    if (!entries.length) return { ok: false, error: 'sampleData 是空对象' };
+    if (!entries.every(([, v]) => Array.isArray(v))) {
+      return { ok: false, error: '列字典写法要求每个变量都是数组，例如 {"group":["A","B"]}' };
+    }
+    const lens = [...new Set(entries.map(([, v]) => v.length))];
+    if (lens.length > 1) {
+      return { ok: false, error: `列字典各变量长度不一致（${entries.map(([k, v]) => `${k}=${v.length}`).join(', ')}）` };
+    }
+    const nCol = lens[0];
+    rows = Array.from({ length: nCol }, (_, i) => {
+      const r = {};
+      for (const [k, v] of entries) r[k] = v[i];
+      return r;
+    });
+    columns = entries.map(([k]) => k);
+  }
+
+  if (refN !== null && rows.length !== refN) {
+    return {
+      ok: false,
+      n: rows.length,
+      error: `样本数不一致：物种矩阵 ${refN} 行，sampleData ${rows.length} 行`
+    };
+  }
+  return { ok: true, n: rows.length, rows, columns };
+}

@@ -126,6 +126,36 @@ console.log('\n=== 5. 25 个模板真实数据三格式往返（逐元素比对�
     console.log('  （已文档化的二义性：方阵列字典按行字典解释 -> ' + squareCases.join(', ') + '）');
 }
 
+// ============================================================ inspectSampleTable
+{
+  const st = mi.inspectSampleTable;
+  const rowsIn = '[{"sample":"S1","group":"A","strata":"B1"},{"sample":"S2","group":"B","strata":"B1"}]';
+  const colIn = '{"group":["A","B"],"strata":["B1","B1"]}';
+
+  const a = st(rowsIn);
+  check('行对象数组: 解析成功', a.ok === true, a.error);
+  check('行对象数组: n=2', a.n === 2);
+  check('行对象数组: 列名齐全', a.columns.join(',') === 'sample,group,strata', a.columns.join(','));
+
+  const b = st(colIn);
+  check('列字典: 解析成功', b.ok === true, b.error);
+  check('列字典: 转成行对象', JSON.stringify(b.rows) === JSON.stringify([{ group: 'A', strata: 'B1' }, { group: 'B', strata: 'B1' }]));
+  check('列字典: n 正确', b.n === 2);
+
+  check('两种写法等价（行数一致）', a.n === b.n);
+  check('参照样本数不符时报错', st(rowsIn, 5).ok === false && /样本数不一致/.test(st(rowsIn, 5).error));
+  check('参照一致时通过', st(rowsIn, 2).ok === true);
+  check('非法 JSON 报错', st('{oops').ok === false);
+  check('空数组报错', st('[]').ok === false);
+  check('数组里混入标量报错', st('[{"a":1},2]').ok === false);
+  check('行字段数不齐报错（不静默补 NA）', st('[{"a":1},{"a":2,"b":3}]').ok === false && /字段数不一致/.test(st('[{"a":1},{"a":2,"b":3}]').error));
+  check('列字典长度不齐报错', st('{"a":[1,2],"b":[1]}').ok === false && /长度不一致/.test(st('{"a":[1,2],"b":[1]}').error));
+  check('列字典里混非数组报错', st('{"a":[1,2],"b":3}').ok === false);
+  check('顶层非对象报错', st('"abc"').ok === false && st('null').ok === false);
+}
+
+
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 fs.rmSync(tmp, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);
+

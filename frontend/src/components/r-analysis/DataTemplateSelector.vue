@@ -46,9 +46,12 @@
  * 说明为什么这里直接写 button 而不是复用 TemplateButton.vue：
  * TemplateButton 取的是 template.name / template.tooltip，而数据模板的字段是
  * label / tip（与 medTemplates 的规格一致）。统一字段名要改两个既有视图，
- * 属于另一件事；等三个新视图落地后再一次性收敛（见 PERMANOVA_REFACTOR_GUIDE）。
+ * 属于另一件事，等三个新视图落地后单独一次收敛（见本目录 README.md）。
  */
+import { CaretRight, CaretBottom } from '@element-plus/icons-vue';
+
 export default {
+  components: { CaretRight, CaretBottom },
   name: 'DataTemplateSelector',
   props: {
     icon: { type: String, default: '🧬' },
@@ -73,3 +76,4 @@ export default {
   }
 }
 </script>
+

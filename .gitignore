@@ -22,3 +22,5 @@ r-scripts/**/*-output4.json
 
 # 一次性手术脚本/探针，不入库
 r-scripts/tools/.scratch/
+# test_nr_render.mjs 生成的临时依赖入口
+frontend/.nr-ssr-deps.js

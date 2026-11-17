@@ -21,6 +21,12 @@ const constantRouterMap = [
     name: 'PERMANOVA_Med',
     component: () => import('@/views/r-analysis/PERMANOVA_Med.vue')
   },
+  // Non-random PERMANOVA（分层 / 空间受限置换）
+  {
+    path: '/r-analysis/nonrandom-permanova',
+    name: 'Nonrandom_PERMANOVA',
+    component: () => import('@/views/r-analysis/Nonrandom_PERMANOVA.vue')
+  },
   // {
   //   path: '/r-analysis/gmr4',
   //   name: 'GMR4',
@@ -30,11 +36,6 @@ const constantRouterMap = [
   //   path: '/r-analysis/bayesian-era',
   //   name: 'Bayesian_ERA',
   //   component: () => import('@/views/r-analysis/Bayesian_ERA.vue')
-  // },
-  // {
-  //   path: '/r-analysis/nonrandom-permanova',
-  //   name: 'Nonrandom_PERMANOVA',
-  //   component: () => import('@/views/r-analysis/Nonrandom_PERMANOVA.vue')
   // },
 ]
 
