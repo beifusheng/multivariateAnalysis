@@ -24,7 +24,8 @@ export const SHEET_ALIASES = {
   sample: ['样本信息', '样本数据', '分组信息', '样本表', 'metadata', 'sample', 'samples', 'grouping'],
   coordinate: ['坐标', '空间坐标', '经纬度', 'coordinate', 'coordinates', 'xy', 'space'],
   distance: ['距离矩阵', '相异度矩阵', 'distance', 'dissimilarity', 'bray'],
-  formula: ['模型公式', '公式', '模型', 'formula', 'model']
+  formula: ['模型公式', '公式', '模型', 'formula', 'model'],
+  matrix: ['outcome', 'mediator', 'predictor', 'covariates', '矩阵']
 };
 
 const SAMPLE_ID_KEYS = ['样本', '样本id', '样品', '样本编号', 'id', 'sample', 'sampleid', 'samples', 'row', '站点'];
@@ -43,8 +44,8 @@ function detectIdColumn(header) {
 }
 
 /** 按别名表在工作簿里找一张表；返回 { name, aoa } 或 null */
-export function findSheet(sheets, kind) {
-  const aliases = (SHEET_ALIASES[kind] || []).map(norm);
+export function findSheet(sheets, kind, nameList) {
+  const aliases = (nameList || SHEET_ALIASES[kind] || []).map(norm);
   const names = Object.keys(sheets);
   for (const n of names) {
     const k = norm(n);
@@ -186,12 +187,47 @@ export function parseFormulaSheet(aoa) {
   return { ok: true, formula };
 }
 
+/**
+ * 「样本 × 变量」矩阵表（中介分析的四张表都是这个形状）。
+ * 与物种矩阵的区别：这里**允许字符串**（X / Z 可能是分组文本），
+ * 数值化交给引擎去判定，不在这里替用户猜；但空行、缺表头、ID 重复会直接拒。
+ */
+export function parseMatrixSheet(aoa) {
+  if (!Array.isArray(aoa) || aoa.length < 2) return { ok: false, error: '这张表至少要有表头和一行数据' };
+  const header = aoa[0].map((h) => String(h ?? '').trim());
+  const idAt = detectIdColumn(aoa[0]) >= 0 ? 0 : (header[0] ? 0 : -1);
+  if (idAt < 0) return { ok: false, error: '找不到样本 ID 列（第一列应是样本名）' };
+  const columns = header.slice(1).filter((h) => h !== '');
+  if (!columns.length) return { ok: false, error: '除样本 ID 外没任何变量列' };
+  const ids = [];
+  const rows = [];
+  for (let r = 1; r < aoa.length; r++) {
+    const raw = aoa[r] || [];
+    if (raw.every(isBlank)) continue;
+    const id = String(raw[idAt] ?? '').trim();
+    if (!id) return { ok: false, error: `第 ${r + 1} 行没写样本 ID` };
+    if (ids.includes(id)) return { ok: false, error: `样本 ID 重复：${id}` };
+    const vals = columns.map((c) => {
+      const at = header.indexOf(c);
+      const v = raw[at];
+      if (v === '' || v === null || v === undefined) return null;
+      const n = Number(v);
+      return Number.isFinite(n) && typeof v !== 'string' ? n : (typeof v === 'string' ? v.trim() : v);
+    });
+    ids.push(id);
+    rows.push(vals);
+  }
+  if (!ids.length) return { ok: false, error: '只有表头，没有数据行' };
+  return { ok: true, ids, columns, rows };
+}
+
 const PARSERS = {
   community: parseCommunitySheet,
   sample: parseSampleSheet,
   coordinate: parseCoordinateSheet,
   distance: parseDistanceSheet,
-  formula: parseFormulaSheet
+  formula: parseFormulaSheet,
+  matrix: parseMatrixSheet
 };
 
 /**
@@ -209,7 +245,7 @@ export function mapWorkbook(sheets, spec, opts = {}) {
   const fields = {};
   const found = {};
   for (const s of spec) {
-    const hit = findSheet(sheets, s.kind);
+    const hit = findSheet(sheets, s.kind, s.names);
     if (!hit) {
       if (s.required) {
         return { ok: false, error: `没找到「${s.label}」表（可叫 ${s.aliasHint || s.label}）`, warnings, fields };
@@ -242,6 +278,12 @@ export function mapWorkbook(sheets, spec, opts = {}) {
     } else if (s.kind === 'coordinate') {
       const map = new Map(f.ids.map((id, i) => [id, f.coords[i]]));
       fields[s.key + '_aligned'] = primary.ids.map((id) => map.get(id));
+    } else if (s.kind === 'matrix') {
+      // 中介分析的四张表只能按样本 ID 对齐：R 收到的是行数组，
+      // 行序就是配对关系，Y 和 M 错一行等于拿不同样本的中介去解释结局
+      const map = new Map(f.ids.map((id, i) => [id, f.rows[i]]));
+      fields[s.key + '_aligned'] = primary.ids.map((id) => map.get(id));
+      fields[s.key + '_columns'] = f.columns;
     }
   }
 
@@ -320,6 +362,21 @@ export function previewFromFields(primaryIds, primary, fields, opts = {}) {
       label: '坐标',
       cols: ['样本', 'x', 'y'],
       rows: primaryIds.map((id, r) => ({ 样本: id, x: fields.coordinate_aligned[r][0], y: fields.coordinate_aligned[r][1] }))
+    });
+  }
+  for (const [key, label] of opts.matrixKeys || []) {
+    const f = fields[key];
+    if (!f || !f.columns) continue;
+    const rows = fields[key + '_aligned'] || f.rows;
+    tabs.push({
+      name: key,
+      label: `${label || key}（${primaryIds.length} 样本 × ${f.columns.length} 变量）`,
+      cols: ['样本 ID', ...f.columns],
+      rows: primaryIds.map((id, i) => {
+        const o = { '样本 ID': id };
+        f.columns.forEach((c, j) => { o[c] = (rows[i] || [])[j] === undefined ? null : rows[i][j]; });
+        return o;
+      })
     });
   }
   if (fields.formula && fields.formula.formula) {
