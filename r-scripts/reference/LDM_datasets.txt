@@ -1,0 +1,20 @@
+========== LDM datasets ==========
+     Item             
+[1,] "sim.meta"       
+[2,] "sim.otu.tab"    
+[3,] "sim.otu.tab5"   
+[4,] "throat.meta"    
+[5,] "throat.otu.tab" 
+[6,] "throat.otu.tab5"
+[7,] "throat.tree"    
+     Title                                                                          
+[1,] "Metadata of the simulated microbiome samples"                                 
+[2,] "OTU count table of the simulated microbiome samples"                          
+[3,] "Filtered OTU count table of the simulated microbiome samples"                 
+[4,] "Metadata of the throat microbiome samples"                                    
+[5,] "OTU count table from 16S sequencing of the throat microbiome samples"         
+[6,] "Filtered OTU count table from 16S sequencing of the throat microbiome samples"
+[7,] "UPGMA tree of the OTUs from 16S sequencing of the throat microbiome samples"  
+
+========== data dir ==========
+[1] "Rdata.rdb" "Rdata.rds" "Rdata.rdx"

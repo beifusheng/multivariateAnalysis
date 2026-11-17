@@ -1,0 +1,839 @@
+function (formula, other.surv.resid = NULL, data = .GlobalEnv, 
+    tree = NULL, dist.method = c("bray"), dist.list = NULL, cluster.id = NULL, 
+    strata = NULL, how = NULL, perm.within.type = "free", perm.between.type = "none", 
+    perm.within.ncol = 0, perm.within.nrow = 0, n.perm.max = 5000, 
+    n.rej.stop = 100, seed = NULL, square.dist = TRUE, center.dist = TRUE, 
+    scale.otu.table = c(TRUE), binary = c(FALSE), n.rarefy = 0, 
+    test.mediation = FALSE, n.cores = 4, verbose = TRUE) 
+{
+    old <- options()
+    on.exit(options(old))
+    options(na.action = na.omit)
+    object = formula
+    cl = match.call()
+    mf = match.call(expand.dots = FALSE)
+    m = match(x = "cluster.id", table = names(mf))
+    mf.string = as.character(mf[c(1L, m)])
+    cluster.name = mf.string[2]
+    if (cluster.name == "NULL") {
+        cluster.id = NULL
+    }
+    else {
+        loc.dollar = utils::tail(gregexpr("\\$", cluster.name)[[1]], 
+            n = 1)
+        if (loc.dollar < 0) {
+            cluster.id = getElement(data, cluster.name)
+            if (is.null(cluster.id)) 
+                cluster.id = get(cluster.name)
+        }
+        else {
+            df.name = get(substr(cluster.name, start = 1, stop = loc.dollar - 
+                1))
+            var.name = substr(cluster.name, start = loc.dollar + 
+                1, stop = nchar(cluster.name))
+            cluster.id = getElement(df.name, var.name)
+        }
+    }
+    obj = toString(object)
+    obj = gsub("\\s", "", obj)
+    prefix = " ~ + 0 + "
+    loc.comma = gregexpr(",", obj)[[1]]
+    start.terms = loc.comma[2]
+    terms = substr(obj, start = start.terms + 1, stop = nchar(obj))
+    if (is.data.frame(data)) {
+        row.names = rownames(data)
+        n.obs = length(row.names)
+    }
+    else {
+        df = model.frame(as.formula(paste("~", terms)), na.action = na.pass)
+        row.names = rownames(df)
+        n.obs = length(row.names)
+    }
+    if (is.null(cluster.id)) {
+        use.rows = row.names
+    }
+    else {
+        use = !is.na(cluster.id)
+        use.rows = row.names[use]
+    }
+    model = list()
+    j = 1
+    loc.bar = regexpr("\\|", obj)[1]
+    loc.minus = regexpr("-", obj)[1]
+    loc.delim = max(loc.bar, loc.minus)
+    if (loc.delim > 0) {
+        end.confound = loc.comma[2]
+        c = substr(obj, start = loc.delim + 1, stop = end.confound - 
+            1)
+        conf = model.matrix(as.formula(paste(prefix, c)), data = data)
+        model[[j]] = model.matrix(as.formula(paste(prefix, c)), 
+            data = data)
+        use.rows = rownames(model[[1]])
+        j = j + 1
+    }
+    else {
+        conf = NULL
+    }
+    continue = TRUE
+    while (continue) {
+        if (substr(terms, 1, 1) == "(") {
+            stop = regexpr(")\\+", terms)[1]
+        }
+        else {
+            stop = regexpr("\\+", terms)[1] - 1
+        }
+        if (stop <= 0) 
+            stop = nchar(terms)
+        m = substr(terms, start = 1, stop = stop)
+        model[[j]] = model.matrix(as.formula(paste(prefix, m)), 
+            data = data)
+        use.rows = intersect(use.rows, rownames(model[[j]]))
+        if (stop + 2 <= nchar(terms)) {
+            terms = substr(terms, start = stop + 2, stop = nchar(terms))
+            j = j + 1
+        }
+        else {
+            continue = FALSE
+        }
+    }
+    n.model = j
+    if (is.null(conf)) 
+        loc.delim = loc.comma[2]
+    otu.name = substr(obj, start = loc.comma[1] + 1, stop = loc.delim - 
+        1)
+    loc.dollar = utils::tail(gregexpr("\\$", otu.name)[[1]], 
+        n = 1)
+    if (loc.dollar < 0) {
+        if (is.data.frame(data)) {
+            otu.table = getElement(data, otu.name)
+            if (is.null(otu.table)) 
+                otu.table = get(otu.name)
+            otu.table = as.matrix(otu.table)
+        }
+        else {
+            otu.table = as.matrix(get(otu.name))
+        }
+    }
+    else {
+        df.name = get(substr(otu.name, start = 1, stop = loc.dollar - 
+            1))
+        var.name = substr(otu.name, start = loc.dollar + 1, stop = nchar(otu.name))
+        otu.table = as.matrix(getElement(df.name, var.name))
+    }
+    if (nrow(otu.table) != n.obs) {
+        if (ncol(otu.table) == n.obs) {
+            otu.table = t(otu.table)
+        }
+        else {
+            stop("OTU table and covariates have different number of observations")
+        }
+    }
+    otu.or.dist <- as.matrix(otu.table)
+    otu.table <- NULL
+    dist <- NULL
+    if (isSymmetric(otu.or.dist)) {
+        dist <- otu.or.dist
+    }
+    else {
+        otu.table <- otu.or.dist
+    }
+    if (!isSymmetric(otu.or.dist)) {
+        neg.exist = any(otu.table < 0)
+        if (neg.exist) {
+            if (scale.otu.table == TRUE) {
+                stop("The OTU table has negative values, so it does not make sense to use 'scale.otu.table=TRUE'")
+            }
+        }
+    }
+    for (j in 1:n.model) {
+        keep = rownames(model[[j]]) %in% use.rows
+        model[[j]] = model[[j]][keep, , drop = FALSE]
+    }
+    if (!is.null(conf)) {
+        keep = rownames(conf) %in% use.rows
+        conf = conf[keep, , drop = FALSE]
+    }
+    keep = row.names %in% use.rows
+    if (!is.null(cluster.id)) 
+        cluster.id = cluster.id[keep]
+    if (!is.null(dist)) {
+        dist = dist[keep, keep]
+        if (dim(model[[1]])[1] != dim(dist)[1]) 
+            stop("numbers of observations mismatch between covariates and the distance matrix")
+    }
+    if (!is.null(otu.table)) {
+        otu.table = otu.table[keep, , drop = FALSE]
+        if (dim(model[[1]])[1] != dim(otu.table)[1]) 
+            otu.table <- t(otu.table)
+        if (dim(model[[1]])[1] != dim(otu.table)[1]) 
+            stop("numbers of observations mismatch between covariates and the OTU table")
+    }
+    if (as.character(class(how)) == "how") {
+        CTRL = how
+    }
+    else {
+        if (is.null(cluster.id)) {
+            if (is.null(perm.within.type) & is.null(perm.between.type)) {
+                perm.within.type = "free"
+            }
+            if (is.null(strata)) {
+                CTRL = permute::how(within = permute::Within(type = perm.within.type, 
+                  nrow = perm.within.nrow, ncol = perm.within.ncol))
+            }
+            else {
+                strata = as.factor(strata)
+                CTRL = permute::how(blocks = strata, within = permute::Within(type = perm.within.type, 
+                  nrow = perm.within.nrow, ncol = perm.within.ncol))
+            }
+        }
+        else {
+            cluster.id = as.factor(cluster.id)
+            if (is.null(strata)) {
+                CTRL = permute::how(plots = permute::Plots(cluster.id, 
+                  type = perm.between.type), within = permute::Within(type = perm.within.type, 
+                  nrow = perm.within.nrow, ncol = perm.within.ncol))
+            }
+            else {
+                strata = as.factor(strata)
+                CTRL = permute::how(blocks = strata, plots = permute::Plots(cluster.id, 
+                  type = perm.between.type), within = permute::Within(type = perm.within.type, 
+                  nrow = perm.within.nrow, ncol = perm.within.ncol))
+            }
+        }
+    }
+    OR = other.surv.resid
+    adjust.for.confounders = !is.null(conf)
+    n.var = length(model)
+    n.var1 = n.var - as.numeric(adjust.for.confounders)
+    n.obs = dim(model[[1]])[1]
+    center.vars = TRUE
+    index = rep(0, n.var)
+    for (i in 1:n.var) {
+        m.i = model[[i]]
+        if (center.vars) 
+            m.i = scale(m.i, center = TRUE, scale = FALSE)
+        if (i == 1) {
+            m = m.i
+            index[i] = dim(m.i)[2]
+        }
+        else {
+            m = cbind(m, m.i)
+            index[i] = index[i - 1] + dim(m.i)[2]
+        }
+    }
+    if (!is.null(OR)) {
+        m.OR = m
+        if (center.vars) 
+            OR = scale(OR, center = TRUE, scale = FALSE)
+        m.OR[, ncol(m.OR)] = OR
+    }
+    if (!is.null(dist.list)) {
+        n.dist = length(dist.list)
+    }
+    else if (is.null(dist.list)) {
+        if (!is.null(dist)) {
+            dist.list = list(dist)
+            n.dist = 1
+        }
+        else {
+            dist.list = list(NULL)
+            n.dist = length(dist.method)
+            if (n.dist != length(binary)) {
+                binary = rep("FALSE", n.dist)
+                binary[which(dist.method == "jaccard")] = TRUE
+            }
+            scale.otu.table = rep(scale.otu.table, n.dist)
+            scale.otu.table[which(binary == "TRUE")] = FALSE
+        }
+    }
+    no_rarefy = (n.rarefy == 0)
+    if (no_rarefy) 
+        n.rarefy = 1
+    if (!is.null(dist.list[[1]])) 
+        n.rarefy = 1
+    resid.dist = array(NA, dim = c(n.dist, n.obs, n.obs, n.var1, 
+        n.rarefy))
+    resid.dist.OR = array(NA, dim = c(n.dist, n.obs, n.obs, n.var1, 
+        n.rarefy))
+    permanova.obs = array(NA, dim = c(n.dist, n.var1, n.rarefy))
+    permanova.perm = array(NA, dim = c(n.dist, n.var1, n.rarefy, 
+        n.perm.max))
+    permanova.obs.OR = NULL
+    permanova.perm.OR = NULL
+    if (!is.null(OR)) {
+        permanova.obs.OR = array(NA, dim = c(n.dist, n.var1, 
+            n.rarefy))
+        permanova.perm.OR = array(NA, dim = c(n.dist, n.var1, 
+            n.rarefy, n.perm.max))
+    }
+    med.permanova.obs = NULL
+    med.permanova.perm = NULL
+    med.permanova.obs.OR = NULL
+    med.permanova.perm.OR = NULL
+    if (test.mediation) {
+        med.permanova.obs = array(NA, dim = c(n.dist, n.rarefy))
+        med.permanova.perm = array(NA, dim = c(n.dist, n.rarefy, 
+            n.perm.max))
+        if (!is.null(OR)) {
+            med.permanova.obs.OR = array(NA, dim = c(n.dist, 
+                n.rarefy))
+            med.permanova.perm.OR = array(NA, dim = c(n.dist, 
+                n.rarefy, n.perm.max))
+        }
+    }
+    if (is.null(seed)) {
+        seed = sample(1:10^6, 1)
+    }
+    set.seed(seed)
+    for (r in 1:n.rarefy) {
+        if (!is.null(otu.table) & is.null(dist.list[[1]])) {
+            if (!no_rarefy) {
+                otu.rarefy = Rarefy(otu.table)$otu.tab.rff
+            }
+            else {
+                otu.rarefy = otu.table
+            }
+        }
+        for (d in 1:n.dist) {
+            if (is.null(dist.list[[1]])) {
+                if (binary[d]) {
+                  otu.rarefy.d = (otu.rarefy > 0) * 1
+                }
+                else {
+                  otu.rarefy.d = otu.rarefy
+                }
+                dist_r_d <- calculate.dist(dist.method = dist.method[d], 
+                  otu.table = otu.rarefy.d, tree = tree, scale.otu.table = scale.otu.table[d], 
+                  binary = binary[d])
+                d.gower <- gower(d = dist_r_d, square = square.dist, 
+                  center = center.dist)
+            }
+            else {
+                d.gower <- gower(d = dist.list[[d]], square = square.dist, 
+                  center = center.dist)
+            }
+            fit.res = fit.permanova(d.gower = d.gower, index = index, 
+                m = m, adjust.for.confounders = adjust.for.confounders)
+            resid.dist[d, , , , r] = fit.res$resid.dist
+            if (!is.null(OR)) {
+                fit.res.OR = fit.permanova(d.gower = d.gower, 
+                  index = index, m = m.OR, adjust.for.confounders = adjust.for.confounders)
+                resid.dist.OR[d, , , , r] = fit.res.OR$resid.dist
+            }
+        }
+        if (r == 1) {
+            x.design = fit.res$x
+            if (!is.null(OR)) 
+                x.design.OR = fit.res.OR$x
+            low = fit.res$low
+            up = fit.res$up
+            ndf = fit.res$ndf
+        }
+    }
+    R.squared = array(NA, dim = c(n.dist, n.var1, n.rarefy))
+    for (d in 1:n.dist) {
+        tmp = permanova.stat(x = x.design, low = low, up = up, 
+            resid.dist = resid.dist[d, , , , , drop = FALSE], 
+            ndf = ndf, adjust.for.confounders = adjust.for.confounders)
+        permanova.obs[d, , ] = tmp$permanova
+        R.squared[d, , ] = tmp$R.squared
+    }
+    if (test.mediation) {
+        med.permanova.obs <- array(permanova.obs[, 1, ] * permanova.obs[, 
+            2, ], dim = c(n.dist, n.rarefy))
+    }
+    R.squared.OR = NULL
+    if (!is.null(OR)) {
+        R.squared.OR = array(NA, dim = c(n.dist, n.var1, n.rarefy))
+        for (d in 1:n.dist) {
+            tmp.OR = permanova.stat(x = x.design.OR, low = low, 
+                up = up, resid.dist = resid.dist.OR[d, , , , 
+                  , drop = FALSE], ndf = ndf, adjust.for.confounders = adjust.for.confounders)
+            permanova.obs.OR[d, , ] = tmp.OR$permanova
+            R.squared.OR[d, , ] = tmp.OR$R.squared
+        }
+        if (test.mediation) {
+            med.permanova.obs.OR <- array(permanova.obs.OR[, 
+                1, ] * permanova.obs.OR[, 2, ], dim = c(n.dist, 
+                n.rarefy))
+        }
+    }
+    p.permanova <- NULL
+    p.permanova.OR <- NULL
+    p.permanova.com <- NULL
+    p.permanova.omni <- NULL
+    p.permanova.omni.OR <- NULL
+    p.permanova.omni.com <- NULL
+    med.p.permanova <- NULL
+    med.p.permanova.OR <- NULL
+    med.p.permanova.com <- NULL
+    med.p.permanova.omni <- NULL
+    med.p.permanova.omni.OR <- NULL
+    med.p.permanova.omni.com <- NULL
+    n.perm.completed = NULL
+    permanova.stopped = FALSE
+    if (n.perm.max > 0) {
+        tol.eq = 10^-8
+        n.perm.block = 100
+        parallel.perm <- function(i, x, perm, low, up, resid.dist, 
+            ndf, adjust.for.confounders) {
+            F.stat = array(NA, dim = dim(resid.dist)[c(1, 4, 
+                5)])
+            x.perm = x[perm[i, ], ]
+            for (d in 1:dim(F.stat)[1]) {
+                F.stat[d, , ] = permanova.stat(x = x.perm, low = low, 
+                  up = up, resid.dist = resid.dist[d, , , , , 
+                    drop = FALSE], ndf = ndf, adjust.for.confounders = adjust.for.confounders)$permanova
+            }
+            F.stat
+        }
+        med.permanova.fun <- function(x.perm, x.obs) {
+            pmax(x.perm[, 1, ] * x.obs[, 2, ], x.perm[, 2, ] * 
+                x.obs[, 1, ], x.perm[, 1, ] * x.perm[, 2, ])
+        }
+        n.perm.completed = 0
+        meet.all.rej.stop = TRUE
+        med.meet.all.rej.stop = TRUE
+        n.permanova = array(0, dim = c(n.dist, n.var1, n.rarefy))
+        n.permanova.OR = NULL
+        if (!is.null(OR)) 
+            n.permanova.OR = array(0, dim = c(n.dist, n.var1, 
+                n.rarefy))
+        if (test.mediation) {
+            med.n.permanova = array(0, dim = c(n.dist, n.rarefy))
+            if (!is.null(OR)) 
+                med.n.permanova.OR = array(0, dim = c(n.dist, 
+                  n.rarefy))
+        }
+        set.seed(seed)
+        nblock = ceiling(n.perm.max/n.perm.block)
+        for (i.block in 1:nblock) {
+            perm = permute::shuffleSet(n.obs, n.perm.block, CTRL)
+            if (n.cores > 1) {
+                i.perm = (n.perm.completed + 1):(n.perm.completed + 
+                  n.perm.block)
+                if (Sys.info()[["sysname"]] == "Windows") {
+                  parallel.stat = BiocParallel::bplapply(1:n.perm.block, 
+                    parallel.perm, BPPARAM = BiocParallel::MulticoreParam(workers = n.cores), 
+                    x.design, perm, low, up, resid.dist, ndf, 
+                    adjust.for.confounders)
+                }
+                else {
+                  parallel.stat = parallel::mclapply(1:n.perm.block, 
+                    parallel.perm, mc.cores = n.cores, x.design, 
+                    perm, low, up, resid.dist, ndf, adjust.for.confounders)
+                }
+                permanova.perm[, , , i.perm] <- array(unlist(parallel.stat), 
+                  dim = c(dim(permanova.obs), n.perm.block))
+                n.rejection <- sapply(parallel.stat, function(x) (x > 
+                  permanova.obs + tol.eq) + (x > permanova.obs - 
+                  tol.eq), simplify = "array")
+                if (n.dist > 1 | n.var1 > 1 | n.rarefy > 1) {
+                  n.permanova <- n.permanova + rowSums(n.rejection, 
+                    dims = 3)
+                }
+                else {
+                  n.permanova <- n.permanova + sum(n.rejection)
+                }
+                if (test.mediation) {
+                  med.permanova.perm[, , i.perm] <- sapply(parallel.stat, 
+                    med.permanova.fun, x.obs = permanova.obs, 
+                    simplify = "array")
+                  med.n.rejection = array((as.vector(med.permanova.perm[, 
+                    , i.perm]) > as.vector(med.permanova.obs) + 
+                    tol.eq) + (as.vector(med.permanova.perm[, 
+                    , i.perm]) > as.vector(med.permanova.obs) - 
+                    tol.eq), dim = c(n.dist, n.rarefy, n.perm.block))
+                  if (n.dist > 1 | n.rarefy > 1) {
+                    med.n.permanova <- med.n.permanova + rowSums(med.n.rejection, 
+                      dims = 2)
+                  }
+                  else {
+                    med.n.permanova <- med.n.permanova + sum(med.n.rejection)
+                  }
+                }
+                if (!is.null(OR)) {
+                  if (Sys.info()[["sysname"]] == "Windows") {
+                    parallel.stat.OR = BiocParallel::bplapply(1:n.perm.block, 
+                      parallel.perm, BPPARAM = BiocParallel::MulticoreParam(workers = n.cores), 
+                      x.design.OR, perm, low, up, resid.dist.OR, 
+                      ndf, adjust.for.confounders)
+                  }
+                  else {
+                    parallel.stat.OR = parallel::mclapply(1:n.perm.block, 
+                      parallel.perm, mc.cores = n.cores, x.design.OR, 
+                      perm, low, up, resid.dist.OR, ndf, adjust.for.confounders)
+                  }
+                  permanova.perm.OR[, , , i.perm] <- array(unlist(parallel.stat.OR), 
+                    dim = c(dim(permanova.obs.OR), n.perm.block))
+                  n.rejection.OR <- sapply(parallel.stat.OR, 
+                    function(x) (x > permanova.obs.OR + tol.eq) + 
+                      (x > permanova.obs.OR - tol.eq), simplify = "array")
+                  if (n.dist > 1 | n.var1 > 1 | n.rarefy > 1) {
+                    n.permanova.OR <- n.permanova.OR + rowSums(n.rejection.OR, 
+                      dims = 3)
+                  }
+                  else {
+                    n.permanova.OR <- n.permanova.OR + sum(n.rejection.OR)
+                  }
+                  if (test.mediation) {
+                    med.permanova.perm.OR[, , i.perm] <- sapply(parallel.stat.OR, 
+                      med.permanova.fun, x.obs = permanova.obs.OR, 
+                      simplify = "array")
+                    med.n.rejection.OR = array((as.vector(med.permanova.perm.OR[, 
+                      , i.perm]) > as.vector(med.permanova.obs.OR) + 
+                      tol.eq) + (as.vector(med.permanova.perm.OR[, 
+                      , i.perm]) > as.vector(med.permanova.obs.OR) - 
+                      tol.eq), dim = c(n.dist, n.rarefy, n.perm.block))
+                    if (n.dist > 1 | n.rarefy > 1) {
+                      med.n.permanova.OR <- med.n.permanova.OR + 
+                        rowSums(med.n.rejection.OR, dims = 2)
+                    }
+                    else {
+                      med.n.permanova.OR <- med.n.permanova.OR + 
+                        sum(med.n.rejection.OR)
+                    }
+                  }
+                }
+            }
+            else {
+                for (i in 1:n.perm.block) {
+                  i.perm = n.perm.completed + i
+                  x.perm = x.design[perm[i, ], ]
+                  for (d in 1:n.dist) {
+                    permanova.perm[d, , , i.perm] = permanova.stat(x = x.perm, 
+                      low = low, up = up, resid.dist = resid.dist[d, 
+                        , , , , drop = FALSE], ndf = ndf, adjust.for.confounders = adjust.for.confounders)$permanova
+                  }
+                  n.permanova <- n.permanova + (array(permanova.perm[, 
+                    , , i.perm], dim = dim(permanova.obs)) > 
+                    permanova.obs + tol.eq) + (array(permanova.perm[, 
+                    , , i.perm], dim = dim(permanova.obs)) > 
+                    permanova.obs - tol.eq)
+                  if (test.mediation) {
+                    med.permanova.null1 <- permanova.perm[, 1, 
+                      , i.perm] * permanova.obs[, 2, ]
+                    med.permanova.null2 <- permanova.perm[, 2, 
+                      , i.perm] * permanova.obs[, 1, ]
+                    med.permanova.null3 <- permanova.perm[, 1, 
+                      , i.perm] * permanova.perm[, 2, , i.perm]
+                    med.permanova.perm[, , i.perm] <- pmax(med.permanova.null1, 
+                      med.permanova.null2, med.permanova.null3)
+                    med.n.permanova = med.n.permanova + (array(med.permanova.perm[, 
+                      , i.perm], dim = dim(med.permanova.obs)) > 
+                      med.permanova.obs + tol.eq) + (array(med.permanova.perm[, 
+                      , i.perm], dim = dim(med.permanova.obs)) > 
+                      med.permanova.obs - tol.eq)
+                  }
+                  if (!is.null(OR)) {
+                    x.perm.OR = x.design.OR[perm[i, ], ]
+                    for (d in 1:n.dist) {
+                      permanova.perm.OR[d, , , i.perm] = permanova.stat(x = x.perm.OR, 
+                        low = low, up = up, resid.dist = resid.dist.OR[d, 
+                          , , , , drop = FALSE], ndf = ndf, adjust.for.confounders = adjust.for.confounders)$permanova
+                    }
+                    n.permanova.OR <- n.permanova.OR + (array(permanova.perm.OR[, 
+                      , , i.perm], dim = dim(permanova.obs.OR)) > 
+                      permanova.obs.OR + tol.eq) + (array(permanova.perm.OR[, 
+                      , , i.perm], dim = dim(permanova.obs.OR)) > 
+                      permanova.obs.OR - tol.eq)
+                    if (test.mediation) {
+                      med.permanova.null1.OR <- permanova.perm.OR[, 
+                        1, , i.perm] * permanova.obs.OR[, 2, 
+                        ]
+                      med.permanova.null2.OR <- permanova.perm.OR[, 
+                        2, , i.perm] * permanova.obs.OR[, 1, 
+                        ]
+                      med.permanova.null3.OR <- permanova.perm.OR[, 
+                        1, , i.perm] * permanova.perm.OR[, 2, 
+                        , i.perm]
+                      med.permanova.perm.OR[, , i.perm] <- pmax(med.permanova.null1.OR, 
+                        med.permanova.null2.OR, med.permanova.null3.OR)
+                      med.n.permanova.OR = med.n.permanova.OR + 
+                        (array(med.permanova.perm.OR[, , i.perm], 
+                          dim = dim(med.permanova.obs.OR)) > 
+                          med.permanova.obs.OR + tol.eq) + (array(med.permanova.perm.OR[, 
+                        , i.perm], dim = dim(med.permanova.obs.OR)) > 
+                        med.permanova.obs.OR - tol.eq)
+                    }
+                  }
+                }
+            }
+            n.perm.completed = n.perm.completed + n.perm.block
+            if (verbose) 
+                message(paste("permutations:", n.perm.completed))
+            meet.all.rej.stop = all(n.permanova >= n.rej.stop * 
+                2)
+            if (!is.null(OR)) 
+                meet.all.rej.stop = meet.all.rej.stop & all(n.permanova.OR >= 
+                  n.rej.stop * 2)
+            if (test.mediation) {
+                med.meet.all.rej.stop = all(med.n.permanova >= 
+                  n.rej.stop * 2)
+                if (!is.null(OR)) 
+                  med.meet.all.rej.stop = med.meet.all.rej.stop & 
+                    all(med.n.permanova.OR >= n.rej.stop * 2)
+            }
+            if (meet.all.rej.stop & med.meet.all.rej.stop) {
+                permanova.stopped = TRUE
+                if (verbose) 
+                  message(paste("PERMANOVA stopped at permutation", 
+                    n.perm.completed))
+                break
+            }
+        }
+        inv.n.perm.completed = 1/n.perm.completed
+        inv.n.perm.completed.1 = 1/(n.perm.completed + 1)
+        p.permanova <- ifelse((n.permanova >= n.rej.stop * 2), 
+            0.5 * n.permanova * inv.n.perm.completed, (0.5 * 
+                n.permanova + 1) * inv.n.perm.completed.1)
+        if (!is.null(OR)) 
+            p.permanova.OR <- ifelse((n.permanova.OR >= n.rej.stop * 
+                2), 0.5 * n.permanova.OR * inv.n.perm.completed, 
+                (0.5 * n.permanova.OR + 1) * inv.n.perm.completed.1)
+        p.permanova.null <- NULL
+        p.permanova.null.OR <- NULL
+        if (!is.null(OR)) {
+            pmin.permanova.com <- 0.5 * pmin(n.permanova, n.permanova.OR)
+            p.permanova.null <- n.perm.completed + 0.5 - apply(permanova.perm[, 
+                , , 1:n.perm.completed, drop = FALSE], c(1, 2, 
+                3), rank)
+            p.permanova.null.OR <- n.perm.completed + 0.5 - apply(permanova.perm.OR[, 
+                , , 1:n.perm.completed, drop = FALSE], c(1, 2, 
+                3), rank)
+            pmin.permanova.com.null <- pmin(p.permanova.null, 
+                p.permanova.null.OR)
+            if (length(dim(pmin.permanova.com.null)) == 4) {
+                pmin.permanova.com.null <- aperm(pmin.permanova.com.null, 
+                  c(2, 3, 4, 1))
+            }
+            else {
+                pmin.permanova.com.null <- array(pmin.permanova.com.null, 
+                  c(dim(pmin.permanova.com.null), 1))
+            }
+            n.permanova.com <- rowSums((pmin.permanova.com.null < 
+                c(pmin.permanova.com) - tol.eq) + 0.5 * (abs(pmin.permanova.com.null - 
+                c(pmin.permanova.com)) < tol.eq), dims = 3)
+            p.permanova.com = ifelse((n.permanova.com >= n.rej.stop), 
+                n.permanova.com * inv.n.perm.completed, (n.permanova.com + 
+                  1) * inv.n.perm.completed.1)
+        }
+        if (n.dist > 1) {
+            pmin.permanova.omni <- apply(0.5 * n.permanova, c(2, 
+                3), min)
+            if (is.null(p.permanova.null)) 
+                p.permanova.null <- n.perm.completed + 0.5 - 
+                  apply(permanova.perm[, , , 1:n.perm.completed, 
+                    drop = FALSE], c(1, 2, 3), rank)
+            pmin.permanova.omni.null <- apply(p.permanova.null, 
+                c(1, 3, 4), min)
+            if (length(dim(pmin.permanova.omni.null)) == 3) {
+                pmin.permanova.omni.null <- aperm(pmin.permanova.omni.null, 
+                  c(2, 3, 1))
+            }
+            else {
+                pmin.permanova.omni.null <- array(pmin.permanova.omni.null, 
+                  c(dim(pmin.permanova.omni.null), 1))
+            }
+            n.permanova.omni <- rowSums((pmin.permanova.omni.null < 
+                c(pmin.permanova.omni) - tol.eq) + 0.5 * (abs(pmin.permanova.omni.null - 
+                c(pmin.permanova.omni)) < tol.eq), dims = 2)
+            p.permanova.omni = ifelse((n.permanova.omni >= n.rej.stop), 
+                n.permanova.omni * inv.n.perm.completed, (n.permanova.omni + 
+                  1) * inv.n.perm.completed.1)
+            if (!is.null(OR)) {
+                pmin.permanova.omni.OR <- apply(0.5 * n.permanova.OR, 
+                  c(2, 3), min)
+                if (is.null(p.permanova.null.OR)) 
+                  p.permanova.null.OR <- n.perm.completed + 0.5 - 
+                    apply(permanova.perm.OR[, , , 1:n.perm.completed, 
+                      drop = FALSE], c(1, 2, 3), rank)
+                pmin.permanova.omni.null.OR <- apply(p.permanova.null.OR, 
+                  c(1, 3, 4), min)
+                if (length(dim(pmin.permanova.omni.null.OR)) == 
+                  3) {
+                  pmin.permanova.omni.null.OR <- aperm(pmin.permanova.omni.null.OR, 
+                    c(2, 3, 1))
+                }
+                else {
+                  pmin.permanova.omni.null.OR <- array(pmin.permanova.omni.null.OR, 
+                    c(dim(pmin.permanova.omni.null.OR), 1))
+                }
+                n.permanova.omni.OR <- rowSums((pmin.permanova.omni.null.OR < 
+                  c(pmin.permanova.omni.OR) - tol.eq) + 0.5 * 
+                  (abs(pmin.permanova.omni.null.OR - c(pmin.permanova.omni.OR)) < 
+                    tol.eq), dims = 2)
+                p.permanova.omni.OR = ifelse((n.permanova.omni.OR >= 
+                  n.rej.stop), n.permanova.omni.OR * inv.n.perm.completed, 
+                  (n.permanova.omni.OR + 1) * inv.n.perm.completed.1)
+                pmin.permanova.omni.com <- pmin(pmin.permanova.omni, 
+                  pmin.permanova.omni.OR)
+                pmin.permanova.omni.null.com <- pmin(pmin.permanova.omni.null, 
+                  pmin.permanova.omni.null.OR)
+                n.permanova.omni.com <- rowSums((pmin.permanova.omni.null.com < 
+                  c(pmin.permanova.omni.com) - tol.eq) + 0.5 * 
+                  (abs(pmin.permanova.omni.null.com - c(pmin.permanova.omni.com)) < 
+                    tol.eq), dims = 2)
+                p.permanova.omni.com = ifelse((n.permanova.omni.com >= 
+                  n.rej.stop), n.permanova.omni.com * inv.n.perm.completed, 
+                  (n.permanova.omni.com + 1) * inv.n.perm.completed.1)
+            }
+        }
+        med.p.permanova.null <- NULL
+        med.p.permanova.null.OR <- NULL
+        if (test.mediation) {
+            med.p.permanova <- ifelse((med.n.permanova >= n.rej.stop * 
+                2), 0.5 * med.n.permanova * inv.n.perm.completed, 
+                (0.5 * med.n.permanova + 1) * inv.n.perm.completed.1)
+            if (!is.null(OR)) 
+                med.p.permanova.OR <- ifelse((med.n.permanova.OR >= 
+                  n.rej.stop * 2), 0.5 * med.n.permanova.OR * 
+                  inv.n.perm.completed, (0.5 * med.n.permanova.OR + 
+                  1) * inv.n.perm.completed.1)
+            if (!is.null(OR)) {
+                med.pmin.permanova.com <- 0.5 * pmin(med.n.permanova, 
+                  med.n.permanova.OR)
+                med.p.permanova.null <- n.perm.completed + 0.5 - 
+                  apply(med.permanova.perm[, , 1:n.perm.completed, 
+                    drop = FALSE], c(1, 2), rank)
+                med.p.permanova.null.OR <- n.perm.completed + 
+                  0.5 - apply(med.permanova.perm.OR[, , 1:n.perm.completed, 
+                  drop = FALSE], c(1, 2), rank)
+                med.pmin.permanova.com.null <- pmin(med.p.permanova.null, 
+                  med.p.permanova.null.OR)
+                if (length(dim(med.pmin.permanova.com.null)) == 
+                  3) {
+                  med.pmin.permanova.com.null <- aperm(med.pmin.permanova.com.null, 
+                    c(2, 3, 1))
+                }
+                else {
+                  med.pmin.permanova.com.null <- array(med.pmin.permanova.com.null, 
+                    c(dim(med.pmin.permanova.com.null), 1))
+                }
+                med.n.permanova.com <- rowSums((med.pmin.permanova.com.null < 
+                  c(med.pmin.permanova.com) - tol.eq) + 0.5 * 
+                  (abs(med.pmin.permanova.com.null - c(med.pmin.permanova.com)) < 
+                    tol.eq), dims = 2)
+                med.p.permanova.com = ifelse((med.n.permanova.com >= 
+                  n.rej.stop), med.n.permanova.com * inv.n.perm.completed, 
+                  (med.n.permanova.com + 1) * inv.n.perm.completed.1)
+            }
+            if (n.dist > 1) {
+                med.pmin.permanova.omni <- apply(0.5 * med.n.permanova, 
+                  2, min)
+                if (is.null(med.p.permanova.null)) 
+                  med.p.permanova.null <- n.perm.completed + 
+                    0.5 - apply(med.permanova.perm[, , 1:n.perm.completed, 
+                    drop = FALSE], c(1, 2), rank)
+                med.pmin.permanova.omni.null <- apply(med.p.permanova.null, 
+                  c(1, 3), min)
+                if (length(dim(med.pmin.permanova.omni.null)) == 
+                  2) {
+                  med.pmin.permanova.omni.null <- aperm(med.pmin.permanova.omni.null, 
+                    c(2, 1))
+                }
+                else {
+                  med.pmin.permanova.omni.null <- array(med.pmin.permanova.omni.null, 
+                    c(dim(med.pmin.permanova.omni.null), 1))
+                }
+                med.n.permanova.omni <- rowSums((med.pmin.permanova.omni.null < 
+                  c(med.pmin.permanova.omni) - tol.eq) + 0.5 * 
+                  (abs(med.pmin.permanova.omni.null - c(med.pmin.permanova.omni)) < 
+                    tol.eq))
+                med.p.permanova.omni = ifelse((med.n.permanova.omni >= 
+                  n.rej.stop), med.n.permanova.omni * inv.n.perm.completed, 
+                  (med.n.permanova.omni + 1) * inv.n.perm.completed.1)
+                if (!is.null(OR)) {
+                  med.pmin.permanova.omni.OR <- apply(0.5 * med.n.permanova.OR, 
+                    2, min)
+                  if (is.null(med.p.permanova.null.OR)) 
+                    med.p.permanova.null.OR <- n.perm.completed + 
+                      0.5 - apply(med.permanova.perm.OR[, , 1:n.perm.completed, 
+                      drop = FALSE], c(1, 2), rank)
+                  med.pmin.permanova.omni.null.OR <- apply(med.p.permanova.null.OR, 
+                    c(1, 3), min)
+                  if (length(dim(med.pmin.permanova.omni.null.OR)) == 
+                    2) {
+                    med.pmin.permanova.omni.null.OR <- aperm(med.pmin.permanova.omni.null.OR, 
+                      c(2, 1))
+                  }
+                  else {
+                    med.pmin.permanova.omni.null.OR <- array(med.pmin.permanova.omni.null.OR, 
+                      c(dim(med.pmin.permanova.omni.null.OR), 
+                        1))
+                  }
+                  med.n.permanova.omni.OR <- rowSums((med.pmin.permanova.omni.null.OR < 
+                    c(med.pmin.permanova.omni.OR) - tol.eq) + 
+                    0.5 * (abs(med.pmin.permanova.omni.null.OR - 
+                      c(med.pmin.permanova.omni.OR)) < tol.eq))
+                  med.p.permanova.omni.OR = ifelse((med.n.permanova.omni.OR >= 
+                    n.rej.stop), med.n.permanova.omni.OR * inv.n.perm.completed, 
+                    (med.n.permanova.omni.OR + 1) * inv.n.perm.completed.1)
+                  med.pmin.permanova.omni.com <- pmin(med.pmin.permanova.omni, 
+                    med.pmin.permanova.omni.OR)
+                  med.pmin.permanova.omni.null.com <- pmin(med.pmin.permanova.omni.null, 
+                    med.pmin.permanova.omni.null.OR)
+                  med.n.permanova.omni.com <- rowSums((med.pmin.permanova.omni.null.com < 
+                    c(med.pmin.permanova.omni.com) - tol.eq) + 
+                    0.5 * (abs(med.pmin.permanova.omni.null.com - 
+                      c(med.pmin.permanova.omni.com)) < tol.eq))
+                  med.p.permanova.omni.com = ifelse((med.n.permanova.omni.com >= 
+                    n.rej.stop), med.n.permanova.omni.com * inv.n.perm.completed, 
+                    (med.n.permanova.omni.com + 1) * inv.n.perm.completed.1)
+                }
+            }
+        }
+    }
+    name.list <- list(paste("dist", 1:n.dist, sep = ""), paste("cov", 
+        1:n.var1, sep = ""), paste("rarefy", 1:n.rarefy, sep = ""))
+    dimnames(permanova.obs) <- name.list
+    dimnames(R.squared) <- name.list
+    if (!is.null(p.permanova) & length(p.permanova) != 1) 
+        dimnames(p.permanova) <- name.list
+    if (!is.null(p.permanova.OR) & length(p.permanova.OR) != 
+        1) 
+        dimnames(p.permanova.OR) <- name.list
+    if (!is.null(p.permanova.com) & length(p.permanova.com) != 
+        1) 
+        dimnames(p.permanova.com) <- name.list
+    if (!is.null(p.permanova.omni) & length(p.permanova.omni) != 
+        1) 
+        dimnames(p.permanova.omni) <- name.list[-1]
+    if (!is.null(p.permanova.omni.OR) & length(p.permanova.omni.OR) != 
+        1) 
+        dimnames(p.permanova.omni.OR) <- name.list[-1]
+    if (!is.null(p.permanova.omni.com) & length(p.permanova.omni.com) != 
+        1) 
+        dimnames(p.permanova.omni.com) <- name.list[-1]
+    if (test.mediation) {
+        if (!is.null(med.p.permanova) & length(med.p.permanova) != 
+            1) 
+            dimnames(med.p.permanova) <- name.list[-2]
+        if (!is.null(med.p.permanova.OR) & length(med.p.permanova.OR) != 
+            1) 
+            dimnames(med.p.permanova.OR) <- name.list[-2]
+        if (!is.null(med.p.permanova.com) & length(med.p.permanova.com) != 
+            1) 
+            dimnames(med.p.permanova.com) <- name.list[-2]
+        if (!is.null(med.p.permanova.omni) & length(med.p.permanova.omni) != 
+            1) 
+            names(med.p.permanova.omni) <- name.list[[3]]
+        if (!is.null(med.p.permanova.omni.OR) & length(med.p.permanova.omni.OR) != 
+            1) 
+            names(med.p.permanova.omni.OR) <- name.list[[3]]
+        if (!is.null(med.p.permanova.omni.com) & length(med.p.permanova.omni.com) != 
+            1) 
+            names(med.p.permanova.omni.com) <- name.list[[3]]
+    }
+    res = list(F.statistics = drop(permanova.obs), R.squared = drop(R.squared), 
+        F.statistics.OR = drop(permanova.obs.OR), R.squared.OR = drop(R.squared.OR), 
+        p.permanova = drop(p.permanova), p.permanova.omni = drop(p.permanova.omni), 
+        med.p.permanova = drop(med.p.permanova), med.p.permanova.omni = drop(med.p.permanova.omni), 
+        p.permanova.OR = drop(p.permanova.OR), p.permanova.omni.OR = drop(p.permanova.omni.OR), 
+        med.p.permanova.OR = drop(med.p.permanova.OR), med.p.permanova.omni.OR = drop(med.p.permanova.omni.OR), 
+        p.permanova.com = drop(p.permanova.com), p.permanova.omni.com = drop(p.permanova.omni.com), 
+        med.p.permanova.com = drop(med.p.permanova.com), med.p.permanova.omni.com = drop(med.p.permanova.omni.com), 
+        n.perm.completed = n.perm.completed, permanova.stopped = permanova.stopped, 
+        seed = seed)
+    return(res)
+}
