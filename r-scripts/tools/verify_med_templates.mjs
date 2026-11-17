@@ -19,6 +19,7 @@ import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { loadFrontendUtils } from './load_frontend_utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -36,11 +37,10 @@ const keep = argv.includes('--keep');
 if (!fs.existsSync(RSCRIPT)) { console.error('找不到便携版 R:', RSCRIPT); process.exit(1); }
 if (!fs.existsSync(MED_R)) { console.error('找不到分析脚本:', MED_R); process.exit(1); }
 
-// medTemplates.js 是 ESM 语法但 frontend 不是 module 包，复制成 .mjs 让 node 能导入
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'medcheck-'));
-const mjs = path.join(tmp, 'medTemplates.mjs');
-fs.copyFileSync(SRC, mjs);
-const mod = await import(pathToFileURL(mjs).href);
+// frontend 不是 ESM 包；用共享 loader 在临时沙箱里按原名加载，
+// 这样 medTemplates.js -> ./rng.js 的相对依赖也不会断
+const { medTemplates: mod } = await loadFrontendUtils(['medTemplates']);
 const { MED_TEMPLATE_GROUPS, buildMedTemplateData } = mod;
 
 const allFinite = (v) =>

@@ -10,16 +10,15 @@ import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { loadFrontendUtils } from './load_frontend_utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
 const RSCRIPT = process.env.RSCRIPT || path.join(ROOT, 'r-portable', 'bin', process.platform === 'win32' ? 'Rscript.exe' : 'Rscript');
-// 用 RSCRIPT 环境变量可做 R 版本 A/B（如 4.3.3 vs 4.6.1）);
+// 用 RSCRIPT 环境变量可做 R 版本 A/B（如 4.3.3 vs 4.6.1）
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'medcharts-'));
-const copy = (rel, name) => { const d = path.join(tmp, name); fs.copyFileSync(path.join(ROOT, rel), d); return pathToFileURL(d).href; };
-const mt = await import(copy('frontend/src/utils/medTemplates.js', 'medTemplates.mjs'));
-const mc = await import(copy('frontend/src/utils/medCharts.js', 'medCharts.mjs'));
+const { medTemplates: mt, medCharts: mc } = await loadFrontendUtils(['medTemplates', 'medCharts']);
 
 const { MED_TEMPLATE_MAP, buildMedTemplateData } = mt;
 const { MED_CHART_BUILDERS, makeFormatters, ols } = mc;

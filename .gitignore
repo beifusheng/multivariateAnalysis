@@ -19,3 +19,6 @@ r-scripts/tools/.tmp_*
 r-scripts/**/*-output2.json
 r-scripts/**/*-output3.json
 r-scripts/**/*-output4.json
+
+# 一次性手术脚本/探针，不入库
+r-scripts/tools/.scratch/

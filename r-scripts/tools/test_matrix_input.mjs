@@ -7,15 +7,13 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { loadFrontendUtils } from './load_frontend_utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
 
-// frontend 不是 ESM 包，复制成 .mjs 供 node 导入
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minput-'));
-const prep = (src, name) => { const p = path.join(tmp, name); fs.copyFileSync(src, p); return pathToFileURL(p).href; };
-const mi = await import(prep(path.join(ROOT, 'frontend/src/utils/matrixInput.js'), 'matrixInput.mjs'));
-const mt = await import(prep(path.join(ROOT, 'frontend/src/utils/medTemplates.js'), 'medTemplates.mjs'));
+const { matrixInput: mi, medTemplates: mt } = await loadFrontendUtils(['matrixInput', 'medTemplates']);
 
 const { inspectValue, inspectMatrix, refSampleNFrom, sampleMismatchMessage } = mi;
 const { MED_TEMPLATE_GROUPS, buildMedTemplateData } = mt;
