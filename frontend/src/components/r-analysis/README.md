@@ -13,6 +13,31 @@
 | `ChartPanel.vue` | 图表区外壳：tab + 容器 ref + 空态；ECharts 实例由视图创建（`getHost()` 拿 DOM） |
 | `ResultCard.vue` / `StatGrid.vue` / `InfoGrid.vue` | 结果区卡片 / 关键统计量网格 / 信息网格 |
 | `TemplateButton.vue` / `TemplateCategory.vue` | 旧的**公式**模板按钮（`PERMANOVA.vue`、`PERMANOVA_Med.vue` 在用） |
+| `ToolbarActions.vue` | 侧边栏四个动作（下载模板/导入数据/导出结果/下载输入）：图标、配色、禁用条件 | 只 emit，不含业务 |
+| `ImportDialog.vue` | 导入外壳：说明 → 选文件 → 错误/警告 → 预览 tabs → 用户点「填入表单」 | 只认 `sheets` / `tabs` |
+| `ExportDialog.vue` | 导出勾选外壳 | 只认 `options` / `selected` |
+
+## 三层切法（导入导出别再往视图里堆）
+
+三个模块的导入导出看起来“其实不一样”，但不一样的是**声明**，不是流程：
+
+| 层 | 内容 | 位置 |
+| --- | --- | --- |
+| L1 原语 | 读写工作簿、表名别名、`mapWorkbook`（按主表 ID 对齐 + 缺表拒绝 + 形状警告）、`previewFromFields`、`writeWorkbook` | `utils/sheetIo.js` |
+| L2 外壳 | 工具栏四个按钮、导入对话框、导出对话框 | `components/r-analysis/*.vue`（本目录） |
+| L3 声明 | 要哪几张表、导出项清单与 `build()/data()`、`planExport`、`toFormPatch` | `utils/<name>SheetSpec.js` |
+
+**硬规定**：L3 必须是纯数据 + 纯函数，不碰 DOM、不 import file-saver。视图只负责把 L3 算出来的
+任务表执行掉。为什么：以前 `build()` 写在视图 methods 里，“导出内容对不对”只能人肉开 Excel 数格子；
+抽成 `planExport(keys, ctx, stamp)` 后，[test_nr_spec.mjs](../../../r-scripts/tools/test_nr_spec.mjs)
+能直接断言“结论对比里 p 是真数”“没有一行第二列是空的”“PCoA 行数 = 样本数”。
+
+**不要把三个模块合成一个带 `if (module === 'med')` 的大对话框**：分支会越长越肥，
+任何模块的新需求都要动共用组件，等于把三个模块焊在同一文件里。
+
+迁移进度：S1 Non-random 已上（dogfood：3 张表 + 6 个导出项）；S2 PERMANOVA.vue（距离矩阵/样本数据/模型公式，
+先补 render 冒烟再动）；S3 PERMANOVA_Med.vue（顺带修 `Sheets['Outcome']` 精确取表——表名不对时
+现在报的是一句跟表名无关的错）。
 
 工具栏（`AnalysisToolbar` 里摆的按钮）四个动作固定同一语义、同一颜色，新模块不要自创：
 
@@ -67,13 +92,22 @@
 ```
 node r-scripts/tools/test_nr_options.mjs      # 界面选项 ↔ R 白名单 ↔ 模板 一致（75 项）
 node r-scripts/tools/test_sheet_io.mjs        # 模板写出→读回整链 + 脏表拒绝（52 项）
+node r-scripts/tools/test_nr_spec.mjs         # 导入声明 + 导出计划器（纯函数，41 项）
 node r-scripts/tools/verify_nonrandom_templates.mjs   # 26 模板真跑 R，p 方向逐条断言
 Rscript r-scripts/tools/verify_nonrandom_engine.R     # F/R² 对齐 adonis2；连续变量必须报错
 node r-scripts/tools/test_nr_charts.mjs       # 4 张图 × 5 个设计（162 项，含 formatter 真调用）
-node r-scripts/tools/test_nr_view.mjs         # canRun / payload / 导入导出（67 项）
-node r-scripts/tools/test_nr_render.mjs       # SSR 渲染 5 种状态 + 告警与吞错必须为 0（41 项）
+node r-scripts/tools/test_nr_view.mjs         # canRun / payload / 导入导出（68 项）
+node r-scripts/tools/test_nr_render.mjs       # SSR 渲染 5 状态 + 告警/吞错必须为 0（42 项）
 node r-scripts/tools/test_home_status.mjs    # 首页卡片状态 ↔ 真实代码（28 项）
 ```
+
+SSR 冒烟里两个坑（已经踩过，改动时别再碰回去）：
+- `el-dialog` 的内容走 `<teleport to="body">`，`renderToString` 只留 `<!---->` → 对话框内部根本没被渲染。
+  用立即渲染的 `ElDialog`/`ElUpload` 替身接管，**替身必须尊重 `modelValue`**，而且必须
+  `app.component()` 全局注册：对话框现在是子组件，局部 `components` 注册不会被子组件继承。
+- Vue 的 SSR 会**吞掉渲染错误**：render 里抛 TypeError 时 `renderToString` 照样 resolve，
+  只留 `<!---->`。所以“没抛异常”不算测到了，得断言捕获到的 `[error]` 为空。
+  往 `ImportDialog.vue` 里注入 `:max-height="t.nope.n"` 验证过这道闸确实会红。
 
 图表的 formatter **必须被真调一次**：`series.data` 写成对象项（`{ value, itemStyle }`）时
 `params.data` 是整个对象、`params.value` 才是数值。结论对比图用了 `params.data`，柱顶和

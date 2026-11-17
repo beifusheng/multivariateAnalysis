@@ -102,7 +102,6 @@ const render = async (tag, dataOverride) => {
   warnings.length = 0;
   const Wrapped = {
     ...Comp,
-    components: { ...(Comp.components || {}), ElDialog: DialogStub, ElUpload: UploadStub },
     data() {
       const d = Comp.data.call(this);
       return { ...d, ...dataOverride(d) };
@@ -110,6 +109,10 @@ const render = async (tag, dataOverride) => {
   };
   const app = vue.createSSRApp(Wrapped);
   app.use(ElementPlus);
+  // 必须全局注册：对话框外壳（ImportDialog/ExportDialog）现在是子组件，
+  // 局部 components 注册不会被子组件继承，el-dialog 会落回真组件走 teleport
+  app.component('ElDialog', DialogStub);
+  app.component('ElUpload', UploadStub);
   app.config.warnHandler = (msg, instance, trace) => {
     // 带上是哪个组件，否则「Invalid prop: value」根本查不到源头
     const name = instance?.type?.name || instance?.$?.type?.name || instance?.subTree?.type?.name || '?';
@@ -213,19 +216,24 @@ console.log('=== 导入对话框（打开 + 有预览）===');
   const html = await render('导入态', (d) => ({
     ...d,
     showImportDialog: true,
-    importPreview: {
-      n: 6, p: 8,
-      communityRows: [{ 样本: 'S1', Bacteroides: 42, Prevotella: 18 }],
-      speciesCols: ['Bacteroides', 'Prevotella'],
-      sampleRows: [{ 样本: 'S1', group: 'Case', strata: 'B1' }],
-      sampleCols: ['样本', 'group', 'strata'],
-      coordRows: [{ 样本: 'S1', x: 0, y: 0 }],
-      coordCols: ['样本', 'x', 'y']
-    },
+    importTabs: [
+      {
+        name: 'community', label: '物种矩阵（6 样本 × 8 物种）', cols: ['样本', 'Bacteroides', 'Prevotella'],
+        rows: [{ 样本: 'S1', Bacteroides: 42, Prevotella: 18 }]
+      },
+      {
+        name: 'sample', label: '样本信息（6 行）', cols: ['样本', 'group', 'strata'],
+        rows: [{ 样本: 'S1', group: 'Case', strata: 'B1' }]
+      },
+      {
+        name: 'coordinate', label: '坐标', cols: ['样本', 'x', 'y'], rows: [{ 样本: 'S1', x: 0, y: 0 }]
+      }
+    ],
     importWarnings: ['样本信息里这些列全是数值：pH。本模块只接受因子，运行前请先分箱'],
-    importTab: 'community'
+    importError: ''
   }));
-  check('预览标题带样本×物种数', html.includes('6 样本 × 8 物种'), '');
+  check('预览标题带样本×物种数', html.includes('6 样本 × 8 物种'));
+  check('三个 tab 全部渲染', ['物种矩阵', '样本信息', '坐标'].every((x) => html.includes(x)));
   check('警告文案渲染出来了', html.includes('请先分箱'));
   check('「填入表单」按钮可用', /填入表单/.test(html));
 }

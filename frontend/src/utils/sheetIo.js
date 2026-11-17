@@ -164,6 +164,146 @@ export function parseDistanceSheet(aoa) {
   return { ok: true, ids, matrix: rows, symmetric };
 }
 
+// ---------------------------------------------------------------- 通用映射：spec 驱动
+
+const PARSERS = {
+  community: parseCommunitySheet,
+  sample: parseSampleSheet,
+  coordinate: parseCoordinateSheet,
+  distance: parseDistanceSheet
+};
+
+/**
+ * 把工作簿按 spec 映射成引擎要的字段。
+ * 三个（将来五个）模块的导入区别只在“要哪几张表”，流程一样，所以这里一次性把
+ * 容易写错的儿件事固定下来：必需表缺失要指名、样本一律按主表 ID 对齐、
+ * 能解析但形状可疑要提醒。
+ *
+ * @param sheets readWorkbook 的结果
+ * @param spec   [{key,label,kind,required,aliasHint}]，须包含一个 primary
+ * @param opts   { primary: 'community', needKeys: ['coordinate'], needLabel: '空间受限' }
+ */
+export function mapWorkbook(sheets, spec, opts = {}) {
+  const warnings = [];
+  const fields = {};
+  const found = {};
+  for (const s of spec) {
+    const hit = findSheet(sheets, s.kind);
+    if (!hit) {
+      if (s.required) {
+        return { ok: false, error: `没找到「${s.label}」表（可叫 ${s.aliasHint || s.label}）`, warnings, fields };
+      }
+      continue;
+    }
+    found[s.key] = hit;
+    const parsed = (PARSERS[s.kind] || parseSampleSheet)(hit.aoa);
+    if (!parsed.ok) return { ok: false, error: `${s.label}：${parsed.error}`, warnings, fields };
+    fields[s.key] = parsed;
+  }
+
+  const primary = fields[opts.primary || 'community'];
+  if (!primary) return { ok: false, error: '缺少主表（决定样本顺序的那一张）', warnings, fields };
+
+  // 其它按样本 ID 的表：统一重排成主表顺序，并检查缺没缺
+  for (const s of spec) {
+    if (!s.key || s.key === (opts.primary || 'community')) continue;
+    const f = fields[s.key];
+    if (!f || !Array.isArray(f.ids)) continue;
+    const miss = primary.ids.filter((id) => !f.ids.includes(id));
+    if (miss.length) {
+      return { ok: false, error: `${s.label}缺少这些样本：${miss.slice(0, 5).join(', ')}${miss.length > 5 ? ` 等 ${miss.length} 个` : ''}`, warnings, fields };
+    }
+    const extra = f.ids.filter((id) => !primary.ids.includes(id));
+    if (extra.length) warnings.push(`${s.label}里有 ${extra.length} 个主表没有的样本（${extra.slice(0, 4).join(', ')}${extra.length > 4 ? ' …' : ''}），已忽略`);
+    if (s.kind === 'sample') {
+      fields[s.key + '_aligned'] = primary.ids.map((id) => f.rows[f.ids.indexOf(id)]);
+      fields[s.key + '_columns'] = f.columns;
+    } else if (s.kind === 'coordinate') {
+      const map = new Map(f.ids.map((id, i) => [id, f.coords[i]]));
+      fields[s.key + '_aligned'] = primary.ids.map((id) => map.get(id));
+    }
+  }
+
+  for (const key of opts.needKeys || []) {
+    if (!found[key]) {
+      const s = spec.find((x) => x.key === key);
+      warnings.push(`当前置换方案是「${opts.needLabel || s?.label || key}」，但文件里没有${s?.label || key}表，填入后需要自己补`);
+    }
+  }
+
+  warnings.push(...shapeWarnings(primary, fields, opts));
+  return { ok: true, fields, warnings, ids: primary.ids };
+}
+
+/** 能解析 ≠ 形状对：把常见误传与隐患说清楚 */
+function shapeWarnings(primary, fields, opts) {
+  const w = [];
+  if (primary.species && primary.species.length <= 1) w.push('物种矩阵只有 1 列物种，是不是把样本信息表放上来了？');
+  if (primary.matrix) {
+    const zeros = primary.matrix.filter((row) => row.every((v) => v === 0)).length;
+    if (zeros) w.push(`主表里有 ${zeros} 个样本全为 0（在相异度里会被当成空群落）`);
+  }
+  const sample = fields[opts.sampleKey || 'sample'];
+  if (sample && sample.columns) {
+    const numericOnly = sample.columns.filter((c) => sample.rows.every((r) => r[c] !== '' && Number.isFinite(Number(r[c]))));
+    if (numericOnly.length) w.push(`样本信息里这些列全是数值：${numericOnly.join(', ')}。本模块只接受因子，运行前请先分箱`);
+    const blank = sample.columns.filter((c) => sample.rows.some((r) => r[c] === ''));
+    if (blank.length) w.push(`样本信息这些列有空值：${blank.join(', ')}（空值会作为缺失水平处理）`);
+  }
+  return w;
+}
+
+/**
+ * 解析结果 -> 预览用的 tab 列表（外壳只负责摆）
+ * cols 统一成字符串数组；主表列太多时只预览前 12 列物种
+ */
+export function previewFromFields(primaryIds, primary, fields, opts = {}) {
+  const tabs = [];
+  if (primary.matrix && primary.species) {
+    tabs.push({
+      name: 'community',
+      label: `物种矩阵（${primaryIds.length} 样本 × ${primary.species.length} 物种）`,
+      cols: ['样本', ...primary.species.slice(0, 12)],
+      rows: primaryIds.map((id, r) => {
+        const o = { 样本: id };
+        primary.species.forEach((sp, c) => { o[sp] = primary.matrix[r][c]; });
+        return o;
+      })
+    });
+  }
+  if (primary.ids && primary.matrix && !primary.species) {
+    // 距离矩阵：行就是样本，列也是样本
+    tabs.push({
+      name: 'distance',
+      label: `距离矩阵（${primary.ids.length} × ${primary.ids.length}）`,
+      cols: ['样本', ...primary.ids.slice(0, 12)],
+      rows: primary.ids.map((id, r) => {
+        const o = { 样本: id };
+        primary.ids.slice(0, 12).forEach((sid, c) => { o[sid] = primary.matrix[r][c]; });
+        return o;
+      })
+    });
+  }
+  const rows = fields.sample_aligned;
+  if (rows) {
+    tabs.push({
+      name: 'sample',
+      label: `样本信息（${rows.length} 行）`,
+      cols: ['样本', ...(fields.sample_columns || [])],
+      rows: rows.slice(0, opts.previewRows || 20).map((row, i) => ({ 样本: primaryIds[i], ...row }))
+    });
+  }
+  if (fields.coordinate_aligned) {
+    tabs.push({
+      name: 'coordinate',
+      label: '坐标',
+      cols: ['样本', 'x', 'y'],
+      rows: primaryIds.map((id, r) => ({ 样本: id, x: fields.coordinate_aligned[r][0], y: fields.coordinate_aligned[r][1] }))
+    });
+  }
+  return tabs;
+}
+
 // ---------------------------------------------------------------- 写：模板与导出
 
 /** aoa -> sheet；XLSX 由调用方注入，避免这里静态 import 影响 Node 测试 */

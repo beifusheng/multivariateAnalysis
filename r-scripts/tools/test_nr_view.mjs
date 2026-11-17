@@ -232,13 +232,14 @@ console.log('\n=== 导入 Excel（下载模板 -> 原样上传 -> 填入表单�
   // 1) 官方模板原样上传
   const vm = makeVm();
   vm.openImport();
-  await vm.handleFileChange({ raw: toFile(sheetIo.buildTemplateSheets().filter(([n]) => n !== '填写说明')) });
+  await vm.handleFileChange(toFile(sheetIo.buildTemplateSheets().filter(([n]) => n !== '填写说明')));
+  const tabOf = (name) => (vm.importTabs || []).find((x) => x.name === name);
   check('模板导入无错误', vm.importError === '', vm.importError);
-  check('预览出 6 样本 × 8 物种', vm.importPreview?.n === 6 && vm.importPreview?.p === 8,
-    `${vm.importPreview?.n}×${vm.importPreview?.p}`);
-  check('预览行带物种列', Object.keys(vm.importPreview.communityRows[0]).includes('Bacteroides'));
-  check('样本预览列包含 group/strata', vm.importPreview.sampleCols.join(',') === '样本,group,strata',
-    vm.importPreview.sampleCols.join(','));
+  check('预览第一个 tab 写明 6 样本 × 8 物种', /6 样本 × 8 物种/.test(tabOf('community')?.label || ''),
+    JSON.stringify((vm.importTabs || []).map((x) => x.label)));
+  check('物种预览行带物种列', Object.keys(tabOf('community').rows[0]).includes('Bacteroides'));
+  check('样本预览列包含 group/strata', tabOf('sample').cols.join(',') === '样本,group,strata', tabOf('sample').cols.join(','));
+  check('坐标 tab 存在', !!tabOf('coordinate') && tabOf('coordinate').rows.length === 6);
   check('导入阶段不动表单（先看再填）', vm.form.communityStr === '');
 
   vm.form.formula = 'group';
@@ -257,29 +258,25 @@ console.log('\n=== 导入 Excel（下载模板 -> 原样上传 -> 填入表单�
 
   // 2) 缺表 / 错表
   const vm2 = makeVm();
-  await vm2.handleFileChange({ raw: toFile([['物种矩阵', [['样本', 'sp1'], ['S1', 1], ['S2', 2]]]]) });
+  await vm2.handleFileChange(toFile([['物种矩阵', [['样本', 'sp1'], ['S1', 1], ['S2', 2]]]]));
   check('只有物种矩阵 -> 提示缺样本信息表', /样本信息/.test(vm2.importError), vm2.importError);
   const vm3 = makeVm();
-  await vm3.handleFileChange({ raw: toFile([['样本信息', [['样本', 'group'], ['S1', 'A'], ['S2', 'B']]]]) });
+  await vm3.handleFileChange(toFile([['样本信息', [['样本', 'group'], ['S1', 'A'], ['S2', 'B']]]]));
   check('只有样本信息 -> 提示缺物种矩阵表', /物种矩阵/.test(vm3.importError), vm3.importError);
 
   // 3) 两表对不上：必须按 ID 对齐，不能按行号默默填
   const vm4 = makeVm();
-  await vm4.handleFileChange({
-    raw: toFile([
-      ['物种矩阵', [['样本', 'sp1'], ['S1', 1], ['S2', 2], ['S9', 3]]],
-      ['样本信息', [['样本', 'group'], ['S1', 'A'], ['S2', 'B']]]
-    ])
-  });
+  await vm4.handleFileChange(toFile([
+    ['物种矩阵', [['样本', 'sp1'], ['S1', 1], ['S2', 2], ['S9', 3]]],
+    ['样本信息', [['样本', 'group'], ['S1', 'A'], ['S2', 'B']]]
+  ]));
   check('物种矩阵多出的样本 -> 拒绝并指名', /S9/.test(vm4.importError), vm4.importError);
 
   const vm5 = makeVm();
-  await vm5.handleFileChange({
-    raw: toFile([
-      ['物种矩阵', [['样本', 'sp1'], ['B', 1], ['A', 2]]],
-      ['样本信息', [['样本', 'group'], ['A', '甲'], ['B', '乙']]]
-    ])
-  });
+  await vm5.handleFileChange(toFile([
+    ['物种矩阵', [['样本', 'sp1'], ['B', 1], ['A', 2]]],
+    ['样本信息', [['样本', 'group'], ['A', '甲'], ['B', '乙']]]
+  ]));
   vm5.form.formula = 'group';
   vm5.applyImport();
   const s5 = JSON.parse(vm5.form.sampleStr);
@@ -288,54 +285,54 @@ console.log('\n=== 导入 Excel（下载模板 -> 原样上传 -> 填入表单�
 
   // 4) 该提醒的隐患
   const vm6 = makeVm();
-  await vm6.handleFileChange({
-    raw: toFile([
-      ['物种矩阵', [['样本', 'sp1', 'sp2'], ['S1', 0, 0], ['S2', 1, 2], ['S3', 3, 4]]],
-      ['样本信息', [['样本', 'group', 'pH'], ['S1', 'A', 6.5], ['S2', 'B', 7.1], ['S3', 'A', 6.8]]]
-    ])
-  });
+  await vm6.handleFileChange(toFile([
+    ['物种矩阵', [['样本', 'sp1', 'sp2'], ['S1', 0, 0], ['S2', 1, 2], ['S3', 3, 4]]],
+    ['样本信息', [['样本', 'group', 'pH'], ['S1', 'A', 6.5], ['S2', 'B', 7.1], ['S3', 'A', 6.8]]]
+  ]));
   check('全 0 样本会被提醒', vm6.importWarnings.some((w) => /全为 0/.test(w)), vm6.importWarnings.join(' | '));
   check('数值型分组列会被提醒分箱', vm6.importWarnings.some((w) => /pH/.test(w) && /分箱/.test(w)), vm6.importWarnings.join(' | '));
 
   const vm7 = makeVm();
   vm7.form.scheme = 'spatial';
-  await vm7.handleFileChange({
-    raw: toFile([
-      ['物种矩阵', [['样本', 'sp1'], ['S1', 1], ['S2', 2]]],
-      ['样本信息', [['样本', 'group'], ['S1', 'A'], ['S2', 'B']]]
-    ])
-  });
+  await vm7.handleFileChange(toFile([
+    ['物种矩阵', [['样本', 'sp1'], ['S1', 1], ['S2', 2]]],
+    ['样本信息', [['样本', 'group'], ['S1', 'A'], ['S2', 'B']]]
+  ]));
   check('选了空间方案但文件里没坐标 -> 提醒而不是静默', vm7.importWarnings.some((w) => /没有坐标表/.test(w)),
     vm7.importWarnings.join(' | '));
 
   // 5) 坐标表自己也要按 ID 对齐
   const vm8 = makeVm();
-  await vm8.handleFileChange({
-    raw: toFile([
-      ['物种矩阵', [['样本', 'sp1'], ['S1', 1], ['S2', 2]]],
-      ['样本信息', [['样本', 'group'], ['S1', 'A'], ['S2', 'B']]],
-      ['坐标', [['样本', 'x', 'y'], ['S2', 9, 9], ['S1', 0, 0]]]
-    ])
-  });
+  await vm8.handleFileChange(toFile([
+    ['物种矩阵', [['样本', 'sp1'], ['S1', 1], ['S2', 2]]],
+    ['样本信息', [['样本', 'group'], ['S1', 'A'], ['S2', 'B']]],
+    ['坐标', [['样本', 'x', 'y'], ['S2', 9, 9], ['S1', 0, 0]]]
+  ]));
   vm8.applyImport();
   const co = JSON.parse(vm8.form.coordinatesStr);
   check('坐标按物种矩阵顺序重排（S1 在前）', co[0][0] === 0 && co[1][0] === 9, JSON.stringify(co));
 
   // 6) 坏文件不能把界面弄挂
   const vm9 = makeVm();
-  await vm9.handleFileChange({ raw: new File([new Blob(['不是 xlsx'])], 'bad.xlsx') });
-  check('坏文件 -> 有错误文案且无预览', !!vm9.importError && vm9.importPreview === null, vm9.importError);
+  await vm9.handleFileChange(new File([new Blob(['不是 xlsx'])], 'bad.xlsx'));
+  check('坏文件 -> 有错误文案且无预览', !!vm9.importError && vm9.importTabs === null, vm9.importError);
 
-  // 7) 导出用的行数据要是真数
+  // 7) 导出任务表由 spec 算出，视图只执行（内容断言在 test_nr_spec.mjs）
   const ex = makeVm();
   ex.analysisResult = conf.json;
-  const pr = ex.pcoaRows();
-  check('pcoaRows 行数 = 样本数 + 表头', pr.length === conf.json.model.n_samples + 1);
-  check('pcoaRows 表头中文', pr[0].join(',') === '样本,分组,区组,PC1,PC2', pr[0].join(','));
-  check('pcoaRows 坐标是真数', Number.isFinite(Number(pr[1][3])) && Number.isFinite(Number(pr[1][4])), JSON.stringify(pr[1]));
-  const nr = ex.nullRows();
-  check('nullRows 两列都有值（受限 + 自由）',
-    nr.length > 100 && nr.slice(1).every((row) => row[0] !== '' && row[1] !== ''), `rows=${nr.length}`);
+  ex.form.communityStr = JSON.stringify(conf.built.payload.communityData);
+  ex.form.sampleStr = JSON.stringify(conf.built.payload.sampleData);
+  const ctxEx = ex.exportCtx('结论对比');
+  check('exportCtx 把真实结果递给 spec', ctxEx.analysisResult === conf.json && ctxEx.cd === conf.json.chart_data);
+  check('没选模板时数据说明写“用户输入数据”', ctxEx.templateLabel === '用户输入数据', ctxEx.templateLabel);
+  check('verdict 来自 falsePositiveSignal/robustSignal（不自己重算）',
+    typeof ctxEx.verdict === 'string' && ['', '是（自由置换假阳性）', '否（结论稳健）'].includes(ctxEx.verdict),
+    ctxEx.verdict);
+  const sel = makeVm();
+  sel.selectedNrId = 'confoundedBlock';
+  sel.analysisResult = conf.json;
+  check('选了模板后数据说明会标出模板名', /合成演示数据/.test(sel.exportCtx('图表').templateLabel),
+    sel.exportCtx('图表').templateLabel);
 }
 
 await server.close();

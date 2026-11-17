@@ -7,30 +7,9 @@
     />
 
     <AnalysisToolbar v-model:expanded="isToolbarExpanded">
-      <el-tooltip content="下载 Excel 模板（物种矩阵 / 样本信息 / 坐标）" placement="top">
-        <el-button @click="downloadTemplate" type="success" class="toolbar-btn">
-          <el-icon><Document /></el-icon>
-          <span class="btn-text">下载模板</span>
-        </el-button>
-      </el-tooltip>
-      <el-tooltip content="导入 Excel/CSV 数据" placement="top">
-        <el-button @click="openImport" type="primary" class="toolbar-btn">
-          <el-icon><UploadFilled /></el-icon>
-          <span class="btn-text">导入数据</span>
-        </el-button>
-      </el-tooltip>
-      <el-tooltip content="导出分析结果（Excel / JSON / 图表 PNG）" placement="top">
-        <el-button @click="openExport" type="warning" class="toolbar-btn" :disabled="!analysisResult">
-          <el-icon><Download /></el-icon>
-          <span class="btn-text">导出结果</span>
-        </el-button>
-      </el-tooltip>
-      <el-tooltip content="下载当前输入为 JSON（可直接复用）" placement="top">
-        <el-button @click="downloadInput" type="info" class="toolbar-btn" :disabled="!canRun">
-          <el-icon><FolderOpened /></el-icon>
-          <span class="btn-text">下载输入</span>
-        </el-button>
-      </el-tooltip>
+      <ToolbarActions :can-run="canRun" :has-result="!!analysisResult"
+        export-tip="导出分析结果（Excel / JSON / 图表 PNG）"
+        @template="downloadTemplate" @import="openImport" @export="openExport" @input="downloadInput" />
     </AnalysisToolbar>
 
     <div class="main-content">
@@ -300,78 +279,12 @@
     </div>
   </div>
 
-  <!-- 导入：先预览再填入，不按行号猜对应关系 -->
-  <el-dialog v-model="showImportDialog" title="📁 导入数据" width="760px" :close-on-click-modal="false">
-    <el-alert type="info" :closable="false" show-icon style="margin-bottom: 14px;">
-      <template #title>需要的表格（工作表名中英文都行，不会认可以明确告诉你缺哪张）</template>
-      <div style="line-height: 1.8; font-size: 12px;">
-        物种矩阵（必需）：第一列样本 ID，其余每列一个物种的丰度<br />
-        样本信息（必需）：第一列样本 ID，其余为分组/区组变量，<b>必须都是因子</b>（连续变量请先分箱）<br />
-        坐标（可选）：选「空间受限置换」时才需要，两列 x/y<br />
-        支持 .xlsx / .xls / .csv；两张表的样本顺序可以不同，导入时按样本 ID 对齐
-      </div>
-    </el-alert>
+  <!-- 导入 / 导出：外壳共用，具体要哪几张表、能勾哪些项来自 nonrandomSheetSpec -->
+  <ImportDialog v-model="showImportDialog" :sheets="importSheets" :tabs="importTabs"
+    :error="importError" :warnings="importWarnings" @file-change="handleFileChange" @apply="applyImport" />
 
-    <el-upload ref="uploadRef" drag :auto-upload="false" :limit="1" :on-change="handleFileChange"
-      :file-list="uploadFileList" accept=".xlsx,.xls,.csv">
-      <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-      <div class="el-upload__text">将文件拖到此处，或<em>点击选择</em></div>
-    </el-upload>
-
-    <el-alert v-if="importError" type="error" :closable="false" show-icon :title="importError"
-      style="margin-top: 12px;" />
-    <el-alert v-for="(w, i) in importWarnings" :key="'w' + i" type="warning" :closable="false" show-icon
-      :title="w" style="margin-top: 8px;" />
-
-    <div v-if="importPreview" class="import-preview">
-      <el-divider>数据预览</el-divider>
-      <el-tabs v-model="importTab">
-        <el-tab-pane :label="`物种矩阵（${importPreview.n} 样本 × ${importPreview.p} 物种）`" name="community">
-          <el-table :data="importPreview.communityRows" border size="small" max-height="260">
-            <el-table-column prop="样本" label="样本" width="110" fixed />
-            <el-table-column v-for="c in importPreview.speciesCols" :key="c" :prop="c" :label="c" min-width="110" />
-          </el-table>
-        </el-tab-pane>
-        <el-tab-pane :label="`样本信息（${importPreview.sampleRows.length} 行）`" name="sample">
-          <el-table :data="importPreview.sampleRows" border size="small" max-height="260">
-            <el-table-column v-for="c in importPreview.sampleCols" :key="c" :prop="c" :label="c" min-width="120" />
-          </el-table>
-        </el-tab-pane>
-        <el-tab-pane v-if="importPreview.coordRows.length" label="坐标" name="coord">
-          <el-table :data="importPreview.coordRows" border size="small" max-height="260">
-            <el-table-column v-for="c in importPreview.coordCols" :key="c" :prop="c" :label="c" min-width="120" />
-          </el-table>
-        </el-tab-pane>
-      </el-tabs>
-    </div>
-
-    <template #footer>
-      <el-button @click="showImportDialog = false">取消</el-button>
-      <el-button type="primary" :disabled="!importPreview || !!importError" @click="applyImport">填入表单</el-button>
-    </template>
-  </el-dialog>
-
-  <!-- 导出：选项由用户勾选，不再一键倒完 -->
-  <el-dialog v-model="showExportDialog" title="💾 导出结果" width="520px">
-    <div class="export-dialog-content">
-      <p class="export-hint">选择要导出的内容：</p>
-      <div class="export-options">
-        <el-checkbox-group v-model="exportOptions">
-          <div class="checkbox-wrapper"><el-checkbox label="excel">分析结果（Excel：结论对比 / 逐术语 / 置换执行 / 模型信息）</el-checkbox></div>
-          <div class="checkbox-wrapper"><el-checkbox label="pcoa">PCoA 坐标（Excel）</el-checkbox></div>
-          <div class="checkbox-wrapper"><el-checkbox label="null">置换零分布样本（Excel）</el-checkbox></div>
-          <div class="checkbox-wrapper"><el-checkbox label="json">完整结果（JSON）</el-checkbox></div>
-          <div class="checkbox-wrapper"><el-checkbox label="input">当前输入数据（JSON）</el-checkbox></div>
-          <div class="checkbox-wrapper"><el-checkbox label="png">当前图表（PNG）</el-checkbox></div>
-        </el-checkbox-group>
-      </div>
-      <el-alert v-if="exportError" type="error" :closable="false" show-icon :title="exportError" style="margin-top: 12px;" />
-    </div>
-    <template #footer>
-      <el-button @click="showExportDialog = false">取消</el-button>
-      <el-button type="warning" :disabled="exportOptions.length === 0" @click="confirmExport">导出</el-button>
-    </template>
-  </el-dialog>
+  <ExportDialog v-model="showExportDialog" :options="exportOptions2" :selected="exportOptions"
+    :error="exportError" @update:selected="(v) => (exportOptions = v)" @confirm="confirmExport" />
 </template>
 
 <script>
@@ -379,6 +292,9 @@ import { ElMessage, ElLoading } from 'element-plus';
 import { Download, Document, FolderOpened, InfoFilled, UploadFilled, VideoPlay } from '@element-plus/icons-vue';
 import AnalysisHeader from '@/components/r-analysis/AnalysisHeader.vue';
 import AnalysisToolbar from '@/components/r-analysis/AnalysisToolbar.vue';
+import ToolbarActions from '@/components/r-analysis/ToolbarActions.vue';
+import ImportDialog from '@/components/r-analysis/ImportDialog.vue';
+import ExportDialog from '@/components/r-analysis/ExportDialog.vue';
 import DataTemplateSelector from '@/components/r-analysis/DataTemplateSelector.vue';
 import ChartPanel from '@/components/r-analysis/ChartPanel.vue';
 import ResultCard from '@/components/r-analysis/ResultCard.vue';
@@ -392,15 +308,18 @@ import { NR_TEMPLATE_GROUPS, NR_TEMPLATE_MAP, NR_TEMPLATE_COUNT, buildNonrandomT
 import { runNonRandomPERMANOVA } from '@/api/r';
 import { NR_DISTANCES, NR_SCHEMES } from '@/utils/nrOptions';
 import {
-  readWorkbook, findSheet, parseCommunitySheet, parseSampleSheet, parseCoordinateSheet,
-  alignBySampleId, buildTemplateSheets, writeWorkbook
+  readWorkbook, mapWorkbook, previewFromFields, writeWorkbook
 } from '@/utils/sheetIo';
+import {
+  NR_IMPORT_SHEETS, NR_EXPORT_OPTIONS, NR_EXPORT_DEFAULTS,
+  planExport, nrToFormPatch, nrTemplateSheets
+} from '@/utils/nonrandomSheetSpec';
 
 const FORMATTERS = makeFormatters();
 
 export default {
   name: 'NonrandomPERMANOVA',
-  components: { AnalysisHeader, AnalysisToolbar, DataTemplateSelector, ChartPanel, ResultCard, StatGrid, InfoGrid, Download, Document, FolderOpened, InfoFilled, UploadFilled, VideoPlay },
+  components: { AnalysisHeader, AnalysisToolbar, ToolbarActions, ImportDialog, ExportDialog, DataTemplateSelector, ChartPanel, ResultCard, StatGrid, InfoGrid, Download, Document, FolderOpened, InfoFilled, UploadFilled, VideoPlay },
   data() {
     return {
       isToolbarExpanded: false,
@@ -408,16 +327,14 @@ export default {
       nrCount: NR_TEMPLATE_COUNT,
       selectedNrId: '',
       nrSummary: '',
-      // 导入 / 导出对话框
+      // 导入 / 导出对话框（外壳共用，内容来自 spec）
       showImportDialog: false,
-      uploadFileList: [],
-      importPreview: null,
+      importTabs: null,
       importError: '',
       importWarnings: [],
       imported: null,
-      importTab: 'community',
       showExportDialog: false,
-      exportOptions: ['excel', 'json'],
+      exportOptions: NR_EXPORT_DEFAULTS.slice(),
       exportError: '',
       form: {
         communityStr: '',
@@ -441,6 +358,12 @@ export default {
     };
   },
   computed: {
+    importSheets() {
+      return NR_IMPORT_SHEETS;
+    },
+    exportOptions2() {
+      return NR_EXPORT_OPTIONS.map(({ key, label }) => ({ key, label }));
+    },
     selectedTemplate() {
       return this.selectedNrId ? NR_TEMPLATE_MAP[this.selectedNrId] : null;
     },
@@ -735,184 +658,118 @@ export default {
     },
 
     async downloadInput() {
-      const { saveAs } = await import('file-saver');
-      const blob = new Blob([JSON.stringify(this.buildPayload(), null, 2)], { type: 'application/json' });
-      saveAs(blob, `nonrandom-permanova 输入_${this.stamp()}.json`);
+      await this.saveJson(`Non-random-PERMANOVA_输入_${this.stamp()}.json`, this.buildPayload());
     },
 
-    // ---------------------------------------------------------- 下载模板 / 导入
+    // ---------------------------------------------------------- 模板 / 导入 / 导出
+    // 外壳（工具栏、对话框）三个模块共用；这里只剩"本模块要哪几张表、能勾哪些项"，
+    // 而那部分已经挪到 utils/nonrandomSheetSpec.js 里当纯数据 + 纯函数了。
     async downloadTemplate() {
       const XLSX = await this.xlsx();
-      await writeWorkbook(XLSX, buildTemplateSheets(), 'Non-random-PERMANOVA_数据模板.xlsx');
+      await writeWorkbook(XLSX, nrTemplateSheets(), 'Non-random-PERMANOVA_数据模板.xlsx');
       this.notify('success', '模板已下载：物种矩阵 / 样本信息 / 坐标 / 填写说明');
     },
 
     openImport() {
-      this.importPreview = null;
+      this.importTabs = null;
       this.importError = '';
       this.importWarnings = [];
       this.imported = null;
-      this.uploadFileList = [];
       this.showImportDialog = true;
     },
 
-    /** el-upload 的 on-change：解析工作簿 -> 出预览，不直接写进表单（先看再填） */
-    async handleFileChange(uploadFile) {
+    /** 解析交给 sheetIo.mapWorkbook 按 spec 跑：缺表指名、按主表 ID 对齐、形状隐患出警告 */
+    async handleFileChange(raw) {
+      this.importTabs = null;
       this.importError = '';
       this.importWarnings = [];
-      this.importPreview = null;
       this.imported = null;
-      const raw = uploadFile && (uploadFile.raw || uploadFile);
       if (!raw) return;
-      this.uploadFileList = [uploadFile];
       try {
         const sheets = await readWorkbook(raw);
-        const cs = findSheet(sheets, 'community');
-        const ss = findSheet(sheets, 'sample');
-        if (!cs) { this.importError = '没找到「物种矩阵」表（可叫 群落矩阵 / 丰度矩阵 / OTU表 / community / abundance）'; return; }
-        if (!ss) { this.importError = '没找到「样本信息」表（可叫 样本数据 / 分组信息 / metadata / sample）'; return; }
-        const comm = parseCommunitySheet(cs.aoa);
-        if (!comm.ok) { this.importError = '物种矩阵：' + comm.error; return; }
-        const sample = parseSampleSheet(ss.aoa);
-        if (!sample.ok) { this.importError = '样本信息：' + sample.error; return; }
-        const aligned = alignBySampleId(comm, sample);
-        if (!aligned.ok) { this.importError = aligned.error; return; }
-        if (aligned.extra && aligned.extra.length) {
-          this.importWarnings.push(`样本信息里有 ${aligned.extra.length} 个物种矩阵中没有的样本（${aligned.extra.slice(0, 4).join(', ')}${aligned.extra.length > 4 ? ' …' : ''}），已忽略`);
+        const res = mapWorkbook(sheets, NR_IMPORT_SHEETS, {
+          primary: 'community',
+          // 选了空间方案却没带坐标表，要当场说，不要等运行时报"缺 coordinates"
+          needKeys: this.form.scheme === 'spatial' ? ['coordinate'] : [],
+          needLabel: '空间受限置换'
+        });
+        if (!res.ok) {
+          this.importError = res.error;
+          this.importWarnings = res.warnings || [];
+          return;
         }
-
-        let coord = null;
-        const ks = findSheet(sheets, 'coordinate');
-        if (ks) {
-          const parsed = parseCoordinateSheet(ks.aoa);
-          if (!parsed.ok) { this.importError = '坐标表：' + parsed.error; return; }
-          const map = new Map(parsed.ids.map((id, n) => [id, parsed.coords[n]]));
-          const missing = comm.ids.filter((id) => !map.has(id));
-          if (missing.length) { this.importError = `坐标表缺少样本：${missing.slice(0, 4).join(', ')}`; return; }
-          // 坐标一律按物种矩阵的样本顺序重排，保证逐行对应
-          coord = comm.ids.map((id) => map.get(id));
-        } else if (this.form.scheme === 'spatial') {
-          this.importWarnings.push('当前置换方案是「空间受限」，但文件里没有坐标表，填入后需要自己补');
-        }
-
-        this.importWarnings.push(...this.inspectImportedShapes(comm, sample));
-
-        this.imported = { community: comm.matrix, sample: aligned.rows, coordinates: coord };
-        this.importPreview = {
-          n: comm.ids.length,
-          p: comm.species.length,
-          communityRows: comm.ids.map((id, r) => {
-            const o = { 样本: id };
-            comm.species.forEach((sp, c) => { o[sp] = comm.matrix[r][c]; });
-            return o;
-          }),
-          speciesCols: comm.species.slice(0, 12),
-          sampleRows: aligned.rows.slice(0, 20).map((row, i) => ({ 样本: comm.ids[i], ...row })),
-          sampleCols: ['样本', ...sample.columns],
-          coordRows: coord ? comm.ids.map((id, r) => ({ 样本: id, x: coord[r][0], y: coord[r][1] })) : [],
-          coordCols: coord ? ['样本', 'x', 'y'] : []
-        };
-        this.importTab = 'community';
+        this.importWarnings = res.warnings;
+        this.imported = res.fields;
+        this.importTabs = previewFromFields(res.ids, res.fields.community, res.fields);
       } catch (e) {
         this.importError = '读取失败：' + (e.message || e);
       }
     },
 
-    /** 数据能解析出来，不代表形状对：把常见的误传与隐患在预览里说清楚 */
-    inspectImportedShapes(comm, sample) {
-      const w = [];
-      if (comm.species.length <= 1) w.push('物种矩阵只有 1 列物种，是不是把样本信息表放上来了？');
-      const zeros = comm.matrix.filter((row) => row.every((v) => v === 0)).length;
-      if (zeros) w.push(`物种矩阵里有 ${zeros} 个样本全为 0（在相异度里会被当成空群落）`);
-      const numericOnly = sample.columns.filter((c) => sample.rows.every((r) => r[c] !== '' && Number.isFinite(Number(r[c]))));
-      if (numericOnly.length) {
-        w.push(`样本信息里这些列全是数值：${numericOnly.join(', ')}。本模块只接受因子，运行前请先分箱`);
-      }
-      const blank = sample.columns.filter((c) => sample.rows.some((r) => r[c] === ''));
-      if (blank.length) w.push(`样本信息这些列有空值：${blank.join(', ')}（空值会作为缺失水平处理）`);
-      return w;
-    },
-
     applyImport() {
       if (!this.imported) return;
-      this.form.communityStr = JSON.stringify(this.imported.community);
-      this.form.sampleStr = JSON.stringify(this.imported.sample);
-      if (this.imported.coordinates) this.form.coordinatesStr = JSON.stringify(this.imported.coordinates);
-      // 导入的是真实数据，设计模板说明不再适用，否则导出结果会把数据标成某个模板名
+      Object.assign(this.form, nrToFormPatch(this.imported));
+      // 导入的是真实数据，设计模板说明不再适用，否则导出结果会把用户数据标成某个模板名
       this.clearNrTemplate();
-      this.showImportDialog = false;
       const c = this.checks.community;
       this.notify('success', `已填入：${c.n} 样本 × ${c.p} 物种`);
     },
 
-    // ---------------------------------------------------------- 导出
     openExport() {
       this.exportError = '';
       this.showExportDialog = true;
     },
 
+    /** spec 的 planExport 算出任务表，这里只负责执行（saveAs / getDataURL 是 DOM 活） */
     async confirmExport() {
       this.exportError = '';
-      if (!this.analysisResult) { this.exportError = '还没有分析结果可导出'; return; }
+      if (!this.analysisResult) {
+        this.exportError = '还没有分析结果可导出';
+        return;
+      }
+      const tab = NR_CHART_TABS.find((x) => x.id === this.activeChart);
+      const jobs = planExport(this.exportOptions, this.exportCtx(tab ? tab.name : ''), this.stamp());
       try {
-        if (this.exportOptions.includes('excel')) await this.exportExcel();
-        if (this.exportOptions.includes('pcoa')) await this.exportSheet('PCoA坐标', this.pcoaRows(), 'PCoA坐标');
-        if (this.exportOptions.includes('null')) await this.exportSheet('零分布样本', this.nullRows(), '置换零分布');
-        if (this.exportOptions.includes('json')) await this.exportJson();
-        if (this.exportOptions.includes('input')) await this.downloadInput();
-        if (this.exportOptions.includes('png')) await this.exportPng();
+        for (const job of jobs) {
+          if (job.type === 'xlsx') await writeWorkbook(await this.xlsx(), job.sheets, job.filename);
+          else if (job.type === 'json') await this.saveJson(job.filename, job.data);
+          else await this.exportPng(job.filename);
+        }
         this.showExportDialog = false;
-        this.notify('success', `已导出 ${this.exportOptions.length} 项`);
+        this.notify('success', `已导出 ${jobs.length} 项`);
       } catch (e) {
         this.exportError = '导出失败：' + (e.message || e);
       }
     },
 
-    /**
-     * 所有弹出提示走这一个口子。
-     * 一是样式/时长统一，二是测试里没有 document，把 vm.notify 换成收集函数
-     * 就能直接断言"用户看到了什么"，而不是让 ElMessage 在 Node 里炸掉。
-     */
-    notify(type, options) {
-      ElMessage[type](options);
+    /** 组装 spec 里 build()/data() 需要的上下文：全是纯数据，所以导出内容能在 Node 里断言 */
+    exportCtx(chartTabName) {
+      return {
+        r: this.result,
+        analysisResult: this.analysisResult,
+        cd: (this.analysisResult && this.analysisResult.chart_data) || {},
+        payload: this.buildPayload(),
+        verdict: this.falsePositiveSignal ? '是（自由置换假阳性）' : this.robustSignal ? '否（结论稳健）' : '',
+        interpretation: this.analysisResult && this.analysisResult.interpretation,
+        permInfo: this.permutationInfo,
+        modelInfo: this.modelInfo,
+        templateLabel: this.selectedTemplate ? `${this.selectedTemplate.label}（合成演示数据）` : '用户输入数据',
+        chartTabName
+      };
     },
 
-        async xlsx() {
+    async xlsx() {
       const m = await import('xlsx');
       return m.utils ? m : m.default;   // xlsx 只有具名导出
     },
 
-    async exportSheet(name, aoa, fileTag) {
-      const XLSX = await this.xlsx();
-      await writeWorkbook(XLSX, [[name, aoa]], `Non-random-PERMANOVA_${fileTag}_${this.stamp()}.xlsx`);
-    },
-
-    pcoaRows() {
-      const cd = this.analysisResult?.chart_data || {};
-      const out = [['样本', '分组', '区组', 'PC1', 'PC2']];
-      (cd.pcoa?.x || []).forEach((x, i) => out.push([
-        cd.pcoa.labels?.[i] || `S${i + 1}`, cd.pcoa.group?.[i] ?? '', cd.pcoa.strata?.[i] ?? '', x, cd.pcoa.y?.[i]
-      ]));
-      return out;
-    },
-
-    nullRows() {
-      const cd = this.analysisResult?.chart_data || {};
-      const a = cd.null?.values || [];
-      const b = cd.null_free?.values || [];
-      const out = [['受限置换F', '自由置换F']];
-      for (let i = 0; i < Math.max(a.length, b.length); i++) out.push([a[i] ?? '', b[i] ?? '']);
-      return out;
-    },
-
-    async exportJson() {
+    async saveJson(filename, data) {
       const { saveAs } = await import('file-saver');
-      saveAs(new Blob([JSON.stringify(this.analysisResult, null, 2)], { type: 'application/json' }),
-        `Non-random-PERMANOVA_原始输出_${this.stamp()}.json`);
+      saveAs(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), filename);
     },
 
     /** 只导得出正在看的那张图：其它 tab 的图还没实例化 */
-    async exportPng() {
+    async exportPng(filename) {
       const el = this.$refs.chartPanel?.getHost?.();
       if (!el) throw new Error('图表还没渲染');
       const echarts = await import('echarts');
@@ -921,42 +778,7 @@ export default {
       const { saveAs } = await import('file-saver');
       const url = chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
       const bytes = Uint8Array.from(atob(url.split(',')[1]), (c) => c.charCodeAt(0));
-      const tab = NR_CHART_TABS.find((x) => x.id === this.activeChart);
-      saveAs(new Blob([bytes], { type: 'image/png' }),
-        `Non-random-PERMANOVA_${(tab && tab.name) || this.activeChart}_${this.stamp()}.png`);
-    },
-
-    async exportExcel() {
-      const XLSX = await this.xlsx();
-      const r = this.result;
-      const summary = [
-        ['项目', '值'],
-        ['检验术语', r.tested_term],
-        ['观测 F', r.F],
-        ['R²', r.R2],
-        ['p（自由置换）', r.p_free],
-        [`p（${r.scheme} 置换）`, r.p_constrained],
-        ['结论是否被置换方案改变', this.falsePositiveSignal ? '是（自由置换假阳性）' : this.robustSignal ? '否（结论稳健）' : ''],
-        ['解释', this.analysisResult.interpretation],
-        ['置换次数（请求/完成）', `${r.requested}/${r.performed}`],
-        ['可用区组 / 丢弃', `${r.feasible_blocks ?? '-'}/${r.dropped_blocks ?? 0}`],
-        ['随机种子', r.seed],
-        ['公式', this.analysisResult.model?.formula],
-        ['距离', this.analysisResult.model?.distance],
-        ['测序深度校正', this.analysisResult.model?.coverage_control || '否'],
-        ['vegan / R', `${this.analysisResult.vegan_version} / R ${this.analysisResult.r_version}`],
-        ['数据说明', this.selectedTemplate ? `${this.selectedTemplate.label}（合成演示数据）` : '用户输入数据']
-      ];
-      const table = [['术语', 'df', '水平数', 'F', 'R²']];
-      (r.table || []).forEach((x) => table.push([x.term, x.df, x.n_levels, x.F_model, x.R2]));
-      const perm = [['项目', '值'], ...this.permutationInfo.map((x) => [x.label, x.value])];
-      const model = [['项目', '值'], ...this.modelInfo.map((x) => [x.label, x.value])];
-      await writeWorkbook(XLSX, [
-        ['结论对比', summary],
-        ['逐术语检验', table],
-        ['置换执行', perm],
-        ['模型信息', model]
-      ], `Non-random-PERMANOVA_结果_${this.stamp()}.xlsx`);
+      saveAs(new Blob([bytes], { type: 'image/png' }), filename);
     },
     stamp() {
       return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
