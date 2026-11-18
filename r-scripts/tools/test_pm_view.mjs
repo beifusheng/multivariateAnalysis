@@ -81,6 +81,9 @@ try {
   await server.close(); process.exit(1);
 }
 
+// 视图源码：模板里有没有概览卡片这类东西，只能在源码层面查（SSR 渲染不出 el-collapse 的细节）
+const pmViewSource = fs.readFileSync(path.join(FRONTEND, 'src/views/r-analysis/PERMANOVA.vue'), 'utf8');
+
 const makeVm = () => {
   const vm = { ...comp.data(), $refs: {}, $nextTick: (f) => f && f() };
   for (const [k, fn] of Object.entries(comp.computed)) Object.defineProperty(vm, k, { get: () => fn.call(vm), configurable: true });
@@ -361,6 +364,100 @@ console.log('\n=== 6. 外壳 props 契约 ===');
   }
   check('旧版按位置猜表的那段已不存在', !/SheetNames\[0\]/.test(src));
   check('生产路径不再刷 console（导入那一段）', !/\[Import\]/.test(src));
+}
+
+console.log('\n=== 7. 编码语义：整数分组被当趋势拟合时必须开口（引擎 + 视图两头）===');
+{
+  // 9 样本 3 组，组内 0.1 / 组间 0.5。同一份数据两种写法：
+  //   formula="Group"          -> adonis2 把 1/2/3 当连续量，检验的是"随编号上升的趋势"
+  //   formula="as.factor(...)" -> 才是"三组互相比较"
+  // 实测 F 差 11 倍（6.47 vs 73.0）而 p 都显著 —— 用户读到"显著"，读不到"答的是另一个问题"。
+  const D9 = [];
+  for (let a = 0; a < 9; a++) {
+    const row = [];
+    for (let b = 0; b < 9; b++) row.push(a === b ? 0 : (Math.floor(a / 3) === Math.floor(b / 3) ? 0.1 : 0.5));
+    D9.push(row);
+  }
+  const codes = ['1', '1', '1', '2', '2', '2', '3', '3', '3'];
+  const base = {
+    distanceMatrix: D9,
+    permutations: 199,
+    sampleData: { Sample: Array.from({ length: 9 }, (_, i) => 'S' + (i + 1)), Group: codes }
+  };
+  const runPm = (payload, tag) => {
+    const f = path.join(TMP, tag + '.json'), o = f + '.out', e = f + '.err';
+    fs.writeFileSync(f, JSON.stringify(payload));
+    execFileSync(RSCRIPT, [path.join(ROOT, 'r-scripts/permanova.R'), f, o, e], { stdio: 'pipe', timeout: 300000 });
+    return JSON.parse(fs.readFileSync(o, 'utf8'));
+  };
+  const pmErr = (payload, tag) => {
+    const f = path.join(TMP, tag + '.json'), e = f + '.err';
+    fs.writeFileSync(f, JSON.stringify(payload));
+    let code = 0;
+    try {
+      execFileSync(RSCRIPT, [path.join(ROOT, 'r-scripts/permanova.R'), f, f + '.out', e], { stdio: 'pipe', timeout: 300000 });
+    } catch (err) { code = err.status; }
+    return { code, msg: fs.existsSync(e) ? fs.readFileSync(e, 'utf8') : '' };
+  };
+
+  const trend = runPm({ ...base, formula: 'Group' }, 'trend');
+  const factored = runPm({ ...base, formula: 'as.factor(Group)' }, 'factored');
+
+  check('整数编码 + 直接进公式 -> diagnostics 非空', (trend.diagnostics || []).length >= 1,
+    JSON.stringify(trend.diagnostics));
+  check('提醒讲清了后果与出路（趋势 vs 组间、怎么写才对）',
+    /趋势|斜率/.test(trend.diagnostics[0]) && /as\.factor\(Group\)/.test(trend.diagnostics[0]),
+    String(trend.diagnostics[0]).slice(0, 140));
+  check('写成 as.factor(Group) 就不再报（用户已经说明了意图）',
+    (factored.diagnostics || []).length === 0, JSON.stringify(factored.diagnostics));
+  check('两种写法的 F 确实不同（不是测试在虚构差异）',
+    Math.abs(factored.F / trend.F - 1) > 1, 'trend F=' + trend.F + ' factor F=' + factored.F);
+  check('PCoA 分组跟随公式项，不再退回样本 ID 着色',
+    trend.pcoa.samples[0].group_variable === 'Group' &&
+      [...new Set(trend.pcoa.samples.map((x) => x.group))].sort().join(',') === '1,2,3',
+    JSON.stringify(trend.pcoa.samples.slice(0, 2)));
+
+  // 两层编码在数学上是同一个分割，报出来就是噪音（这条是防我自己过度报警）
+  const D4 = [[0, 0.08, 0.4, 0.45], [0.08, 0, 0.42, 0.38], [0.4, 0.42, 0, 0.09], [0.45, 0.38, 0.09, 0]];
+  const two = runPm({
+    distanceMatrix: D4, permutations: 99,
+    sampleData: { Sample: ['S1', 'S2', 'S3', 'S4'], Group: ['1', '2', '1', '2'] }, formula: 'Group'
+  }, 'two');
+  const twoTxt = runPm({
+    distanceMatrix: D4, permutations: 99,
+    sampleData: { Sample: ['S1', 'S2', 'S3', 'S4'], Group: ['Case', 'Control', 'Case', 'Control'] }, formula: 'Group'
+  }, 'twotxt');
+  check('两层数字编码不报警（F/p 与文本编码逐字相同）',
+    (two.diagnostics || []).length === 0 && two.F === twoTxt.F && two.p_value === twoTxt.p_value,
+    JSON.stringify({ two: [two.F, two.p_value], txt: [twoTxt.F, twoTxt.p_value] }));
+
+  // 两条报错分支必须在真 R 里跑过（本项目老规矩：没执行过的报错信息等于没有）
+  const mixed = pmErr({
+    ...base, formula: 'Group',
+    sampleData: { ...base.sampleData, Group: ['Case', '1', 'Case', '3', '3', '3', '1', '2', '3'] }
+  }, 'mixed');
+  check('数值与文本混在一列 -> 明确报错而不是静默变 NA 列',
+    mixed.code !== 0 && /既有数值又有文本/.test(mixed.msg) && !/非数值参数/.test(mixed.msg),
+    mixed.msg.slice(0, 140));
+  const short = pmErr({ ...base, formula: 'Group', sampleData: { Sample: ['S1', 'S2'], Group: ['1', '2'] } }, 'short');
+  check('样本数不匹配 -> 说清两边各多少个',
+    short.code !== 0 && /距离矩阵有 9 个样本，但样本数据有 2 行/.test(short.msg), short.msg.slice(0, 140));
+
+  // 视图侧：引擎说了但界面不显示，等于没说
+  const vm = makeVm();
+  vm.analysisResult = trend;
+  check('视图 diagnostics 计算属性拿到提醒', vm.diagnostics.length >= 1, JSON.stringify(vm.diagnostics));
+  check('视图把 permanova_result 变成表格行', vm.resultTerms.length >= 1 && vm.resultTerms[0].Df !== undefined,
+    JSON.stringify(vm.resultTerms));
+  const vmOld = makeVm();
+  vmOld.analysisResult = { F: 1.2, p_value: 0.04, permanova_result: [{ Df: 1, R2: 0.3 }] };
+  check('旧结果没有 diagnostics 字段时返回空数组而不是报错', vmOld.diagnostics.length === 0);
+  const vmStr = makeVm();
+  vmStr.analysisResult = { diagnostics: ['', null, '  ', '真提醒'] };
+  check('空串/null 不算一条提醒', vmStr.diagnostics.join('|') === '真提醒', JSON.stringify(vmStr.diagnostics));
+  check('结果区不再是裸 JSON：概览卡片与逐术语表格在模板里',
+    /result-summary/.test(pmViewSource) && /rs-table/.test(pmViewSource) &&
+      /原始输出（JSON，调试用）/.test(pmViewSource), '');
 }
 
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);

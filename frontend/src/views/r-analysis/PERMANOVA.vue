@@ -373,9 +373,48 @@
       <!-- 结果展示 -->
       <div v-if="analysisResult" class="result-section">
         <h2>分析结果</h2>
-    <div class="result-content">
-      <pre>{{ JSON.stringify(analysisResult, null, 2) }}</pre>
-    </div>
+      <!-- 结果概览：以前这里是一个 <pre>{{ JSON.stringify(analysisResult) }}</pre>，
+           用户打开自己的分析结果看到的是一堆键值对。引擎新加的 diagnostics
+           （整数编码被当趋势拟合等）塑在那个 JSON 里根本没人看得见。 -->
+      <div class="result-summary">
+        <div class="rs-headline" :class="resultSignificant ? 'sig' : 'nsig'">
+          <div class="rs-p">{{ fmtP(analysisResult.p_value) }}</div>
+          <div class="rs-cap">p 值（置换 {{ analysisResult.permutations }} 次）</div>
+          <div class="rs-nums">
+            F = {{ fmt(analysisResult.F_model != null ? analysisResult.F_model : analysisResult.F, 4) }}
+            ｜R² = {{ fmt(analysisResult.R2, 4) }}
+            ｜样本 {{ analysisResult.pcoa && analysisResult.pcoa.n_samples ? analysisResult.pcoa.n_samples : '-' }}
+          </div>
+        </div>
+        <el-alert v-for="(d, di) in diagnostics" :key="'pm-dg-' + di"
+                  type="warning" :closable="false" show-icon class="rs-diagnostic">
+          <template #title>{{ d }}</template>
+        </el-alert>
+        <p v-if="analysisResult.message" class="rs-note">{{ analysisResult.message }}</p>
+      </div>
+
+      <div class="result-content">
+        <table class="rs-table" v-if="resultTerms.length">
+          <thead>
+            <tr><th>术语</th><th>Df</th><th>SumOfSqs</th><th>R²</th><th>F</th><th>p</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="t in resultTerms" :key="t.term">
+              <td>{{ t.term }}</td>
+              <td>{{ t.Df }}</td>
+              <td>{{ fmt(t.SumOfSqs, 4) }}</td>
+              <td>{{ fmt(t.R2, 4) }}</td>
+              <td>{{ fmt(t.F, 4) }}</td>
+              <td>{{ fmtP(t.p) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <el-collapse class="rs-raw">
+          <el-collapse-item title="原始输出（JSON，调试用）" name="raw">
+            <pre>{{ JSON.stringify(analysisResult, null, 2) }}</pre>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
 
     <!-- 图表展示区域（如果使用 ECharts） -->
     <div v-if="analysisResult.permanova_result || analysisResult.pcoa" class="result-chart">
@@ -542,6 +581,9 @@ import ToolbarActions from '@/components/r-analysis/ToolbarActions.vue';
 import ImportDialog from '@/components/r-analysis/ImportDialog.vue';
 import ExportDialog from '@/components/r-analysis/ExportDialog.vue';
 import { readWorkbook, mapWorkbook, previewFromFields, writeWorkbook, templateFilename, fileStamp } from '@/utils/sheetIo';
+import { makeFormatters } from '@/utils/format';
+
+const FORMATTERS = makeFormatters();
 import {
   PM_IMPORT_SHEETS,
   PM_EXPORT_OPTIONS,
@@ -681,6 +723,30 @@ export default {
     // 图表颜色
     chartColors() {
       return chartConfig.colors;
+    },
+
+    /** 引擎的硬提醒（整数编码被当趋势拟合、PCoA 没生成等）。旧版没有这个字段，按空处理 */
+    diagnostics() {
+      const d = this.analysisResult && this.analysisResult.diagnostics;
+      return Array.isArray(d) ? d.filter((x) => x && String(x).trim()) : [];
+    },
+
+    /** permanova_result 行 → 表格行（字段名跨 vegan 版本不一样，这里已做兼容） */
+    resultTerms() {
+      const rows = (this.analysisResult && this.analysisResult.permanova_result) || [];
+      return rows.map((r, i) => ({
+        term: r.term || r.Variable || r[`Terms`] || `项 ${i + 1}`,
+        Df: r.Df,
+        SumOfSqs: r.SumOfSqs,
+        R2: r.R2,
+        F: r.F != null ? r.F : r.F_model,
+        p: r.p_value != null ? r.p_value : r['Pr(>F)']
+      }));
+    },
+
+    resultSignificant() {
+      const p = this.analysisResult && this.analysisResult.p_value;
+      return typeof p === 'number' && p < 0.05;
     }
   },
 
@@ -699,6 +765,8 @@ export default {
   },
 
   methods: {
+    fmt(v, d = 4) { return FORMATTERS.fmt(v, d); },
+    fmtP(v) { return FORMATTERS.fmtP(v); },
     // 切换工具栏展开/收起
     toggleToolbar() {
       this.isToolbarExpanded = !this.isToolbarExpanded;
@@ -2680,6 +2748,33 @@ export default {
   max-height: 400px;
   overflow: auto;
 }
+
+/* 结果概览：p/F/R² 一眼能读到，引擎提醒紧跟在后头。
+   写在本视图自己的 scoped 里，不再往 Med 的 CSS 或 r-analysis.css 里搜（那个文件是生成产物）。 */
+.result-summary {
+  margin-bottom: 16px;
+}
+.rs-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  padding: 14px 18px;
+  border-radius: 6px;
+  background: #f5f7fa;
+  border-left: 5px solid #909399;
+}
+.rs-headline.sig { border-left-color: #67c23a; background: #f0f9eb; }
+.rs-headline.nsig { border-left-color: #e6a23c; background: #fdf6ec; }
+.rs-p { font-size: 30px; font-weight: 700; line-height: 1.1; }
+.rs-cap { font-size: 12px; color: #606266; }
+.rs-nums { margin-left: auto; font-size: 13px; color: #303133; }
+.rs-diagnostic { margin-top: 10px; }
+.rs-diagnostic :deep(.el-alert__title) { font-size: 12px; line-height: 1.7; white-space: normal; }
+.rs-note { margin: 10px 0 0; font-size: 12px; color: #606266; }
+.rs-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 12px; }
+.rs-table th, .rs-table td { border: 1px solid #ebeef5; padding: 6px 10px; text-align: right; }
+.rs-table th:first-child, .rs-table td:first-child { text-align: left; }
+.rs-raw { margin-top: 8px; }
 
 .result-content pre {
   margin: 0;

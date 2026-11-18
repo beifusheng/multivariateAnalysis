@@ -65,77 +65,89 @@ tryCatch({
   # 创建虚拟的环境变量数据（用于演示）
   n_samples <- nrow(distance_matrix)
   
-  # 检查是否提供了样本数据和公式
-  if (!is.null(params$sampleData) && !is.null(params$formula)) {
-    # 用户提供了样本数据和公式
-    sample_data_raw <- params$sampleData
-    cat("[PERMANOVA.R] Sample data raw type:", typeof(sample_data_raw), "\n")
-    cat("[PERMANOVA.R] Sample data raw names:", paste(names(sample_data_raw), collapse=", "), "\n")
-    cat("[PERMANOVA.R] Sample data first column length:", length(sample_data_raw[[1]]), "\n")
-    
-    # 使用 list 构建 data.frame
-    sample_data_list <- list()
+  # 创建虚拟的环境变量数据（用于演示）
+  n_samples <- nrow(distance_matrix)
+
+  # ---------------- 样本表 -> data.frame：全脚本只允许这一份实现 ----------------
+  # 旧版有两份，规则还不一样：
+  #   建模那份：除首列外一律 as.numeric()，于是 "0/1" 编码的分组被当**连续变量**拟合
+  #     ——adonis2 检验的是斜率而不是组间差异；样本写成 1,2 还是 2,1 会得出不同的 F。
+  #   PCoA 那份：拿“第一个字符型列”当分组，数字编码时它退化成“按样本 ID 着色”
+  #     ——图上每个点一个颜色，看上去像分组着色，其实没有分组。两边都能“跑成功”。
+  # 现在：一份转换 + 一项歧义检测（只报告，不替用户猜），PCoA 分组跟随公式首项。
+  ambiguous_terms <- character(0)
+
+  # 公式里被 as.factor(...) 包住的列：用户已经明确说了它是因子，不能再报“当连续量拟合”
+  factored_terms <- character(0)
+  if (!is.null(params$formula)) {
+    # 用零宽断言取 as.factor(...) 里的列名。
+    # 旧写法拿 gregexpr 的 attr(m,"captures") —— 那是 regmatches 才有的东西，
+    # 真实跑下去就是「子字符串参数无效」（只有带 as.factor 的公式会炸，默认公式根本碰不到）。
+    factored_terms <- trimws(unlist(
+      regmatches(params$formula,
+                 gregexpr("(?<=as\\.factor\\()[^)]+(?=\\))", params$formula, perl = TRUE))))
+  }
+
+  to_sample_frame <- function(sample_data_raw) {
     col_names <- names(sample_data_raw)
-    
+    out <- list()
     for (i in seq_along(col_names)) {
       col_name <- col_names[i]
-      col_data <- sample_data_raw[[col_name]]
-      
-      # 第一列是样本 ID，转换为字符型；其他列尝试转换为数值型
-      if (i == 1) {
-        sample_data_list[[col_name]] <- as.character(col_data)
-      } else {
-        # 尝试转换为数值，如果失败则保持字符
-        numeric_data <- suppressWarnings(as.numeric(col_data))
-        if (all(is.na(numeric_data))) {
-          sample_data_list[[col_name]] <- as.character(col_data)
-        } else {
-          sample_data_list[[col_name]] <- numeric_data
+      col_data <- as.list(sample_data_raw[[col_name]])
+      chr <- as.character(unlist(col_data, use.names = FALSE))
+      if (i == 1L) {
+        out[[col_name]] <- chr                       # 首列：样本 ID
+        next
+      }
+      if (anyNA(chr) || !length(chr)) {
+        stop(sprintf("样本表第 %d 列 %s 有空值，无法建模", i, col_name))
+      }
+      num <- suppressWarnings(as.numeric(chr))
+      if (all(!is.na(num))) {
+        # 数字编码的“分组嫌疑”：整数值且不同取值很少（<= 样本数一半）——
+        # 数学上它既能读成组也能读成斜率，机器替不了用户决定，但必须把后果说出来。
+        uniq <- unique(num)
+        # 只在 **>=3 个整数值** 时报。两层时 0/1 的连续拟合与分组拟合得到完全相同的分割，
+        # adonis2 的 F/p 逐字相等（实测都 F=0.292、p=0.667）——那里报警是假噪音。
+        # 3 层起才是真陷阱：1/2/3 被当“随编号上升的趋势”，而不是三组互相比较。
+        if (all(uniq == round(uniq)) && length(uniq) >= 3 &&
+            length(uniq) <= floor(length(num) / 2) &&
+            !(col_name %in% factored_terms)) {
+          ambiguous_terms <<- c(ambiguous_terms, col_name)
         }
+        out[[col_name]] <- num
+      } else if (any(!is.na(num))) {
+        # 一半能转数字一半不能：以前会静默变成带 NA 的数值列，adonis2 再报“缺失值”
+        stop(sprintf(paste0("样本表列 %s 既有数值又有文本（比如 'Case' 和 '1' 混在同一列）。",                             # col_name
+                            "请统一：分组就全写文本，协变量就全写数值"), col_name))
+      } else {
+        out[[col_name]] <- factor(chr)                # 文本列：因子
       }
     }
-    
-    # 从 list 创建 data.frame
-    sample_data <- as.data.frame(sample_data_list, stringsAsFactors = FALSE)
-    
-    cat("[PERMANOVA.R] Sample data converted. Dimensions:", nrow(sample_data), "x", ncol(sample_data), "\n")
-    cat("[PERMANOVA.R] Sample data columns:", paste(colnames(sample_data), collapse=", "), "\n")
-    cat("[PERMANOVA.R] Sample data structure:\n")
-    str(sample_data)
-    
+    as.data.frame(out, stringsAsFactors = FALSE)
+  }
+
+  # 公式首项（PCoA 按它着色）：支持 as.factor(x) / x
+  first_term_of <- function(f) trimws(strsplit(gsub("as\\.factor\\(", "", gsub("\\)", "", f)),
+                                               "[+*:]", perl = TRUE)[[1]][1])
+
+  # 检查是否提供了样本数据和公式
+  if (!is.null(params$sampleData) && !is.null(params$formula)) {
+    sample_data <- to_sample_frame(params$sampleData)
     formula_str <- params$formula
-    
-    # 验证样本数匹配
-    n_samples_matrix <- nrow(distance_matrix)
-    n_samples_data <- nrow(sample_data)
-    
-    if (n_samples_matrix != n_samples_data) {
-      stop(sprintf(
-        "样本数不匹配：距离矩阵有 %d 个样本，但样本数据有 %d 行",
-        n_samples_matrix, n_samples_data
-      ))
-    }
-    
-    # 处理公式格式：提取 ~ 右侧的部分
-    # 如果公式包含 ~ ，只保留右侧变量
     if (grepl("~", formula_str)) {
-      # 分割公式，取右侧部分
-      formula_parts <- strsplit(formula_str, "~")[[1]]
-      if (length(formula_parts) >= 2) {
-        # 取右侧部分，去除首尾空格
-        formula_str <- trimws(formula_parts[2])
-      }
+      formula_str <- trimws(strsplit(formula_str, "~")[[1]][2])
     }
-    
-    cat(sprintf("PERMANOVA formula (right side): %s\n", formula_str))
-    
-    cat(sprintf("PERMANOVA formula: dist_obj ~ %s\n", formula_str))
-    cat(sprintf("Sample data columns: %s\n", paste(colnames(sample_data), collapse=", ")))
-    cat(sprintf("Number of samples: %d\n", nrow(sample_data)))
-    
-    # 执行 PERMANOVA
-    # 注意：adonis2 的置换用全局 RNG，不设种子则每次 p 值都会抖动，
-    # 无法做回归比对与结果复核，故固定（可用 params.seed 覆盖）
+    cat(sprintf("[PERMANOVA.R] 建模表: %d 行 × %d 列；公式: dist ~ %s\n",
+                nrow(sample_data), ncol(sample_data), formula_str))
+
+    n_samples_data <- nrow(sample_data)
+    if (nrow(distance_matrix) != n_samples_data) {
+      stop(sprintf("样本数不匹配：距离矩阵有 %d 个样本，但样本数据有 %d 行",
+                   nrow(distance_matrix), n_samples_data))
+    }
+
+    # 执行 PERMANOVA（adonis2 的置换用全局 RNG，不设种子每次 p 都抖，故已固定）
     result <- vegan::adonis2(
       as.formula(paste("dist_obj ~", formula_str)),
       data = sample_data,
@@ -218,6 +230,18 @@ tryCatch({
   if (is.null(params$sampleData)) {
     output$message <- "演示模式：使用随机分组。请提供 sampleData 和 formula 进行真实分析。"
   }
+
+  # ---------------- 歧义列提醒 ----------------
+  # 整数编码且取值很少的列（如 Group = 1/2）在 adonis2 里是**连续变量**：
+  # 检验的是“随编号单调上升”的斜率，不是组间差异。机器不该替用户猜，
+  # 但必须把后果说清楚 —— 只删掉数字列不给说法，用户会以为软件拒收他的数据。
+  if (length(ambiguous_terms)) {
+    output$diagnostics <- list(paste0(
+      "公式里这些列是整数编码且取值很少：", paste(unique(ambiguous_terms), collapse = ", "),
+      "。它们被当连续协变量拟合（Df=1，检验的是斜率而不是组间差异）——",
+      "如果它们其实是分组编码（如 1=病例 / 2=对照），请改成文本（Case/Control），",
+      "或在公式里写成 as.factor(Group)。"))
+  }
   
   # ========== 添加 PCoA 分析 ==========
   cat("Starting PCoA analysis...\n")
@@ -278,46 +302,40 @@ tryCatch({
           sample_names <- paste0("Sample", 1:nrow(points))
         }
         
-        cat("Building sample list...\n")
+        # 分组列只算一次（旧版在循环里给**每个样本**重建一次 as.data.frame 并 cat 一行，
+        # 包名与列名全部打印到控制台）
+        group_col <- NULL
+        group_vals <- NULL
+        if (!is.null(params$sampleData)) {
+          # 着色用的列必须跟建模用的是同一列。旧版“找第一个字符型列”，
+          # 数字编码的 Group 找不到 → 退化成拿首列（样本 ID）着色：
+          # 图里每个点一个颜色，看上去像分组，其实根本没有分组。
+          term <- if (exists("formula_str") && length(formula_str)) first_term_of(formula_str) else ""
+          if (length(term) && term %in% colnames(sample_data)) {
+            group_col <- term
+          } else {
+            cand <- colnames(sample_data)[-1]        # 除 ID 外第一个非数值列
+            fac <- cand[sapply(cand, function(cc) is.factor(sample_data[[cc]]))]
+            group_col <- if (length(fac)) fac[1] else (if (length(cand)) cand[1] else NULL)
+          }
+          if (!is.null(group_col)) group_vals <- as.character(sample_data[[group_col]])
+        }
+
         for (i in 1:nrow(points)) {
           sample_point <- list(
             sample_id = sample_names[i],
             coordinates = as.list(points[i, ])
           )
-          
-          # 如果有样本数据，添加分组信息
           if (!is.null(params$sampleData)) {
-            cat("  Sample", i, ": has sampleData\n")
-            sample_data_df <- as.data.frame(params$sampleData)
-            # 添加第一个分类变量作为分组（用于着色）
-            if (nrow(sample_data_df) >= i) {
-              # 查找第一个因子型或字符型列
-              found_group <- FALSE
-              for (col in colnames(sample_data_df)) {
-                val <- sample_data_df[[col]][i]
-                if (is.character(val) || is.factor(val)) {
-                  sample_point$group <- as.character(val)
-                  sample_point$group_variable <- col
-                  found_group <- TRUE
-                  cat("    Found group:", sample_point$group, "from column:", col, "\n")
-                  break
-                }
-              }
-              # 如果没有找到字符型列，使用第一列
-              if (!found_group) {
-                first_col <- colnames(sample_data_df)[1]
-                sample_point$group <- as.character(sample_data_df[[first_col]][i])
-                sample_point$group_variable <- first_col
-                cat("    Using first column:", sample_point$group, "\n")
-              }
+            if (!is.null(group_col) && length(group_vals) >= i) {
+              sample_point$group <- group_vals[i]
+              sample_point$group_variable <- group_col
             }
           } else {
             # 演示模式：使用预设分组
             sample_point$group <- paste0("Group", ((i - 1) %% 3) + 1)
             sample_point$group_variable <- "Demo_Group"
-            cat("  Sample", i, ": demo group:", sample_point$group, "\n")
           }
-          
           pcoa_samples[[i]] <- sample_point
         }
         cat("Sample list built. Total samples:", length(pcoa_samples), "\n")
@@ -334,8 +352,12 @@ tryCatch({
       }
     }
   }, error = function(e) {
+    # PCoA 失败以前只 cat 到控制台——没人看控制台，用户看到的就是“图没出来”。
+    # 本轮实测就撞上了：一行赋值写到循环外 ⇒ “找不到对象 sample_point” ⇒ PCoA 静默消失整整一轮。
+    output$diagnostics <<- c(output$diagnostics, paste0(
+      "PCoA 排序图未能生成：", conditionMessage(e),
+      "（PERMANOVA 本身的结果不受影响，仅影响绘图）"))
     cat("PCoA analysis failed:", conditionMessage(e), "\n")
-    cat("Error trace:", traceback(), "\n")
   })
   # ===================================
   
