@@ -205,7 +205,25 @@ t('模板自身能被自己的声明读回去（写出→读回整链）', (() =
   tpl.forEach(([name, aoa]) => { wb[name] = aoa; });
   return sheetIo.mapWorkbook(wb, spec.PM_IMPORT_SHEETS, { primary: 'distance' }).ok === true;
 })(), sheetIo.mapWorkbook(Object.fromEntries(tpl.map(([n, a]) => [n, a])), spec.PM_IMPORT_SHEETS, { primary: 'distance' }).error);
-t('模板示例是 5 样本方阵', tpl[0][1].length === 6 && tpl[0][1][0].length === 6);
+t('模板示例是 8 样本方阵（5 个样本时示例跑不出好看的结果）',
+  tpl[0][1].length === 9 && tpl[0][1][0].length === 9,
+  `${tpl[0][1].length}×${tpl[0][1][0].length}`);
+{
+  // 表顺序变了不该把测试弄挂：按表名拿
+  const byName = Object.fromEntries(tpl.map(([n, a]) => [n, a]));
+  const dist = byName['距离矩阵'], samp = byName['样本数据'];
+  t('距离矩阵表头与行数一致、样本名与样本表逐字相同',
+    dist[0].slice(1).join(',') === dist.slice(1).map((r) => r[0]).join(',') &&
+      samp.slice(1).map((r) => r[0]).join(',') === dist[0].slice(1).join(','),
+    dist[0].slice(1).join(','));
+  const groupCol = samp[0].indexOf('Group');
+  const labels = samp.slice(1).map((r) => r[groupCol]);
+  const uniq = [...new Set(labels)];
+  t('分组是文本两水平且每边至少 3 个样本（示例要能真跑出显著）',
+    uniq.length === 2 && labels.every((v) => typeof v === 'string' && v.length > 1) &&
+      uniq.every((v) => labels.filter((x) => x === v).length >= 3),
+    labels.join(','));
+}
 
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((f) => console.log('  - ' + f)); process.exit(1); }

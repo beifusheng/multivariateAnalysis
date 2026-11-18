@@ -265,6 +265,67 @@ console.log('\n=== 5. 导入得到的参数真跑一次 R ===');
   }
 }
 
+// ------------------------------------------------ 5b. 下载模板本身必须能导入并跑出结果
+console.log('\n=== 5b. 「下载模板 → 导入 → 真跑 R」 ===');
+{
+  // 用户会下载模板、原封不动上传、然后点运行。旧模板 5 样本跑得出来但 p=0.53，
+  // 第一次接触这个功能的人看到的是"看不出差异"，而那是示例的问题、不是方法的问题。
+  const pmSpec = await import(pathToFileURL(path.join(FRONTEND, 'src/utils/permanovaSheetSpec.js')).href);
+  const tpl = pmSpec.pmTemplateSheets();
+  const dataSheets = tpl.filter(([n]) => n !== '填写说明');
+
+  const vm = makeVm();
+  vm.openImport();
+  await driveImport(vm, dataSheets);
+  check('模板被自己的导入器接受', !vm.importError, vm.importError);
+  check('填入后对话框关掉', vm.showImportDialog === false, String(vm.showImportDialog));
+  const ids = JSON.parse(vm.permanovaParams.distanceMatrixStr || '[]');
+  check('模板至少 8 个样本（5 个时自由度太少，示例不好看结果）', ids.length >= 8, String(ids.length));
+  check('距离矩阵对称、对角为 0',
+    ids.every((r, i) => r[i] === 0) && ids.every((r, i) => ids.every((c, j) => Math.abs(r[j] - c[i]) < 1e-9)),
+    JSON.stringify(ids[0]));
+  check('模板公式引用的是本模板的列名', /^[^~]+~\s*Group/.test(vm.permanovaParams.formula || ''), vm.permanovaParams.formula);
+  // sampleDataStr 是列字典（{样本:[…], Group:[…]}），不是行数组：这里按它自己的形状断言
+  const sd = JSON.parse(vm.permanovaParams.sampleDataStr);
+  check('样本表里分组是文本而不是 0/1',
+    Array.isArray(sd.Group) && sd.Group.every((v) => typeof v === 'string' && v.length > 1),
+    JSON.stringify(sd.Group));
+  check('分组列与样本列同长（列字典一旦错位 R 那边静默错）',
+    sd.Group.length === sd['样本'].length && sd.Age.length === sd['样本'].length,
+    `${sd.Group.length}/${sd['样本'].length}`);
+  // 数值协变量在 PERMANOVA 里合法，不该套用 Non-random 那句"请分箱"
+  const hint = (vm.importWarnings || []).join(' ');
+  check('数值协变量的提醒说清了后果（不是「本模块只接受因子」）',
+    hint === '' || (!/只接受因子/.test(hint) && /连续协变量/.test(hint)), hint.slice(0, 160));
+
+  if (typeof vm.buildRunParams === 'function') {
+    const p = vm.buildRunParams();
+    const f = path.join(TMP, 'tpl.json'), e = f + '.err';
+    fs.writeFileSync(f, JSON.stringify(p));
+    let out = null, rerr = '';
+    try {
+      execFileSync(RSCRIPT, [path.join(ROOT, 'r-scripts/permanova.R'), f, f + '.out', e],
+        { stdio: ['ignore', 'pipe', 'pipe'], timeout: 300000 });
+      out = JSON.parse(fs.readFileSync(f + '.out', 'utf8'));
+    } catch (ex) {
+      rerr = String(ex.stdout || '') + String(ex.stderr || '');
+    }
+    const model = out && (out.permanova_result || []).find((r) => r._row === 'Model');
+    check('模板真跑 R 成功', !!out && !out.error,
+      rerr.split('\n').filter((l) => /Error|错误/.test(l))[0] || (out && out.error) || '');
+    check('模板跑出的 p 显著（示例要能演示"查出差异"长什么样）',
+      !!model && Number(model.p_value) < 0.05, JSON.stringify(model));
+    check('模板的 PCoA 也渲出来了', !!out && Array.isArray(out.pcoa?.samples) && out.pcoa.samples.length >= 8,
+      JSON.stringify(out && out.pcoa && out.pcoa.samples && out.pcoa.samples.length));
+  }
+
+  // 文件名：三个模块必须同一格式（<slug> 数据模板_<stamp>.xlsx）
+  check('下载模板的文件名走统一格式',
+    typeof vm.templateFileName === 'function' && /^PERMANOVA 数据模板_[0-9-]{19}\.xlsx$/.test(String(vm.templateFileName())),
+    typeof vm.templateFileName === 'function' ? vm.templateFileName() : '没有 templateFileName');
+}
+
+
 // ---------------------------------------------------------------- 6. 外壳 props 契约
 console.log('\n=== 6. 外壳 props 契约 ===');
 {
@@ -286,9 +347,15 @@ console.log('\n=== 6. 外壳 props 契约 ===');
     }
   }
   const tb = bound('ToolbarActions') || [];
+  const tbText = (tpl.match(/<ToolbarActions[^>]*>/s) || [''])[0];
   check('工具栏四个动作都接上了方法',
     ['template', 'import', 'export', 'input'].every((ev) => tpl.includes(`@${ev}="`)),
     tb.map(([k, v]) => `${k}=${v}`).join(' '));
+  // 少了 can-run / has-result 不会报错，只会让“下载输入/导出结果”永远灰着（S2 就踩过）
+  // 用文本存在判定，不用上面那个只认标识符的 pairs 正则：“!!analysisResult”这种开头不是字母
+  for (const p of ['can-run', 'has-result']) {
+    check(`ToolbarActions 传了 :${p}`, tbText.includes(`:${p}="`), tbText.replace(/\s+/g, ' ').slice(0, 120));
+  }
   for (const m of ['downloadTemplate', 'openImport', 'openExport', 'downloadInput']) {
     check(`${m} 在 methods 里`, typeof makeVm()[m] === 'function', m);
   }

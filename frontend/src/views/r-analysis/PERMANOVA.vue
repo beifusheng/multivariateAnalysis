@@ -24,10 +24,14 @@
         </el-icon>
       </div>
 
-      <ToolbarActions
-        :has-result="!!analysisResult" :show-input="true"
-        @template="downloadTemplate" @import="openImport" @export="openExport" @input="downloadInput"
-      />
+      <!-- 收起时靠 .toolbar-content 的 opacity/visibility 把按钮藏掉；
+           没有这一层的话 side-toolbar 是 width:0 + overflow:visible，四个按钮会直接溢出到页面上 -->
+      <div class="toolbar-content">
+        <ToolbarActions
+          :can-run="permanovaParams.matrixValid" :has-result="!!analysisResult" :show-input="true"
+          @template="downloadTemplate" @import="openImport" @export="openExport" @input="downloadInput"
+        />
+      </div>
     </div>
 
     <!-- 参数配置区域 -->
@@ -537,7 +541,7 @@ import {
 import ToolbarActions from '@/components/r-analysis/ToolbarActions.vue';
 import ImportDialog from '@/components/r-analysis/ImportDialog.vue';
 import ExportDialog from '@/components/r-analysis/ExportDialog.vue';
-import { readWorkbook, mapWorkbook, previewFromFields, writeWorkbook } from '@/utils/sheetIo';
+import { readWorkbook, mapWorkbook, previewFromFields, writeWorkbook, templateFilename, fileStamp } from '@/utils/sheetIo';
 import {
   PM_IMPORT_SHEETS,
   PM_EXPORT_OPTIONS,
@@ -567,6 +571,7 @@ import templateData from '@/data/permanova-templates.json';
 import chartConfig from '@/data/permanova-charts.json';
 import TemplateButton from '@/components/r-analysis/TemplateButton.vue';
 import TemplateCategory from '@/components/r-analysis/TemplateCategory.vue';
+import { hostWhenReady } from '@/utils/chartHost';
 
 export default {
   name: 'PERMANOVA',
@@ -676,6 +681,13 @@ export default {
     // 图表颜色
     chartColors() {
       return chartConfig.colors;
+    }
+  },
+
+  watch: {
+    // 与另两个模块同一个约定：数据到位就重画，而不是只靠 runPERMANOVA 里那一次性 nextTick。
+    analysisResult(v) {
+      if (v) this.$nextTick(() => this.renderCurrentChart(v));
     }
   },
 
@@ -845,7 +857,14 @@ export default {
         this.importError = '这个文件读不出来：' + (e.message || e) + '（要 .xlsx / .xls / .csv）';
         return;
       }
-      const res = mapWorkbook(sheets, PM_IMPORT_SHEETS, { primary: 'distance', sampleKey: 'sample' });
+      const res = mapWorkbook(sheets, PM_IMPORT_SHEETS, {
+        primary: 'distance',
+        sampleKey: 'sample',
+        // 本模块不像 Non-random 那样只收因子：数值列会直接进 adonis2 当连续协变量。
+        // 0/1 编码的分组会被当连续变量（这是 permanova.R 的已知欠账），所以这里说清后果而不是说“请分箱”
+        sampleNumericHint: (cols) => `样本信息里这些列是数值：${cols.join(', ')}，将作为连续协变量进模型。` +
+          '如果它们其实是分组（如 0/1 编码），请改成文本（如 A/B），否则检验按连续变量做、结果不可读'
+      });
       this.importWarnings = res.warnings || [];
       if (!res.ok) {
         this.importError = res.error;
@@ -884,10 +903,15 @@ export default {
     /** 下载模板：表结构由 spec 声明，这里只负责写出 */
     async downloadTemplate() {
       try {
-        await writeWorkbook(await this.xlsx(), pmTemplateSheets().map(([name, aoa]) => ({ name, aoa })), 'PERMANOVA 模板.xlsx');
+        await writeWorkbook(await this.xlsx(), pmTemplateSheets(), this.templateFileName());
       } catch (e) {
         this.$message.error('模板下载失败：' + (e.message || e));
       }
+    },
+
+    /** 文件名格式三个模块一致（见 sheetIo.templateFilename） */
+    templateFileName() {
+      return templateFilename('PERMANOVA', this.stamp());
     },
 
     /** 送给 R 的参数就一个来源：按钮可用性、运行、下载输入都用它，不再各拼一遍 */
@@ -939,8 +963,9 @@ export default {
       }
     },
 
+    /** 时间戳统一由 sheetIo.fileStamp 给（三个模块的文件名要能对上） */
     stamp() {
-      return new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      return fileStamp();
     },
 
     async xlsx() {
@@ -1069,15 +1094,18 @@ export default {
 
     // 渲染当前选中的图表
     async renderCurrentChart(result) {
-      console.log('[Chart] renderCurrentChart called, type:', this.activeChartType);
-      console.log('[Chart] Result:', result);
-
-      const echarts = await import('echarts');
-      const chartContainer = this.$refs.pcoaChart;
+      // 旧写法：拿不到容器就 console.error + return——DOM 只晚一帧也会“初次不画、切 tab 才画”，
+      // 而且用户看到的是空白而不是任何提示。现在先有界等几帧。
+      const { el: chartContainer, waited } = await hostWhenReady(
+        () => this.$refs.pcoaChart || null, this.$nextTick
+      );
       if (!chartContainer) {
-        console.error('[Chart] Container not found');
+        console.warn('[Chart] 等了', waited, '帧仍没拿到可测量的容器');
+        this.$message.warning('图表容器还没就绪（等了 ' + waited + ' 帧），切一下图表类型可重画');
         return;
       }
+
+      const echarts = await import('echarts');
 
       let myChart = echarts.getInstanceByDom(chartContainer);
       if (!myChart) {
@@ -1086,26 +1114,30 @@ export default {
 
       switch (this.activeChartType) {
         case 'scatter':
-          console.log('[Chart] Rendering scatter chart');
           this.renderScatterChart(result, myChart, echarts);
           break;
         case 'scree':
-          console.log('[Chart] Rendering scree chart');
           this.renderScreeChart(result, myChart, echarts);
           break;
         case 'variance':
-          console.log('[Chart] Rendering variance pie chart');
           this.renderVariancePieChart(result, myChart, echarts);
           break;
         case 'boxplot':
-          console.log('[Chart] Rendering boxplot chart');
           this.renderBoxplotChart(result, myChart, echarts);
           break;
         case 'heatmap':
-          console.log('[Chart] Rendering heatmap chart');
           this.renderHeatmapChart(result, myChart, echarts);
           break;
       }
+      // 布局晚到（刚挂载 / 滚动 / 字体回流）时，这一帧后的 resize 能补上尺寸；
+      // 与 utils/chartHost.js 里给另两个模块的保险保持同一个做法
+      this.$nextTick(() => {
+        try { myChart.resize(); } catch (e) { /* 已销毁就算了 */ }
+        // 自己量一下：init 在 0 宽容器上不报错，只画个看不见的空图
+        if (typeof myChart.getWidth === 'function' && myChart.getWidth() === 0) {
+          this.$message.warning('图表已生成但宽度为 0（布局未完成），切一下图表类型可重画');
+        }
+      });
     },
 
     // 渲染 PCoA 散点图
