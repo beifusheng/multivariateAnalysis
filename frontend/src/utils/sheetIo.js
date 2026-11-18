@@ -309,7 +309,14 @@ function shapeWarnings(primary, fields, opts) {
   const sample = fields[opts.sampleKey || 'sample'];
   if (sample && sample.columns) {
     const numericOnly = sample.columns.filter((c) => sample.rows.every((r) => r[c] !== '' && Number.isFinite(Number(r[c]))));
-    if (numericOnly.length) w.push(`样本信息里这些列全是数值：${numericOnly.join(', ')}。本模块只接受因子，运行前请先分箱`);
+    if (numericOnly.length) {
+      // 这句话对不同模块意义完全不同：Non-random 真的只接受因子（连续变量直接拒），
+      // PERMANOVA 会把数值列当连续协变量用（能跑，但 0/1 编码的分组会被错当连续量）。
+      // L1 不认得业务，所以文案由调用方给。
+      w.push(opts.sampleNumericHint
+        ? opts.sampleNumericHint(numericOnly)
+        : `样本信息里这些列全是数值：${numericOnly.join(', ')}。本模块只接受因子，运行前请先分箱`);
+    }
     const blank = sample.columns.filter((c) => sample.rows.some((r) => r[c] === ''));
     if (blank.length) w.push(`样本信息这些列有空值：${blank.join(', ')}（空值会作为缺失水平处理）`);
   }
@@ -394,10 +401,18 @@ export function sheetFromAoa(XLSX, aoa, colWidths = null) {
   return ws;
 }
 
+/**
+ * sheets 参数两种写法都收：`[[名, aoa], …]`（模板）与 `[{name, aoa}, …]`（spec 的导出项）。
+ * 以前只按数组解构，视图把 spec 的对象项直接传进来就炸成 `.for is not iterable`，
+ * 报错信息跟“哪张表”毫无关系。L1 认识形状不认识业务，所以在这里归一。
+ */
+const asSheet = (s) => (Array.isArray(s) ? { name: s[0], aoa: s[1] } : { name: s.name, aoa: s.aoa });
+
 /** 浏览器里 XLSX.writeFile 会直接触发下载；Node 里需要 set_fs，两边统一走 write -> Blob */
 export function writeWorkbook(XLSX, sheets, filename) {
   const wb = XLSX.utils.book_new();
-  for (const [name, aoa] of sheets) {
+  for (const s of sheets || []) {
+    const { name, aoa } = asSheet(s);
     XLSX.utils.book_append_sheet(wb, sheetFromAoa(XLSX, aoa), String(name).slice(0, 31));
   }
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
@@ -408,7 +423,8 @@ export function writeWorkbook(XLSX, sheets, filename) {
 /** 交给调用方自己下文件（测试里用得到） */
 export function workbookOf(XLSX, sheets) {
   const wb = XLSX.utils.book_new();
-  for (const [name, aoa] of sheets) {
+  for (const s of sheets || []) {
+    const { name, aoa } = asSheet(s);
     XLSX.utils.book_append_sheet(wb, sheetFromAoa(XLSX, aoa), String(name).slice(0, 31));
   }
   return wb;
@@ -422,54 +438,23 @@ export function downloadBlob(blob, filename) {
 }
 
 /**
- * 一个可直接填写的示例工作簿：物种矩阵 / 样本信息 / 坐标 / 说明
- * 数值取自 6 样本 × 8 物种的小设计，用户照着换成自己的即可。
+ * 文件名里的时间戳。三个模块以前各写各的（两种 replace 规则 + 一种根本不带时间戳），
+ * 用户手里同一天的导出文件名字对不上。规则：ISO 去掉冒号与 T，精确到秒。
+ * 例：2026-11-18-03-25-18
  */
-export function buildTemplateSheets() {
-  const species = ['Bacteroides', 'Prevotella', 'Faecalibacterium', 'Ruminococcus', 'Akkermansia', 'Bifidobacterium', 'Escherichia', 'Lactobacillus'];
-  const ids = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
-  const abund = [
-    [42, 18, 30, 5, 2, 11, 7, 3],
-    [38, 22, 26, 8, 1, 9, 5, 4],
-    [12, 9, 15, 28, 14, 3, 2, 1],
-    [15, 11, 12, 31, 10, 4, 3, 2],
-    [9, 7, 18, 25, 16, 2, 1, 1],
-    [45, 20, 28, 4, 3, 12, 6, 5]
-  ];
-  const community = [['样本', ...species], ...ids.map((id, i) => [id, ...abund[i]])];
-  const sample = [
-    ['样本', 'group', 'strata'],
-    ['S1', 'Case', 'B1'], ['S2', 'Case', 'B1'], ['S3', 'Case', 'B2'],
-    ['S4', 'Control', 'B2'], ['S5', 'Control', 'B3'], ['S6', 'Control', 'B3']
-  ];
-  const coord = [
-    ['样本', 'x', 'y'],
-    ['S1', 0, 0], ['S2', 1.2, 0.6], ['S3', 20, 4], ['S4', 21.5, 3.2], ['S5', 40, 12], ['S6', 41, 12.6]
-  ];
-  const notes = [
-    ['Non-random PERMANOVA 数据模板'],
-    [''],
-    ['📄 物种矩阵（必需）：'],
-    ['   第一列样本 ID，其余每列一个物种/OTU 的丰度（原始读数即可，无需先标准化）'],
-    ['   行 = 样本，列 = 物种'],
-    [''],
-    ['📋 样本信息（必需）：'],
-    ['   第一列样本 ID（需与物种矩阵一致，顺序可以不同，导入时按 ID 对齐）'],
-    ['   group 是待检验的分组；strata 是分层变量（受限置换只在 strata 内部交换标签）'],
-    ['   ⚠️ 本模块只接受因子（分类）变量；pH、年龄这类连续变量请先分箱'],
-    [''],
-    ['📍 坐标（可选）：'],
-    ['   只有选择「空间受限置换」时才需要；第一列样本 ID，另两列 x/y'],
-    [''],
-    ['导入后请核对预览，再点「填入表单」']
-  ];
-  return [
-    ['物种矩阵', community],
-    ['样本信息', sample],
-    ['坐标', coord],
-    ['填写说明', notes]
-  ];
+export function fileStamp(d = new Date()) {
+  return d.toISOString().slice(0, 19).replace(/[:T]/g, "-");
 }
+
+/**
+ * 下载模板的文件名。三个模块以前各写各的（`PERMANOVA 模板.xlsx` 无时间戳会互相覆盖、
+ * `Non-random-PERMANOVA_数据模板.xlsx` 下划线、`PERMANOVA-med 模板_….xlsx` 又不一样），
+ * 名字是用户手里的实物，格式必须一致：`<slug> 数据模板_<stamp>.xlsx`。
+ */
+export function templateFilename(slug, stamp) {
+  return `${slug} 数据模板_${stamp}.xlsx`;
+}
+
 
 /** 读文件 -> { sheets: { 名: aoa } }；CSV 走单 sheet */
 export async function readWorkbook(file) {

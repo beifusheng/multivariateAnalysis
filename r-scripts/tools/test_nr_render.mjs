@@ -159,6 +159,16 @@ console.log('=== 空态 ===');
   check('模板分组标题渲染', html.includes('教学：置换方案为什么会改变结论') && html.includes('水体与海洋'));
   check('未运行时无结果区', !html.includes('分析结果'));
   check('运行按钮存在且禁用', /运行分析/.test(html) && /is-disabled/.test(html));
+  // 实机反馈的第三条：刚进页面就一片「JSON 格式错误：Unexpected end of JSON input」，
+  // 让人以为自己数据坏了。空就是空，不是格式错。
+  check('空态不报 JSON 格式错误', !/JSON 格式错误|Unexpected end of JSON/.test(html),
+    (html.match(/error-text[^<]{0,80}/g) || []).slice(0, 3).join(' | '));
+  check("空态物种卡片只写「等待输入」（不重复挂解析器术语）",
+    html.includes("等待输入") && !/error-text[^<]*等待输入/.test(html),
+    (html.match(/error-text[^<]{0,60}/g) || []).slice(0, 3).join(" | "));
+  const bad = await render('坏输入态', (d) => ({ form: { ...d.form, communityStr: '{ 坏' } }));
+  check('真填了坏格式才会看到格式错提示（与空态区分得开）',
+    /JSON 格式错误/.test(bad), (bad.match(/error-text[^<]{0,60}/g) || ['(没提示)'])[0]);
 }
 
 console.log('\n=== 载入模板后 ===');
@@ -248,6 +258,19 @@ console.log('=== 导出对话框 ===');
 await server.close();
 fs.rmSync(depsFile, { force: true });
 fs.rmSync(TMP, { recursive: true, force: true });
+console.log('\n=== 引擎提醒真的渲染到屏幕上（而不是只在 JSON 里）===');
+{
+  const withDiag = await render('提醒态', () => ({
+    analysisResult: {
+      ...result,
+      diagnostics: ['受限置换的零分布退化：999 次置换里只有 2 个互不相同的统计量，p 的理论下界约 0.270。']
+    }
+  }));
+  check('提醒文案出现在结果区', /零分布退化/.test(withDiag), (withDiag.match(/headline-diagnostic[^<]{0,60}/) || ['(没渲染)'])[0]);
+  check('用的是提醒样式而不是普通解释文本', /headline-diagnostic/.test(withDiag));
+  check('无提醒时不多渲染一个空框', !/headline-diagnostic/.test(await render('无提醒', () => ({ analysisResult: result }))));
+}
+
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) {
   console.log('\n失败项:');

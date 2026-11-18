@@ -19,7 +19,7 @@ const XLSX = await import(pick('frontend/node_modules/xlsx/xlsx.mjs'));
 const mod = await import(pick('frontend/src/utils/sheetIo.js'));
 const {
   SHEET_ALIASES, findSheet, parseCommunitySheet, parseSampleSheet, parseCoordinateSheet,
-  parseDistanceSheet, alignBySampleId, buildTemplateSheets, writeWorkbook, workbookOf, readWorkbook
+  parseDistanceSheet, alignBySampleId, writeWorkbook, workbookOf, readWorkbook, fileStamp, templateFilename
 } = mod;
 
 let pass = 0;
@@ -39,7 +39,8 @@ const bookToFile = (wb, name = 'x.xlsx') => {
 };
 
 console.log('\n[1] 模板工作簿 -> 读回 -> 解析（整链）');
-const tpl = buildTemplateSheets();
+const nrSpec = await import(pick('frontend/src/utils/nonrandomSheetSpec.js'));
+const tpl = nrSpec.nrTemplateSheets();
 t('模板含 4 张表', tpl.length === 4, tpl.map((x) => x[0]).join(','));
 for (const need of ['物种矩阵', '样本信息', '坐标']) {
   t(`模板里有「${need}」表`, tpl.some(([n]) => n === need));
@@ -53,19 +54,36 @@ const coord = findSheet(back, 'coordinate');
 t('按别名找到物种矩阵表', !!comm && comm.name === '物种矩阵', comm && comm.name);
 const pc = parseCommunitySheet(comm.aoa);
 t('物种矩阵解析成功', pc.ok === true, pc.error);
-t('6 样本 × 8 物种', pc.ids.length === 6 && pc.matrix.every((r) => r.length === 8), `${pc.ids.length}×${(pc.matrix[0] || []).length}`);
-t('物种名取自表头', pc.species[0] === 'Bacteroides' && pc.species.length === 8, (pc.species || []).join(','));
-t('数值类型正确', pc.matrix[0][0] === 42 && typeof pc.matrix[0][0] === 'number');
+t('12 样本 × 6 物种', pc.ids.length === 12 && pc.matrix.every((r) => r.length === 6), `${pc.ids.length}×${(pc.matrix[0] || []).length}`);
+t('物种名取自表头', pc.species[0] === 'Bacteroides' && pc.species.length === 6, (pc.species || []).join(','));
+t('数值类型正确', pc.matrix[0][0] === 39 && typeof pc.matrix[0][0] === 'number');
 const ps = parseSampleSheet(samp.aoa);
 t('样本信息解析成功', ps.ok === true, ps.error);
 t('样本信息列为 group/strata', ps.columns.join(',') === 'group,strata', ps.columns.join(','));
 const pco = parseCoordinateSheet(coord.aoa);
-t('坐标解析成功', pco.ok === true && pco.coords.length === 6, pco.error);
+t('坐标解析成功', pco.ok === true && pco.coords.length === 12, pco.error);
 const al = alignBySampleId(pc, ps);
 t('按 ID 对齐成功', al.ok === true, al.error);
 t('对齐后行数与群落矩阵一致', al.rows.length === pc.ids.length);
-t('分组跟着样本走（S1=Case, S6=Control）', al.rows[0].group === 'Case' && al.rows[5].group === 'Control',
+t('分组跟着样本走（S1=Case, S12=Control）', al.rows[0].group === 'Case' && al.rows[11].group === 'Control',
   al.rows.map((r) => r.group).join(','));
+// 示例设计的硬约束：每个批次必须 2 Case + 2 Control。
+// 每批只有 1:1 时，把所有批次标签同时翻转得到的置换与观测设计完全同构，
+// 零分布退化、p 下界约 0.25 —— 旧模板就是这样“无论效应多强都不显著”。
+{
+  const byBlock = {};
+  al.rows.forEach((r, i) => {
+    const b = r.strata;
+    byBlock[b] = byBlock[b] || { Case: 0, Control: 0 };
+    byBlock[b][r.group] += 1;
+    if (pc.ids[i] !== al.rows[i].sample) { /* 按 ID 对齐后顺序应以群落矩阵为准 */ }
+  });
+  const blocks = Object.keys(byBlock).sort();
+  t('示例至少 3 个批次（受限置换要有足够的层内交换）', blocks.length >= 3, blocks.join(','));
+  t('每批都是 2 Case + 2 Control（否则零分布退化）',
+    blocks.every((b) => byBlock[b].Case === 2 && byBlock[b].Control === 2),
+    blocks.map((b) => `${b}:${byBlock[b].Case}/${byBlock[b].Control}`).join(' '));
+}
 
 console.log('\n[2] 下载模板再上传，得到的必须就是模板里那份数据');
 // 浏览器里 writeWorkbook 会走 saveAs 下载；这里取它同样的工作簿对象写入内存，
@@ -134,6 +152,32 @@ t('CSV 单表也能读', await (async () => {
   const only = Object.values(s)[0];
   return parseSampleSheet(only).ok === true;
 })());
+
+// 两种 sheets 形状：模板给 [[名, aoa]]，L3 的导出项给 [{name, aoa}]
+// （以前只认前者，视图把导出任务直接递进来就炸成 `.for is not iterable`）
+const pairWb = workbookOf(XLSX, [['A', [['x', 1]]], ['B', [['y', 2]]]]);
+let objWb = null, objErr = '';
+try { objWb = workbookOf(XLSX, [{ name: 'A', aoa: [['x', 1]] }, { name: 'B', aoa: [['y', 2]] }]); }
+catch (e) { objErr = e.message; }
+t('对象形不被当成“不可迭代”直接弄挂 harness', objErr === '', objErr);
+t('两种形状产出同一张工作簿',
+  !!objWb && JSON.stringify(objWb.SheetNames) === JSON.stringify(pairWb.SheetNames) && objWb.SheetNames.length === 2,
+  objWb ? objWb.SheetNames.join(',') + ' vs ' + pairWb.SheetNames.join(',') : '未产出');
+t('对象形也能真的写出单元格（不是默默丢表）',
+  !!objWb && objWb.Sheets.B['B1'] && objWb.Sheets.B['B1'].v === 2,
+  objWb ? JSON.stringify(objWb.Sheets.B['!ref']) : '未产出');
+t('空 sheets 不抛异常', Array.isArray(workbookOf(XLSX, []).SheetNames) && workbookOf(XLSX, []).SheetNames.length === 0);
+
+// 文件名与时间戳：三个模块的产出物名字必须能对上
+t('fileStamp 形如 2026-11-18-03-25-18（无冒号无 T）',
+  /^[\d]{4}-[\d]{2}-[\d]{2}-[\d]{2}-[\d]{2}-[\d]{2}$/.test(mod.fileStamp(new Date('2026-11-18T03:25:18.456Z'))),
+  mod.fileStamp(new Date('2026-11-18T03:25:18.456Z')));
+t('templateFilename 统一成 <slug> 数据模板_<stamp>.xlsx',
+  mod.templateFilename('PERMANOVA-med', 'STAMP') === 'PERMANOVA-med 数据模板_STAMP.xlsx',
+  mod.templateFilename('PERMANOVA-med', 'STAMP'));
+t('templateFilename 不会出现双下划线（旧版 Non-random 就是这样）',
+  !/__/.test(mod.templateFilename('Non-random-PERMANOVA', mod.fileStamp())),
+  mod.templateFilename('Non-random-PERMANOVA', mod.fileStamp()));
 
 console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1); }

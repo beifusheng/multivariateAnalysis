@@ -213,6 +213,11 @@
                 {{ constrainedSig ? '✓ 组间差异显著' : '× 组间差异不显著' }}
               </el-tag>
               <p class="headline-interp">{{ analysisResult.interpretation }}</p>
+              <!-- 引擎说“这次检验本质上不可能显著”时必须摆到明面上：
+                   p=1 与“没效应”长得一模一样，但两者对用户的动作完全不同 -->
+              <div v-for="(d, di) in diagnostics" :key="'dg' + di" class="headline-diagnostic">
+                ⚠️ {{ d }}
+              </div>
               <p class="headline-sub">
                 术语 {{ result.tested_term }}｜F = {{ fmt(result.F, 4) }}｜R² = {{ fmt(result.R2, 4) }}｜
                 置换 {{ result.performed }}/{{ result.requested }} 次｜可用区组 {{ result.feasible_blocks ?? '-' }}
@@ -302,13 +307,14 @@ import StatGrid from '@/components/r-analysis/StatGrid.vue';
 import InfoGrid from '@/components/r-analysis/InfoGrid.vue';
 import '@/components/r-analysis/r-analysis.css';
 import { inspectMatrix, inspectSampleTable } from '@/utils/matrixInput';
+import { drawWhenReady } from '@/utils/chartHost';
 import { makeFormatters } from '@/utils/format';
 import { NR_CHART_BUILDERS, NR_CHART_TABS } from '@/utils/nrCharts';
 import { NR_TEMPLATE_GROUPS, NR_TEMPLATE_MAP, NR_TEMPLATE_COUNT, buildNonrandomTemplateData } from '@/utils/nonrandomTemplates';
 import { runNonRandomPERMANOVA } from '@/api/r';
 import { NR_DISTANCES, NR_SCHEMES } from '@/utils/nrOptions';
 import {
-  readWorkbook, mapWorkbook, previewFromFields, writeWorkbook
+  readWorkbook, mapWorkbook, previewFromFields, writeWorkbook, templateFilename, fileStamp
 } from '@/utils/sheetIo';
 import {
   NR_IMPORT_SHEETS, NR_EXPORT_OPTIONS, NR_EXPORT_DEFAULTS,
@@ -506,10 +512,24 @@ export default {
     },
     chartData() {
       return this.analysisResult?.chart_data || null;
+    },
+    /**
+     * 引擎的硬提醒（零分布退化之类）。空数组就是真的没问题。
+     * 以前退化设计只会安静地给 p=1 —— 与“没效应”在屏幕上长得一模一样。
+     */
+    diagnostics() {
+      const d = this.analysisResult?.diagnostics;
+      return Array.isArray(d) ? d.filter((x) => x && String(x).trim()) : [];
     }
   },
   watch: {
     activeChart() {
+      this.$nextTick(() => this.renderChart());
+    },
+    // 关键：让“有没有数据”自己驱动重画，而不是靠 runAnalysis 里那一次性 nextTick。
+    // 首次分析时 activeChart 常常没变（默认就是 'null'），watcher 不触发，
+    // 只依赖那一帧的 DOM——那一帧拿不到尺寸就永远空白，直到用户切 tab。
+    chartData() {
       this.$nextTick(() => this.renderChart());
     }
   },
@@ -520,11 +540,15 @@ export default {
     /** 纯校验：返回五个输入项的状态（不改 data，供计算属性用） */
     checkAll() {
       const c = inspectMatrix(this.form.communityStr);
-      const community = c.ok ? { ok: true, n: c.n, p: c.p } : { ok: false, error: c.error, n: 0, p: 0 };
+      // empty（还没填）与“格式错”要分开：卡片已经写了「等待输入」，
+      // 再把解析器的提示挂上去就是刚进页面一片红字（实机反馈就是这个）
+      const community = c.ok
+        ? { ok: true, n: c.n, p: c.p }
+        : { ok: false, empty: !!c.empty, error: c.empty ? '' : c.error, n: 0, p: 0 };
 
       const s = this.form.sampleStr.trim()
         ? inspectSampleTable(this.form.sampleStr, c.ok ? c.n : null)
-        : { ok: false, error: '等待输入' };
+        : { ok: false, empty: true, error: '' };   // 卡片自己会写「等待输入」，这里不再挂一份
       const sample = s.ok ? { ok: true, n: s.n, columns: s.columns, rows: s.rows } : { ok: false, error: s.error, columns: [] };
 
       // 坐标：只有 spatial 才强制要求；其它方案留空即可
@@ -647,14 +671,23 @@ export default {
     },
 
     renderChart() {
-      const el = this.$refs.chartPanel?.getHost?.();
-      if (!el || !this.chartData) return;
-      import('echarts').then((echarts) => {
-        const chart = echarts.getInstanceByDom(el) || echarts.init(el);
-        const build = NR_CHART_BUILDERS[this.activeChart] || NR_CHART_BUILDERS.null;
-        chart.setOption(build(this.chartData, FORMATTERS), true);
-        chart.resize();
-      }).catch((e) => this.notify('error', '图表库加载失败：' + e.message));
+      if (!this.chartData) return;                       // 真没数据：空态文案会说明
+      return drawWhenReady({
+        getHost: () => this.$refs.chartPanel?.getHost?.() || null,
+        nextTick: this.$nextTick,
+        option: (NR_CHART_BUILDERS[this.activeChart] || NR_CHART_BUILDERS.null)(this.chartData, FORMATTERS)
+      }).then((r) => {
+        // 以前这里是 `if (!el) return;`：静默放弃，于是“初次分析不画、切 tab 才画”
+        if (!r.ok && (r.reason === 'no-host' || r.reason === 'zero-size')) {
+          this.notify('warning', (r.reason === 'zero-size'
+            ? '图表容器量不出尺寸（0 宽/0 高），等过 ' + r.waited + ' 帧仍未就绪'
+            : '图表容器还没就绪（等了 ' + r.waited + ' 帧）') + '，切一下图表类型可重画');
+        } else if (r.ok && r.empty) {
+          // setOption 确实跑了，但图画在 0 宽容器上 => 屏幕上一片空白
+          this.notify('warning', '图表已生成但宽度为 0（布局未完成），切一下图表类型或收缩侧边栏可重画');
+        }
+        return r;
+      });
     },
 
     async downloadInput() {
@@ -666,8 +699,13 @@ export default {
     // 而那部分已经挪到 utils/nonrandomSheetSpec.js 里当纯数据 + 纯函数了。
     async downloadTemplate() {
       const XLSX = await this.xlsx();
-      await writeWorkbook(XLSX, nrTemplateSheets(), 'Non-random-PERMANOVA_数据模板.xlsx');
+      await writeWorkbook(XLSX, nrTemplateSheets(), this.templateFileName());
       this.notify('success', '模板已下载：物种矩阵 / 样本信息 / 坐标 / 填写说明');
+    },
+
+    /** 文件名格式三个模块一致（见 sheetIo.templateFilename） */
+    templateFileName() {
+      return templateFilename('Non-random-PERMANOVA', this.stamp());
     },
 
     openImport() {
@@ -706,9 +744,15 @@ export default {
       }
     },
 
+    /** 先看后填：用户点「填入表单」才动表单，而且必须把对话框关掉 */
     applyImport() {
-      if (!this.imported) return;
+      if (!this.imported) {
+        // 不报错就是“点了没反应”：上面已经报过的解析错优先
+        if (!this.importError) this.importError = '先选一个能解析的文件';
+        return;
+      }
       Object.assign(this.form, nrToFormPatch(this.imported));
+      this.showImportDialog = false;
       // 导入的是真实数据，设计模板说明不再适用，否则导出结果会把用户数据标成某个模板名
       this.clearNrTemplate();
       const c = this.checks.community;
@@ -751,6 +795,7 @@ export default {
         payload: this.buildPayload(),
         verdict: this.falsePositiveSignal ? '是（自由置换假阳性）' : this.robustSignal ? '否（结论稳健）' : '',
         interpretation: this.analysisResult && this.analysisResult.interpretation,
+        diagnostics: this.diagnostics,
         permInfo: this.permutationInfo,
         modelInfo: this.modelInfo,
         templateLabel: this.selectedTemplate ? `${this.selectedTemplate.label}（合成演示数据）` : '用户输入数据',
@@ -780,8 +825,9 @@ export default {
       const bytes = Uint8Array.from(atob(url.split(',')[1]), (c) => c.charCodeAt(0));
       saveAs(new Blob([bytes], { type: 'image/png' }), filename);
     },
+    /** 时间戳统一由 sheetIo.fileStamp 给（三个模块的文件名要能对上） */
     stamp() {
-      return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      return fileStamp();
     }
   }
 };

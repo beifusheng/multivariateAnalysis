@@ -223,6 +223,7 @@ console.log('\n=== 导入 Excel（下载模板 -> 原样上传 -> 填入表单�
 {
   const XLSX = await import(pathToFileURL(path.join(FRONTEND, 'node_modules/xlsx/xlsx.mjs')).href);
   const sheetIo = await import(pathToFileURL(path.join(FRONTEND, 'src/utils/sheetIo.js')).href);
+  const nrSpec = await import(pathToFileURL(path.join(FRONTEND, 'src/utils/nonrandomSheetSpec.js')).href);
   const toFile = (sheets, name = 'data.xlsx') => {
     const wb = XLSX.utils.book_new();
     for (const [n, aoa] of sheets) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), n);
@@ -232,14 +233,15 @@ console.log('\n=== 导入 Excel（下载模板 -> 原样上传 -> 填入表单�
   // 1) 官方模板原样上传
   const vm = makeVm();
   vm.openImport();
-  await vm.handleFileChange(toFile(sheetIo.buildTemplateSheets().filter(([n]) => n !== '填写说明')));
+  await vm.handleFileChange(toFile(nrSpec.nrTemplateSheets().filter(([n]) => n !== '填写说明')));
   const tabOf = (name) => (vm.importTabs || []).find((x) => x.name === name);
   check('模板导入无错误', vm.importError === '', vm.importError);
-  check('预览第一个 tab 写明 6 样本 × 8 物种', /6 样本 × 8 物种/.test(tabOf('community')?.label || ''),
+  check('预览第一个 tab 写明 12 样本 × 6 物种', /12 样本 × 6 物种/.test(tabOf('community')?.label || ''),
     JSON.stringify((vm.importTabs || []).map((x) => x.label)));
   check('物种预览行带物种列', Object.keys(tabOf('community').rows[0]).includes('Bacteroides'));
   check('样本预览列包含 group/strata', tabOf('sample').cols.join(',') === '样本,group,strata', tabOf('sample').cols.join(','));
-  check('坐标 tab 存在', !!tabOf('coordinate') && tabOf('coordinate').rows.length === 6);
+  check('坐标 tab 存在', !!tabOf('coordinate') && tabOf('coordinate').rows.length === 12,
+    String(tabOf('coordinate') && tabOf('coordinate').rows.length));
   check('导入阶段不动表单（先看再填）', vm.form.communityStr === '');
 
   vm.form.formula = 'group';
@@ -248,13 +250,23 @@ console.log('\n=== 导入 Excel（下载模板 -> 原样上传 -> 填入表单�
   vm.applyImport();
   const comm = JSON.parse(vm.form.communityStr);
   const samp = JSON.parse(vm.form.sampleStr);
-  check('填入后物种矩阵是 6×8 数值', comm.length === 6 && comm[0].length === 8 && comm[0][0] === 42);
-  check('填入后样本信息是行对象数组', samp.length === 6 && samp[0].group === 'Case' && samp[5].group === 'Control');
-  check('坐标也一并填入', JSON.parse(vm.form.coordinatesStr).length === 6);
+  check('填入后物种矩阵是 12×6 数值', comm.length === 12 && comm[0].length === 6 && comm[0][0] === 39, JSON.stringify(comm[0]));
+  check('填入后样本信息是行对象数组', samp.length === 12 && samp[0].group === 'Case' && samp[11].group === 'Control',
+    samp.map((r) => r.group).join(','));
+  check('坐标也一并填入', JSON.parse(vm.form.coordinatesStr).length === 12);
   check('导入后能运行', vm.canRun === true, vm.runHint);
-  check('导入成功的提示里写了形状', vm.notices.some(([t, m]) => t === 'success' && /6 样本 × 8 物种/.test(m)),
+  check('导入成功的提示里写了形状', vm.notices.some(([t, m]) => t === 'success' && /12 样本 × 6 物种/.test(m)),
     JSON.stringify(vm.notices));
   check('导入真实数据后模板选择被清掉', vm.selectedTemplate === null && vm.selectedNrId === '');
+  // 用户实机报的就是这个：解析都对了、表单也写了，但对话框不关，看起来就是“点了没反应”
+  check('填入后对话框关掉', vm.showImportDialog === false, String(vm.showImportDialog));
+
+  const vmSilent = makeVm();
+  vmSilent.showImportDialog = true;
+  vmSilent.applyImport();
+  check('没解析过就点填入 -> 给明确提示（不是静默 return）',
+    /文件|解析/.test(vmSilent.importError || '') && vmSilent.showImportDialog === true,
+    JSON.stringify({ err: vmSilent.importError, open: vmSilent.showImportDialog }));
 
   // 2) 缺表 / 错表
   const vm2 = makeVm();
@@ -333,6 +345,147 @@ console.log('\n=== 导入 Excel（下载模板 -> 原样上传 -> 填入表单�
   sel.analysisResult = conf.json;
   check('选了模板后数据说明会标出模板名', /合成演示数据/.test(sel.exportCtx('图表').templateLabel),
     sel.exportCtx('图表').templateLabel);
+}
+
+console.log('\n=== 9. 「下载模板 → 导入 → 真跑 R」必须跑得通 ===');
+{
+  // 用户会真的下载模板、原封不动上传、然后点运行。这条链任何一环糊上去，
+  // 第一次接触这个功能的人拿到的就是一个跑不出结果的空壳。
+  const XLSX9 = await import(pathToFileURL(path.join(FRONTEND, 'node_modules/xlsx/xlsx.mjs')).href);
+  const nrSpec9 = await import(pathToFileURL(path.join(FRONTEND, 'src/utils/nonrandomSheetSpec.js')).href);
+  const toFileFor = (sheets) => {
+    const wb = XLSX9.utils.book_new();
+    for (const [n, aoa] of sheets) XLSX9.utils.book_append_sheet(wb, XLSX9.utils.aoa_to_sheet(aoa), n);
+    return new File([XLSX9.write(wb, { bookType: 'xlsx', type: 'array' })], 'tpl.xlsx');
+  };
+  const vm = makeVm();
+  vm.openImport();
+  await vm.handleFileChange(toFileFor(nrSpec9.nrTemplateSheets().filter(([n]) => n !== '填写说明')));
+  vm.applyImport();
+  check('模板被自己的导入器接受', !vm.importError, vm.importError);
+  check('填入后对话框关掉', vm.showImportDialog === false);
+  check('模板三个字段都填上了', ['communityStr', 'sampleStr', 'coordinatesStr']
+    .every((k) => (vm.form[k] || '').length > 20), Object.keys(vm.form).join(','));
+  check('公式与分层变量来自模板', vm.form.strata === 'strata' || vm.canRun === true, vm.runHint);
+  const payload = vm.buildPayload();
+  const inp = path.join(TMP, 'tpl.json'), outp = inp + '.out', err = inp + '.err';
+  fs.writeFileSync(inp, JSON.stringify(payload));
+  let res = null, rerr = '';
+  try {
+    execFileSync(RSCRIPT, [path.join(ROOT, 'r-scripts/nonrandom_permanova.R'), inp, outp, err],
+      { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], timeout: 300000 });
+    res = JSON.parse(fs.readFileSync(outp, 'utf8'));
+  } catch (e) {
+    rerr = String(e.stdout || '') + String(e.stderr || '');
+  }
+  check('模板真跑 R 成功', !!res && res.success !== false, rerr.split('\n').filter((l) => /Error|错误/.test(l))[0] || res?.error || '');
+  check('模板送 R 的置换方案是 stratified', res && res.permutation?.scheme === 'stratified',
+    res ? JSON.stringify(res.permutation?.scheme) : rerr.slice(0, 120));
+  check('受限置换至少有一个可行批次', (res?.permutation?.feasible_blocks ?? 0) >= 2,
+    JSON.stringify(res?.permutation?.feasible_blocks));
+  // 旧模板（6 样本、每批 1:1）就是在这里翻车：p_free=1、p_constrained=1
+  check('模板的 p_constrained 显著（旧版恒 >= 0.25）',
+    Number(res?.observed?.p_constrained) < 0.05, JSON.stringify(res?.observed));
+  check('模板的 p_free 也显著（说明分组效应是真的）',
+    Number(res?.observed?.p_free) < 0.05, JSON.stringify(res?.observed?.p_free));
+  const vmT = makeVm();
+  check('下载模板的文件名走统一格式',
+    typeof vmT.templateFileName === 'function' &&
+      /^Non-random-PERMANOVA 数据模板_[0-9-]{19}\.xlsx$/.test(String(vmT.templateFileName())),
+    String(vmT.templateFileName && vmT.templateFileName()));
+  check('示例的 p_free 与 p_constrained 不是同一个数（两个都算出来了）',
+    res && String(res.observed.p_free) !== String(res.observed.p_constrained), JSON.stringify(res?.observed));
+}
+
+console.log('\n=== 10. 退化设计必须开口（引擎 diagnostics 一路到结果）===');
+{
+  // 每层 1 Case + 1 Control：组间差异拉到天量，p 仍下不去 0.05。
+  // 以前这种设计只会安静地给出 p=1，屏幕上是“没效应”，而真实原因是检验没有自由度。
+  const mkDegenerate = (perBlock) => {
+    const rows = [], sample = [];
+    let k = 0;
+    for (let b = 1; b <= 3; b++) {
+      for (let j = 0; j < 2 * perBlock; j++) {
+        const isCase = j < perBlock;
+        rows.push(isCase ? [80 + b, 5, 60, 8 + b, 30, 4] : [5, 80 + b, 8, 60 + b, 4, 30]);
+        sample.push({ sample: 'S' + (++k), group: isCase ? 'Case' : 'Control', strata: 'B' + b });
+      }
+    }
+    return { communityData: rows, sampleData: sample, formula: 'group', scheme: 'stratified',
+      strata: 'strata', distance: 'bray', permutations: 999, seed: 7 };
+  };
+  const runEngine = (payload, tag) => {
+    const inp = path.join(TMP, tag + '.json'), o = inp + '.out', e = inp + '.err';
+    fs.writeFileSync(inp, JSON.stringify(payload));
+    execFileSync(RSCRIPT, [path.join(ROOT, 'r-scripts/nonrandom_permanova.R'), inp, o, e],
+      { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], timeout: 300000 });
+    return JSON.parse(fs.readFileSync(o, 'utf8'));
+  };
+
+  const deg = runEngine(mkDegenerate(1), 'degenerate');
+  const good = runEngine(mkDegenerate(2), 'balanced');
+
+  check('退化设计：效应巨大但 p 仍不显著（统计事实，不是bug）',
+    Number(deg.observed.F_model) > 50 && Number(deg.observed.p_constrained) > 0.05,
+    JSON.stringify({ F: deg.observed.F_model, p: deg.observed.p_constrained }));
+  check('退化设计：引擎给出 diagnostics',
+    Array.isArray(deg.diagnostics) && deg.diagnostics.length >= 1, JSON.stringify(deg.diagnostics));
+  check('diagnostics 说清了原因与出路（不是只说“无法计算”）',
+    /退化/.test(deg.diagnostics[0]) && /下界/.test(deg.diagnostics[0]) && /2 Case \+ 2 Control/.test(deg.diagnostics[0]),
+    String(deg.diagnostics[0]).slice(0, 160));
+  check('diagnostics 里的下界是精确组合值，不是抽样估计',
+    /下界就是 0\.250/.test(deg.diagnostics[0]) && /25% 的置换/.test(deg.diagnostics[0]),
+    String(deg.diagnostics[0]).slice(0, 110));
+  // 999 次抽样估计会报 27%、9999 次报 25%；这个设计的精确答案是 2/8 = 25%。
+  // 报“约 0.27”会让人以为置换数提上去就能显著，其实永远到不了。
+  check('下界 0.250 与实测 p 同一量级（再多置换也只是逼近它）',
+    Math.abs(0.25 - Number(deg.observed.p_constrained)) < 0.05, 'p_con=' + deg.observed.p_constrained);
+  check('正常设计（2:2）：p 显著且 diagnostics 为空',
+    Number(good.observed.p_constrained) < 0.05 && (good.diagnostics || []).length === 0,
+    JSON.stringify({ p: good.observed.p_constrained, d: good.diagnostics }));
+
+  // 视图层：computed 要把旧 R 脚本的缺失/字符串当成没提醒，不能把 null 当一条提醒
+  const vm = makeVm();
+  vm.analysisResult = deg;
+  check('视图 diagnostics 计算属性拿到提醒', vm.diagnostics.length >= 1, JSON.stringify(vm.diagnostics));
+  const vmOld = makeVm();
+  vmOld.analysisResult = { interpretation: 'x', observed: {} };        // 旧引擎输出
+  check('旧结果无 diagnostics 字段时返回空数组而不是报错',
+    Array.isArray(vmOld.diagnostics) && vmOld.diagnostics.length === 0, JSON.stringify(vmOld.diagnostics));
+  const vmStr = makeVm();
+  vmStr.analysisResult = { diagnostics: ['', '  ', null, '真实提醒'] };
+  check('空字符串/null 不会被当成一条提醒', vmStr.diagnostics.join('|') === '真实提醒',
+    JSON.stringify(vmStr.diagnostics));
+}
+
+console.log('\n=== 11. 初次分析的绘制时序（不该等用户切 tab 补救）===');
+{
+  // 用户报的是：跑完分析图表是空的，切一下图表类型才画出来。
+  // 旧 renderChart 是 `const el = ...; if (!el || !chartData) return;`——
+  // 结果区刚 v-if 出现时容器还没落地，那一次尝试作废，之后再没人叫它画。
+  const vm = makeVm();
+  vm.analysisResult = { chart_data: { groups: [], samples: [] }, permutation: { scheme: 'stratified' } };
+  let frames = 0;
+  const fakeEl = { tag: 'chart-host' };
+  vm.$refs = { chartPanel: { getHost: () => (frames > 6 ? fakeEl : (frames++, null)) } };
+  vm.notices = [];
+  let out = null, err = null;
+  try { out = await vm.renderChart(); } catch (e) { err = String(e && e.message).slice(0, 120); }
+  check('renderChart 不把异常抛给调用方', err === null, err || '');
+  check('拿不到容器时会 notify 而不是沉默',
+    (vm.notices || []).some(([t, m]) => t === 'warning' && /图表|容器/.test(String(m))),
+    JSON.stringify(vm.notices));
+  check('重试有界（不会无限 nextTick 卡住）', out && typeof out.waited === 'number' && out.waited <= 5,
+    JSON.stringify(out));
+
+  // 数据没来之前不该画，也不该报「容器没就绪」（那是两种不同的空）
+  const vm2 = makeVm();
+  vm2.analysisResult = null;
+  vm2.$refs = { chartPanel: { getHost: () => null } };
+  vm2.notices = [];
+  const r2 = await vm2.renderChart();
+  check('没有图表数据时直接返回、不报容器警告',
+    vm2.notices.length === 0 && r2 === undefined, JSON.stringify({ n: vm2.notices.length, r2 }));
 }
 
 await server.close();

@@ -145,7 +145,7 @@ console.log('\n[8] nrToFormPatch：解析结果 -> 表单字符串，形状不�
   const sheets = await (async () => {
     const XLSX = await import(pick('frontend/node_modules/xlsx/xlsx.mjs'));
     const wb = XLSX.utils.book_new();
-    for (const [n, aoa] of sheetIo.buildTemplateSheets().filter(([n]) => n !== '填写说明')) {
+    for (const [n, aoa] of spec.nrTemplateSheets().filter(([n]) => n !== '填写说明')) {
       wb.SheetNames.push(n);
       wb.Sheets[n] = XLSX.utils.aoa_to_sheet(aoa);
     }
@@ -165,10 +165,10 @@ console.log('\n[8] nrToFormPatch：解析结果 -> 表单字符串，形状不�
   const comm = JSON.parse(patch.communityStr);
   const samp = JSON.parse(patch.sampleStr);
   const co = JSON.parse(patch.coordinatesStr);
-  t('物种矩阵 6×8 数值', comm.length === 6 && comm[0].length === 8 && comm[0][0] === 42);
-  t('样本信息行数与主表一致', samp.length === 6);
-  t('分组跟着样本走', samp[0].group === 'Case' && samp[5].group === 'Control', samp.map((r) => r.group).join(','));
-  t('坐标 6 行 2 列', co.length === 6 && co[0].length === 2);
+  t('物种矩阵 12×6 数值', comm.length === 12 && comm[0].length === 6 && comm[0][0] === 39, JSON.stringify(comm[0]));
+  t('样本信息行数与主表一致', samp.length === 12, String(samp.length));
+  t('分组跟着样本走', samp[0].group === 'Case' && samp[11].group === 'Control', samp.map((r) => r.group).join(','));
+  t('坐标 12 行 2 列', co.length === 12 && co[0].length === 2, String(co.length));
   t('patch 不含 coordinatesStr 以外的多余键',
     Object.keys(patch).sort().join(',') === 'communityStr,coordinatesStr,sampleStr', Object.keys(patch).join(','));
 
@@ -186,6 +186,24 @@ console.log('\n[8] nrToFormPatch：解析结果 -> 表单字符串，形状不�
 
   const bad = sheetIo.mapWorkbook({ 样本信息: asSheets['样本信息'] }, spec.NR_IMPORT_SHEETS, { primary: 'community' });
   t('缺主表 -> 明确拒绝', bad.ok === false && /物种矩阵/.test(bad.error), bad.error);
+}
+
+console.log('\n[引擎提醒通路] 引擎说“这次不可能显著”时，导出里不能丢');
+{
+  const diag = ['受限置换的零分布退化：999 次置换里只有 2 个互不相同的统计量，p 的理论下界约 0.270。'];
+  const jobs = spec.planExport(['excel'], mkCtx({ diagnostics: diag }), 'STAMP');
+  const summary = jobs[0].sheets.find((x) => x[0] === '结论对比')[1];
+  t('Excel 结论对比里带上引擎提醒',
+    summary.some((r) => String(r[0] || '').includes('引擎提醒') && String(r[1] || '').includes('零分布退化')),
+    JSON.stringify(summary.slice(-2)));
+  const none = spec.planExport(['excel'], mkCtx({ diagnostics: [] }), 'S')[0].sheets.find((x) => x[0] === '结论对比')[1];
+  t('没有提醒时不多塞一行', !none.some((r) => String(r[0] || '').includes('引擎提醒')), JSON.stringify(none.slice(-1)));
+  t('旧 R 脚本没有 diagnostics 字段也不炸', (() => {
+    try { spec.planExport(['excel'], mkCtx({ diagnostics: undefined }), 'S'); return true; } catch (e) { return false; }
+  })());
+  t('多条提醒各占一行',
+    spec.planExport(['excel'], mkCtx({ diagnostics: ['甲问题', '乙问题'] }), 'S')[0].sheets
+      .find((x) => x[0] === '结论对比')[1].filter((r) => String(r[0] || '').includes('引擎提醒')).length === 2);
 }
 
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);

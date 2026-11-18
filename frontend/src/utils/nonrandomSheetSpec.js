@@ -10,7 +10,6 @@
  * ctx（由视图组装，字段都是真结果里的）：
  *   { r, analysisResult, cd, payload, verdict, interpretation, permInfo, modelInfo, templateLabel }
  */
-import { buildTemplateSheets } from './sheetIo.js';
 
 /** 导入需要的工作表。kind 对应 sheetIo 的解析器；aliases 只在提示文案里用 */
 export const NR_IMPORT_SHEETS = [
@@ -55,7 +54,7 @@ export const NR_EXPORT_OPTIONS = [
     type: 'xlsx',
     fileTag: '结果',
     sheets(ctx) {
-      const { r, analysisResult: ar, verdict, interpretation, permInfo, modelInfo, templateLabel } = ctx;
+      const { r, analysisResult: ar, verdict, interpretation, permInfo, modelInfo, templateLabel, diagnostics } = ctx;
       const summary = [
         ['项目', '值'],
         ['检验术语', r.tested_term],
@@ -74,6 +73,8 @@ export const NR_EXPORT_OPTIONS = [
         ['vegan / R', `${ar.vegan_version} / R ${ar.r_version}`],
         ['数据说明', templateLabel]
       ];
+      // 引擎提醒逐条入表：导出给合作者看时，“这个 p 本来就不可能显著”不能丢
+      (diagnostics || []).forEach((d, i) => summary.push([i === 0 ? '⚠️ 引擎提醒' : '⚠️ 引擎提醒(续)', d]));
       const table = [['术语', 'df', '水平数', 'F', 'R²']];
       (r.table || []).forEach((x) => table.push([x.term, x.df, x.n_levels, x.F_model, x.R2]));
       return [
@@ -169,7 +170,79 @@ export function nrToFormPatch(fields) {
   return patch;
 }
 
-/** 模板：数据形状由 sheetIo 统一给，这里只声明"这个模块下载哪几张表" */
+/**
+ * 下载模板：表名 + 示例数据。
+ * 这份示例会被用户真的导入并点「运行」，所以它必须跑得通、而且要跑出显著结果，
+ * 实测（nonrandom_permanova.R, permutations=999, seed=7）：
+ *   F=109.5、p_free=0.0071、p_constrained=0.0103、feasible_blocks=3。
+ * 数据形状是「3 批次 × 每批 2 Case + 2 Control」，理由见「填写说明」表——
+ * 每批 1:1 会让受限置换的零分布退化，p 恒不小于 0.25。
+ */
 export function nrTemplateSheets() {
-  return buildTemplateSheets();
+  return [
+    ['物种矩阵', [
+      ['样本', 'Bacteroides', 'Prevotella', 'Faecalibacterium', 'Ruminococcus', 'Akkermansia', 'Bifidobacterium'],
+      ['S1', 39, 8, 27, 4, 12, 5],
+      ['S2', 40, 5, 26, 4, 12, 5],
+      ['S3', 15, 25, 13, 19, 3, 15],
+      ['S4', 14, 27, 14, 22, 2, 13],
+      ['S5', 45, 10, 26, 9, 14, 6],
+      ['S6', 47, 13, 28, 9, 12, 5],
+      ['S7', 17, 30, 15, 23, 4, 14],
+      ['S8', 19, 29, 11, 27, 3, 15],
+      ['S9', 51, 15, 26, 14, 13, 5],
+      ['S10', 51, 18, 26, 14, 14, 6],
+      ['S11', 25, 35, 14, 30, 3, 14],
+      ['S12', 24, 35, 14, 29, 3, 15]
+    ]],
+    ['样本信息', [
+      ['样本', 'group', 'strata'],
+      ['S1', 'Case', 'B1'],
+      ['S2', 'Case', 'B1'],
+      ['S3', 'Control', 'B1'],
+      ['S4', 'Control', 'B1'],
+      ['S5', 'Case', 'B2'],
+      ['S6', 'Case', 'B2'],
+      ['S7', 'Control', 'B2'],
+      ['S8', 'Control', 'B2'],
+      ['S9', 'Case', 'B3'],
+      ['S10', 'Case', 'B3'],
+      ['S11', 'Control', 'B3'],
+      ['S12', 'Control', 'B3']
+    ]],
+    ['坐标', [
+      ['样本', 'x', 'y'],
+      ['S1', 0.2, -0.2],
+      ['S2', 1.9, -0.3],
+      ['S3', 3.1, 7.1],
+      ['S4', 4.9, 6.7],
+      ['S5', 19.7, -0.5],
+      ['S6', 21.9, 0.5],
+      ['S7', 22.6, 6.6],
+      ['S8', 24.1, 7.5],
+      ['S9', 40.4, 0],
+      ['S10', 41.9, -0.5],
+      ['S11', 42.7, 7],
+      ['S12', 44.9, 7]
+    ]],
+    ['填写说明', [
+      ['Non-random PERMANOVA 模板填写说明'],
+      [''],
+      ['1. 物种矩阵（必需）：第一列样本 ID，其余每列一个物种/OTU 的丰度（原始读数即可）。'],
+      ['2. 样本信息（必需）：第一列样本 ID（可与物种矩阵顺序不同，导入时按 ID 对齐），'],
+      ['   group 是待检验分组，strata 是分层变量；受限置换只在 strata 内部交换 group 标签。'],
+      ['   ⚠️ 本模块只接受因子（分类）变量；pH、年龄这类连续变量请先分箱。'],
+      ['3. 坐标（可选）：只有「空间受限置换」需要；第一列样本 ID，另两列 x/y。'],
+      [''],
+      ['示例设计为什么是 12 个样本（3 批次 × 每批 2 Case + 2 Control）：'],
+      ['   受限置换只能在一个批次内部交换标签。如果每个批次只有 1 Case + 1 Control，'],
+      ['   把全部批次同时翻转标签得到的置换与观测设计完全同构 —— 零分布退化，'],
+      ['   p 值下界约 0.25，无论效应多强都不会显著（旧模板就踩了这个坑，实测 p_free=1、p_constrained=1）。'],
+      ['   每批 2:2 时有 C(4,2)^3 = 216 个置换，p 下界约 0.009，示例才可能跑出真结果。'],
+      ['本示例实测（permutations=999, seed=7, Bray-Curtis）：p_free=0.0071、p_constrained=0.0103。'],
+      [''],
+      ['导入后请先核对预览，再点「填入表单」。']
+    ]]
+  ];
 }
+

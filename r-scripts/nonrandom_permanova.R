@@ -460,6 +460,41 @@ main <- function() {
   }
   dropped_blocks <- if (is.null(use_blocks)) NA_integer_ else as.integer(sum(table(use_blocks) < MIN_BLOCK_SIZE))
 
+  # ---------------- 退化设计诊断 ----------------
+  # 真正的退化不是“p 算大了”，而是大量置换与观测设计完全同构（F 一模一样）：
+  # 这部分置换无论抽多少都会计入 #{null >= obs}，于是 p 被钉在“并列频率”上跳不出去。
+  # 典型场景：每个区组只有 1 Case + 1 Control，层内对调标签回到同一个分割。
+  #
+  # 这里踩过两个坑，别再改回去：
+  #   1) 拿 mean(f_null >= f_obs) 当下界——那个量就是 p 本身（没效应的设计自然 ≈0.5），
+  #      结果把 9/26 个教学模板全误报了。
+  #   2) 拿 mean(f_null == f_obs) 当下界——方向对了，但它是 Monte-Carlo：
+  #      999 次报 27%、9999 次报 25%，而这个设计的精确答案就是 2/8 = 25%。所以下面直接算组合数。
+  #
+  # 层内置换总数 = ∏ n_b!；保持分组向量不变的是 ∏ k_b!(n_b-k_b)!；
+  # 把所有层的标签同时翻转（Case<->Control）得到的分割只换了列名，F 完全相等，故乘 2。
+  # 并列比例 = 2·∏ k_b!(n_b-k_b)! / ∏ n_b!  （用 lfactorial，避免阶乘溢出）
+  diagnostics <- character(0)
+  if (!is.null(use_blocks)) {
+    fv <- f_null_constrained[!is.na(f_null_constrained)]
+    distinct_f <- if (length(fv)) length(unique(round(fv, 10))) else 0L
+    bt <- table(use_blocks, joint_grp)
+    log_tie <- log(2) + sum(apply(bt, 1, function(cnt)
+      lfactorial(cnt[1]) + lfactorial(cnt[2]) - lfactorial(sum(cnt))))
+    tie_exact <- exp(min(log_tie, 0))
+    if (tie_exact > 0.05) {
+      diagnostics <- c(diagnostics, sprintf(paste0(
+        "受限置换的零分布退化：%.0f%% 的置换与观测设计算出完全相同的 F（不同取值只有 %d 个），",
+        "因此 p 的下界就是 %.3f——即使组间差异无穷大也跳不过 0.05。",
+        "原因是分层变量的层内水平太少（每层每类样本数：%s，即一个区组里只有一例待比较水平）。",
+        "出路：① 每层至少放 2 个待比较水平（如 2 Case + 2 Control）；",
+        "② 或者这个变量本来就不是分层变量，应该放进公式当待检验项；",
+        "③ 或者换一个真正与批次共线的变量做 strata。"),
+        100 * tie_exact, distinct_f, tie_exact,
+        paste(head(sort(unique(as.vector(bt))), 4), collapse = '/')))
+    }
+  }
+
   # ---------------- 图表数据（全部来自本次真实计算）----------------
   pcoa <- tryCatch({
     # 仅用于绘图：取 Gower 双中心化后的正特征值轴（非欧氏距离会有负特征值，
@@ -552,6 +587,7 @@ main <- function() {
       strata_variable = strata_var %||% NA_character_,
       feasible_blocks = feasible_blocks,
       dropped_blocks = dropped_blocks,
+      distinct_null_values = length(unique(round(f_null_constrained[!is.na(f_null_constrained)], 10))),
       seed = seed,
       elapsed_seconds = round(elapsed, 3),
       note = plan$note
@@ -568,6 +604,7 @@ main <- function() {
     ),
     chart_data = chart_data,
     interpretation = interpretation,
+    diagnostics = if (length(diagnostics)) as.list(diagnostics) else list(),
     vegan_version = as.character(utils::packageVersion("vegan")),
     r_version = as.character(getRversion()),
     timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S")

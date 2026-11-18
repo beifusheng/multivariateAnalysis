@@ -160,6 +160,23 @@ p_all <- replicate(200, all(blk[permute_within_blocks(seq_len(n), blk)] == blk))
 ok("200 次置换全部保持区组", all(p_all))
 ok("置换确实改变了顺序（不是恒等）", sum(p1 != seq_len(n)) > 0)
 
+cat("== 7) 退化设计：每层 1 Case + 1 Control 时，层内可交换的标签指派极少 ==\n")
+# 这是“p 下界被钉死”的根源：受限置换只能重排标签，如果重排能得到的不同指派只有几个，
+# 那么零分布里绝大多数抽样与观测设计完全同构（F 相等），p 就永远跳不出 0.05。
+# 引擎对这种设计必须开口说（diagnostics），不能静默给个 p=1 让用户以为“没效应”。
+distinct_assignments <- function(per_block, draws = 600) {
+  n <- 6 * per_block
+  grp <- rep(rep(c("Case", "Control"), each = per_block), times = 3)[seq_len(n)]
+  blk <- rep(paste0("B", 1:3), each = 2 * per_block)[seq_len(n)]
+  set.seed(9)
+  seen <- replicate(draws, paste(grp[permute_within_blocks(seq_len(n), blk)], collapse = ","))
+  length(unique(seen))
+}
+k1 <- distinct_assignments(1)
+k2 <- distinct_assignments(2)
+ok("每层 1:1：可达指派只有个位数（p 下界约 0.25）", k1 <= 8, paste("distinct =", k1))
+ok("每层 2:2：可达指派多到能支撑 p<0.05", k2 > 3 * k1, paste(k1, "->", k2))
+
 cat(if (fails == 0) "\n✅ 全部通过：统计口径与 vegan 一致，边界条件有明确拒绝\n"
     else sprintf("\n❌ %d 项未通过\n", fails))
 quit(status = if (fails == 0) 0 else 1)
