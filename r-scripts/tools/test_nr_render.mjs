@@ -269,6 +269,15 @@ console.log('\n=== 引擎提醒真的渲染到屏幕上（而不是只在 JSON �
   check('提醒文案出现在结果区', /零分布退化/.test(withDiag), (withDiag.match(/headline-diagnostic[^<]{0,60}/) || ['(没渲染)'])[0]);
   check('用的是提醒样式而不是普通解释文本', /headline-diagnostic/.test(withDiag));
   check('无提醒时不多渲染一个空框', !/headline-diagnostic/.test(await render('无提醒', () => ({ analysisResult: result }))));
+
+  // 样式真的得存在于某个会加载的地方：这个类归本视图自带（不靠 Med 的 CSS 搬运）
+  const viewSrc = (await import('node:fs')).readFileSync(
+    path.join(FRONTEND, 'src/views/r-analysis/Nonrandom_PERMANOVA.vue'), 'utf8');
+  check('.headline-diagnostic 的样式就在本视图的 <style scoped> 里',
+    /<style scoped>[\s\S]*\.headline-diagnostic\s*\{/.test(viewSrc), '');
+  check('共享的 r-analysis.css 里不再有这条死规则（不重复来路）',
+    !/headline-diagnostic/.test((await import('node:fs')).readFileSync(
+      path.join(FRONTEND, 'src/components/r-analysis/r-analysis.css'), 'utf8')), '');
 }
 
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);

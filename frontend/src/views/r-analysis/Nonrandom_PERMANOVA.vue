@@ -832,3 +832,23 @@ export default {
   }
 };
 </script>
+
+<style scoped>
+/* 本视图自己的元素，样式就写在这里。
+   以前所有 ra 样式都堆在 PERMANOVA_Med.vue 的 scoped 块里、靠 extract_ra_styles.mjs 搬到
+   r-analysis.css（那个文件头部还留着 "generated from PERMANOVA_Med.vue —— do not hand-edit"），
+   结果是：往别的视图加一个类，得先去改第三个文件的 CSS。外壳与视图各自的样式自己带着，
+   这里就是引擎提醒那条横幅。 */
+.headline-diagnostic {
+  margin: 8px 0 0 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #84351a;
+  background: #fef0f0;
+  border: 1px solid #fbc4c4;
+  border-left: 4px solid #e6a23c;
+  border-radius: 6px;
+  font-weight: 600;
+}
+</style>

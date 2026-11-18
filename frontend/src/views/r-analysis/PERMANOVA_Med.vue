@@ -25,32 +25,9 @@
       </div>
 
       <div class="toolbar-content">
-        <el-tooltip content="下载 Excel 模板" placement="top">
-          <el-button @click="downloadTemplate" type="success" class="toolbar-btn">
-            <el-icon>
-              <Download />
-            </el-icon>
-            <span class="btn-text">下载模板</span>
-          </el-button>
-        </el-tooltip>
-
-        <el-tooltip content="导入 Excel/CSV 数据" placement="top">
-          <el-button @click="showImportDialog = true" type="primary" class="toolbar-btn">
-            <el-icon>
-              <Upload />
-            </el-icon>
-            <span class="btn-text">导入数据</span>
-          </el-button>
-        </el-tooltip>
-
-        <el-tooltip content="导出分析结果" placement="top">
-          <el-button @click="showExportDialog = true" type="warning" class="toolbar-btn" :disabled="!analysisResult">
-            <el-icon>
-              <FolderOpened />
-            </el-icon>
-            <span class="btn-text">导出结果</span>
-          </el-button>
-        </el-tooltip>
+        <ToolbarActions :can-run="canRunAnalysis" :has-result="!!analysisResult"
+          export-tip="导出分析结果（Excel / JSON / 图表 PNG）"
+          @template="downloadTemplate" @import="openImport" @export="openExport" @input="downloadInput" />
       </div>
     </div>
 
@@ -481,99 +458,28 @@
     </div><!-- main-content -->
   </div><!-- permanova-med-container -->
 
-  <!-- 导入对话框 -->
-  <el-dialog v-model="showImportDialog" title="📥 导入数据" width="900px" :close-on-click-modal="false">
-    <el-upload drag :auto-upload="false" :on-change="handleFileChange" :show-file-list="false" accept=".xlsx,.xls,.csv">
-      <el-icon class="el-icon--upload">
-        <UploadFilled />
-      </el-icon>
-      <div class="el-upload__text">
-        将文件拖到此处，或<em>点击上传</em>
-      </div>
-      <template #tip>
-        <div class="el-upload__tip">
-          支持 Excel (.xlsx/.xls) 和 CSV 文件，包含 4 个 sheet：Outcome、Mediator、Predictor、Covariates
-        </div>
-      </template>
-    </el-upload>
+  <!-- 导入对话框：外壳只管"说明→选文件→错误/警告→预览→填入表单"这个顺序，
+       哪几张表、叫什么名、按谁对齐全在 utils/medSheetSpec.js 里声明 -->
+  <ImportDialog v-model="showImportDialog" :sheets="importSheets" :tabs="importTabs"
+    :error="importError" :warnings="importWarnings"
+    @file-change="handleFileChange" @apply="applyImport" />
 
-    <div v-if="importPreview" class="import-preview">
-      <el-tabs v-model="importPreviewActiveTab">
-        <el-tab-pane label="结果变量 (Y)" name="outcome">
-          <el-table :data="importPreview.outcomePreview" border max-height="300">
-            <el-table-column v-for="col in importPreview.outcomeCols" :key="col.key" :prop="col.key"
-              :label="col.label" />
-          </el-table>
-        </el-tab-pane>
-        <el-tab-pane label="中介变量 (M)" name="mediator">
-          <el-table :data="importPreview.mediatorPreview" border max-height="300">
-            <el-table-column v-for="col in importPreview.mediatorCols" :key="col.key" :prop="col.key"
-              :label="col.label" />
-          </el-table>
-        </el-tab-pane>
-        <el-tab-pane label="预测变量 (X)" name="predictor">
-          <el-table :data="importPreview.predictorPreview" border max-height="300">
-            <el-table-column v-for="col in importPreview.predictorCols" :key="col.key" :prop="col.key"
-              :label="col.label" />
-          </el-table>
-        </el-tab-pane>
-        <el-tab-pane label="协变量" name="covariates">
-          <el-table :data="importPreview.covariatesPreview" border max-height="300">
-            <el-table-column v-for="col in importPreview.covariatesCols" :key="col.key" :prop="col.key"
-              :label="col.label" />
-          </el-table>
-        </el-tab-pane>
-      </el-tabs>
-    </div>
-
-    <template #footer>
-      <el-button @click="showImportDialog = false">取消</el-button>
-      <el-button type="primary" @click="confirmImport">确认导入</el-button>
-    </template>
-  </el-dialog>
-
-  <!-- 导出对话框 -->
-  <el-dialog v-model="showExportDialog" title="💾 导出结果" width="500px">
-    <div class="export-dialog-content">
-      <p class="export-hint">选择要导出的内容：</p>
-
-      <div class="export-options">
-        <el-checkbox-group v-model="exportOptions">
-          <div class="checkbox-wrapper">
-            <el-checkbox label="json">完整结果 (JSON)</el-checkbox>
-          </div>
-          <div class="checkbox-wrapper">
-            <el-checkbox label="globalEffect">分组置换检验 (Excel)</el-checkbox>
-          </div>
-          <div class="checkbox-wrapper">
-            <el-checkbox label="mediatorEffects">路径分解 (Excel)</el-checkbox>
-          </div>
-          <div class="checkbox-wrapper">
-            <el-checkbox label="chartPNG">当前图表 (PNG)</el-checkbox>
-          </div>
-        </el-checkbox-group>
-      </div>
-    </div>
-
-    <template #footer>
-      <el-button @click="showExportDialog = false">取消</el-button>
-      <el-button type="warning" @click="confirmExport" :disabled="exportOptions.length === 0">
-        导出
-      </el-button>
-    </template>
-  </el-dialog>
+  <!-- 导出对话框：勾选清单与文件内容都在 medSheetSpec 里算，这里不拼 -->
+  <ExportDialog v-model="showExportDialog" :options="exportOptions2" :selected="exportOptions"
+    :error="exportError" @update:selected="(v) => (exportOptions = v)" @confirm="confirmExport" />
 </template>
 
 <script>
 import { defineComponent } from 'vue';
 import {
-  ArrowLeft, Document, Connection, DataLine, TrendCharts,
-  Histogram, Filter, InfoFilled, VideoPlay, UploadFilled,
-  Download, Upload, FolderOpened, Setting, CaretRight, CaretBottom, WarningFilled
+  ArrowLeft, InfoFilled, VideoPlay, Setting, WarningFilled
 } from '@element-plus/icons-vue';
-import { ElLoading, ElMessage } from 'element-plus';
+import { ElLoading } from 'element-plus';
 import { checkR, runPERMANOVA_Med } from '@/api/r';
 import TemplateCategory from '../../components/r-analysis/TemplateCategory.vue';
+import ToolbarActions from '../../components/r-analysis/ToolbarActions.vue';
+import ImportDialog from '../../components/r-analysis/ImportDialog.vue';
+import ExportDialog from '../../components/r-analysis/ExportDialog.vue';
 import templateData from '../../data/permanova-med-templates.json';
 import chartConfig from '../../data/permanova-med-charts.json';
 // 25 个「数据模板」：一键生成可直接运行的合成数据（已经便携版 R 实测 25/25 中介 p<0.05）
@@ -586,6 +492,18 @@ import {
 } from '@/utils/matrixInput';
 // 图表配置生成（纯函数，可在 node 侧用真实 R 输出做单测）
 import { MED_CHART_BUILDERS, makeFormatters } from '@/utils/medCharts';
+import { drawWhenReady } from '@/utils/chartHost';
+// 导入/导出三层里的 L1 原语与 L3 声明（视图只管排版，不写业务分支）
+import { readWorkbook, mapWorkbook, previewFromFields, writeWorkbook, templateFilename, fileStamp } from '@/utils/sheetIo';
+import {
+  MED_IMPORT_SHEETS,
+  MED_EXPORT_OPTIONS,
+  MED_EXPORT_DEFAULTS,
+  medToFormPatch,
+  medWarnings,
+  medTemplateSheets,
+  planExport
+} from '@/utils/medSheetSpec';
 
 const FORMATTERS = makeFormatters();
 
@@ -593,9 +511,10 @@ export default defineComponent({
   name: 'PERMANOVA_Med',
   components: {
     TemplateCategory,
-    ArrowLeft, Document, Connection, DataLine, TrendCharts,
-    Histogram, Filter, InfoFilled, VideoPlay, UploadFilled,
-    Download, Upload, FolderOpened, Setting, CaretRight, CaretBottom, WarningFilled
+    ToolbarActions,
+    ImportDialog,
+    ExportDialog,
+    ArrowLeft, InfoFilled, VideoPlay, Setting, WarningFilled
   },
   data() {
     return {
@@ -644,17 +563,21 @@ export default defineComponent({
       // 侧边栏
       isToolbarExpanded: false, // 初始收缩
 
-      // 导入相关
+      // 导入相关（外壳状态，具体业务在 medSheetSpec）
       showImportDialog: false,
-      importPreview: null,
-      importPreviewActiveTab: 'outcome',
+      importTabs: null,
+      importFields: null,
+      importIds: null,
+      importWarnings: [],
       importError: '',
-      importedData: null,
 
       // 导出相关
       showExportDialog: false,
-      exportOptions: ['json', 'globalEffect', 'mediatorEffects', 'chartPNG'],
+      exportOptions: [...MED_EXPORT_DEFAULTS],
       exportError: '',
+
+      // 上一次真正送给 R 的入参（「下载输入」与导出输入项用它，不重算一遍）
+      lastRunParams: null,
 
       // R 环境状态
       rAvailable: false
@@ -664,6 +587,16 @@ export default defineComponent({
   computed: {
     templateConfig() {
       return templateData;
+    },
+
+    // 导入外壳要的表声明（L3）
+    importSheets() {
+      return MED_IMPORT_SHEETS;
+    },
+
+    // 导出外壳要的勾选清单（只到 key/label，内容在 spec 里算）
+    exportOptions2() {
+      return MED_EXPORT_OPTIONS.map((o) => ({ key: o.key, label: o.label }));
     },
 
     chartTypes() {
@@ -684,6 +617,17 @@ export default defineComponent({
         this.permanovaMedParams.mediatorDataValid &&
         this.permanovaMedParams.predictorDataValid &&
         !this.permanovaMedParams.sampleMismatch;
+    }
+  },
+
+  watch: {
+    // 数据驱动重画，而不是只靠 runPERMANOVAMed 里那一次性 nextTick：
+    // 首次分析时 activeChartType 往往没变，watcher 不触发，就只能赌 DOM 己经就绪。
+    chartData() {
+      this.$nextTick(() => this.renderCurrentChart());
+    },
+    activeChartType() {
+      this.$nextTick(() => this.renderCurrentChart());
     }
   },
 
@@ -747,68 +691,26 @@ export default defineComponent({
       console.log('[PERMANOVA-med] Loaded template:', this.selectedTemplate);
     },
 
-    // 回填模板数据
-    fillTemplateData(template) {
-      // 生成示例数据格式提示
-      const outcomeExample = {
-        'Sample1': [1.2, 3.4, 2.1],
-        'Sample2': [2.3, 4.5, 3.2],
-        'Sample3': [1.8, 3.9, 2.7]
-      };
-
-      const mediatorExample = {
-        'Sample1': [0.5, 1.2],
-        'Sample2': [0.7, 1.5],
-        'Sample3': [0.6, 1.3]
-      };
-
-      const predictorExample = {
-        'Sample1': [1, 0],
-        'Sample2': [0, 1],
-        'Sample3': [1, 1]
-      };
-
-      const covariatesExample = {
-        'Age': [25, 30, 35],
-        'BMI': [22.5, 25.0, 23.5]
-      };
-
-      // 填充输入框（示例格式）
-      this.permanovaMedParams.outcomeDataStr = JSON.stringify(outcomeExample, null, 2);
-      this.permanovaMedParams.mediatorDataStr = JSON.stringify(mediatorExample, null, 2);
-      this.permanovaMedParams.predictorDataStr = JSON.stringify(predictorExample, null, 2);
-      this.permanovaMedParams.covariatesStr = JSON.stringify(covariatesExample, null, 2);
-
-      // 触发验证
-      this.validateOutcomeData();
-      this.validateMediatorData();
-      this.validatePredictorData();
-      this.validateCovariates();
-
-      ElMessage.success(`已加载模板：${template.name}`);
-    },
-
     // 清除选择
     clearSelectedTemplate() {
       this.selectedTemplateId = null;
       this.selectedTemplate = null;
     },
 
-    // 数据验证
-    // 回填模板数据
+    // 回填公式预设（只动公式语义，不动数据）
     // 公式预设只描述研究设计（X→M→Y 的角色与变量名），本身不包含数据。
     // 以前这里会写入 3 行假矩阵：既不是模板描述的结构，又让直接运行必然失败，
     // 因此改为保留用户已有数据，并提示如何拿到可运行数据。
     fillTemplateData(template) {
       const empty = !this.permanovaMedParams.mediatorDataStr.trim();
       if (empty) {
-        ElMessage.info({
+        this.$message.info({
           message: `已应用公式预设「${template.name}」（中介：${template.mediator || 'M'}）。`
             + '该预设不含数据，请再点一个「数据模板」生成可运行数据，或用 Excel 导入自己的数据。',
           duration: 7000
         });
       } else {
-        ElMessage.success(`已应用公式预设：${template.name}（当前数据保持不变）`);
+        this.$message.success(`已应用公式预设：${template.name}（当前数据保持不变）`);
       }
     },
 
@@ -816,7 +718,7 @@ export default defineComponent({
     loadMedDataTemplate(id) {
       const item = MED_TEMPLATE_MAP[id];
       if (!item) {
-        ElMessage.error(`未知数据模板：${id}`);
+        this.$message.error(`未知数据模板：${id}`);
         return;
       }
       if (this.selectedMedDataId === id) {
@@ -841,9 +743,9 @@ export default defineComponent({
         this.selectedMedDataLabel = item.label;
         this.medDataSummary = `${d.n} 样本 × ${d.taxa} 中介变量｜LDM 公式 ${d.formula}｜${item.spec.note || item.tip}`;
         this.analysisResult = null;
-        ElMessage.success(`已载入数据模板：${item.label}，可直接运行分析`);
+        this.$message.success(`已载入数据模板：${item.label}，可直接运行分析`);
       } catch (e) {
-        ElMessage.error('数据模板生成失败：' + e.message);
+        this.$message.error('数据模板生成失败：' + e.message);
       }
     },
 
@@ -888,7 +790,7 @@ export default defineComponent({
       ], p.mediatorN);
     },
 
-        validateOutcomeData() {
+    validateOutcomeData() {
       try {
         if (!this.permanovaMedParams.outcomeDataStr.trim()) {
           this.permanovaMedParams.outcomeDataValid = false;
@@ -995,21 +897,9 @@ export default defineComponent({
       });
 
       try {
-        // 统一转成「样本 × 变量」二维数组再发送，避开历史三种格式在 R 侧的歧义
-        const toRows = (field) => {
-          const ref = field === 'mediatorDataStr' ? this.refSampleN('mediatorDataStr') : this.permanovaMedParams.mediatorN;
-          const r = this.inspectMatrix(this.permanovaMedParams[field], ref);
-          if (!r.ok) throw new Error(r.error);
-          return r.rows;
-        };
-
-        const params = {
-          outcomeData: toRows('outcomeDataStr'),
-          mediatorData: toRows('mediatorDataStr'),
-          predictorData: toRows('predictorDataStr'),
-          covariates: this.permanovaMedParams.covariatesStr.trim() ? toRows('covariatesStr') : null,
-          permutations: this.permanovaMedParams.permutations
-        };
+        // 参数拼装只在 buildRunParams() 一处（下载输入 / 导出输入项用的同一份）
+        const params = this.buildRunParams();
+        this.lastRunParams = params;
 
         console.log('[PERMANOVA-med] Running analysis with params:', params);
 
@@ -1018,7 +908,7 @@ export default defineComponent({
         console.log('[PERMANOVA-med] Analysis result:', result);
 
         this.analysisResult = result;
-        ElMessage.success('PERMANOVA-med 分析完成！');
+        this.$message.success('PERMANOVA-med 分析完成！');
 
         // 自动切换到结果区域并立即渲染图表（之前只在切 tab 时渲染，导致运行后图表空白）
         this.$nextTick(() => {
@@ -1030,12 +920,12 @@ export default defineComponent({
         
         // 检查是否是 Electron 环境
         if (error.message.includes('ipcRenderer') || !window.electron) {
-          ElMessage.error({
+          this.$message.error({
             message: '请在 Electron 窗口中运行（不是浏览器）',
             duration: 5000
           });
         } else {
-          ElMessage.error('分析失败：' + error.message);
+          this.$message.error('分析失败：' + error.message);
         }
       } finally {
         loadingInstance.close();
@@ -1052,17 +942,21 @@ export default defineComponent({
 
     // 渲染当前图表（配置生成在 @/utils/medCharts 里，便于单测）
     renderCurrentChart() {
-      const el = this.$refs.medChart;
-      if (!el || !this.chartData) return;
-
-      import('echarts').then((echarts) => {
-        const chart = echarts.getInstanceByDom(el) || echarts.init(el);
-        const build = MED_CHART_BUILDERS[this.activeChartType] || MED_CHART_BUILDERS.bar;
-        chart.setOption(build(this.chartData, FORMATTERS), true);
-        chart.resize();
-      }).catch((e) => {
-        console.error('[PERMANOVA-med] 图表加载失败:', e);
-        ElMessage.error('图表库加载失败：' + e.message);
+      if (!this.chartData) return;
+      return drawWhenReady({
+        getHost: () => this.$refs.medChart || null,
+        nextTick: this.$nextTick,
+        option: (MED_CHART_BUILDERS[this.activeChartType] || MED_CHART_BUILDERS.bar)(this.chartData, FORMATTERS)
+      }).then((r) => {
+        // 旧写法是 `if (!el || !chartData) return;`——撞在 DOM 未落地那一帧就是静默不画
+        if (!r.ok && (r.reason === 'no-host' || r.reason === 'zero-size')) {
+          this.$message.warning((r.reason === 'zero-size'
+            ? '图表容器量不出尺寸（0 宽/0 高）'
+            : '图表容器还没就绪') + '，等过 ' + r.waited + ' 帧仍未好，切一下图表类型可重画');
+        } else if (r.ok && r.empty) {
+          this.$message.warning('图表已生成但宽度为 0（布局未完成），切一下图表类型可重画');
+        }
+        return r;
       });
     },
 
@@ -1080,260 +974,181 @@ export default defineComponent({
       if (n !== v) this.permanovaMedParams.permutations = n;
     },
 
-    // 下载模板
+    /** 下载模板：表名与示例由 medSheetSpec 声明，这里只负责写出 */
     async downloadTemplate() {
       try {
-        const XLSX = await import('xlsx');
-        const FileSaver = await import('file-saver');
-
-        const wb = XLSX.utils.book_new();
-
-        // 创建 4 个 sheet
-        const outcomeSheet = XLSX.utils.aoa_to_sheet([
-          ['样本 ID', 'Y1', 'Y2', 'Y3'],
-          ['Sample1', 1.2, 3.4, 2.1],
-          ['Sample2', 2.3, 4.5, 3.2]
-        ]);
-
-        const mediatorSheet = XLSX.utils.aoa_to_sheet([
-          ['样本 ID', 'M1', 'M2'],
-          ['Sample1', 0.5, 1.2],
-          ['Sample2', 0.7, 1.5]
-        ]);
-
-        const predictorSheet = XLSX.utils.aoa_to_sheet([
-          ['样本 ID', 'X1'],
-          ['Sample1', 1],
-          ['Sample2', 0]
-        ]);
-
-        const covariatesSheet = XLSX.utils.aoa_to_sheet([
-          ['样本 ID', 'Age', 'BMI'],
-          ['Sample1', 25, 22.5],
-          ['Sample2', 30, 25.0]
-        ]);
-
-        XLSX.utils.book_append_sheet(wb, outcomeSheet, 'Outcome');
-        XLSX.utils.book_append_sheet(wb, mediatorSheet, 'Mediator');
-        XLSX.utils.book_append_sheet(wb, predictorSheet, 'Predictor');
-        XLSX.utils.book_append_sheet(wb, covariatesSheet, 'Covariates');
-
-        const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-        const blob = new Blob([wbout], { type: 'application/octet-stream' });
-
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-        FileSaver.saveAs(blob, `PERMANOVA-med 模板_${timestamp}.xlsx`);
-
-        ElMessage.success('模板下载成功！');
-      } catch (error) {
-        console.error('[PERMANOVA-med] Download template error:', error);
-        ElMessage.error('模板下载失败：' + error.message);
+        await writeWorkbook(await this.xlsx(), medTemplateSheets(), this.templateFileName());
+        this.$message.success('模板下载成功');
+      } catch (e) {
+        console.error('[PERMANOVA-med] Download template error:', e);
+        this.$message.error('模板下载失败：' + (e.message || e));
       }
     },
 
-    // 处理文件导入
-    handleFileChange(file) {
-      console.log('[PERMANOVA-med] File selected:', file.name);
-
-      const reader = new FileReader();
-
-      reader.onload = async (e) => {
-        try {
-          const XLSX = await import('xlsx');
-          const data = new Uint8Array(e.target.result);
-          const workbook = XLSX.read(data, { type: 'array' });
-
-          console.log('[PERMANOVA-med] Workbook sheets:', workbook.SheetNames);
-
-          // 解析 4 个 sheet
-          const outcomeData = XLSX.utils.sheet_to_json(workbook.Sheets['Outcome']);
-          const mediatorData = XLSX.utils.sheet_to_json(workbook.Sheets['Mediator']);
-          const predictorData = XLSX.utils.sheet_to_json(workbook.Sheets['Predictor']);
-          const covariatesData = workbook.Sheets['Covariates'] ?
-            XLSX.utils.sheet_to_json(workbook.Sheets['Covariates']) : [];
-
-          console.log('[PERMANOVA-med] Parsed data:', {
-            outcome: outcomeData.length,
-            mediator: mediatorData.length,
-            predictor: predictorData.length,
-            covariates: covariatesData.length
-          });
-
-          this.importPreview = {
-            outcomePreview: outcomeData,
-            outcomeCols: outcomeData.length > 0 ?
-              Object.keys(outcomeData[0]).map(k => ({ key: k, label: k })) : [],
-            mediatorPreview: mediatorData,
-            mediatorCols: mediatorData.length > 0 ?
-              Object.keys(mediatorData[0]).map(k => ({ key: k, label: k })) : [],
-            predictorPreview: predictorData,
-            predictorCols: predictorData.length > 0 ?
-              Object.keys(predictorData[0]).map(k => ({ key: k, label: k })) : [],
-            covariatesPreview: covariatesData,
-            covariatesCols: covariatesData.length > 0 ?
-              Object.keys(covariatesData[0]).map(k => ({ key: k, label: k })) : []
-          };
-
-          this.importedData = {
-            outcome: outcomeData,
-            mediator: mediatorData,
-            predictor: predictorData,
-            covariates: covariatesData
-          };
-
-        } catch (error) {
-          console.error('[PERMANOVA-med] Parse file error:', error);
-          this.importError = '文件解析失败：' + error.message;
-        }
-      };
-
-      reader.onerror = () => {
-        this.importError = '文件读取失败';
-      };
-
-      reader.readAsArrayBuffer(file.raw);
+    /** 文件名格式三个模块一致（见 sheetIo.templateFilename） */
+    templateFileName() {
+      return templateFilename('PERMANOVA-med', this.stamp());
     },
 
-    // 确认导入
-    confirmImport() {
-      if (!this.importedData) {
-        ElMessage.error('请先选择文件');
+    openImport() {
+      this.importTabs = null;
+      this.importFields = null;
+      this.importIds = null;
+      this.importError = '';
+      this.importWarnings = [];
+      this.showImportDialog = true;
+    },
+
+    /**
+     * 四张表交给 mapWorkbook 按声明解析：表名走中英文别名、缺必需表指名拒绝，
+     * 并且一律按「结局 Y」的样本 ID 对齐重排。
+     * 旧写法是按表名精确取表 + 按行号配对：中介分析里 Y 与 M 错一行等于拿别的样本的
+     * 中介去解释结局，模型照跑、图照画、系数全废，而且图上一点异常都看不出来。
+     */
+    async handleFileChange(file) {
+      this.importError = '';
+      this.importWarnings = [];
+      this.importTabs = null;
+      this.importFields = null;
+      this.importIds = null;
+      let sheets;
+      try {
+        sheets = await readWorkbook(file);
+      } catch (e) {
+        this.importError = '这个文件读不出来：' + (e.message || e) + '（要 .xlsx / .xls / .csv）';
         return;
       }
-
-      try {
-        // 转换数据格式
-        const outcomeData = this.convertImportData(this.importedData.outcome);
-        const mediatorData = this.convertImportData(this.importedData.mediator);
-        const predictorData = this.convertImportData(this.importedData.predictor);
-        const covariatesData = this.importedData.covariates.length > 0 ?
-          this.convertImportData(this.importedData.covariates) : null;
-
-        // 填充到输入框
-        this.permanovaMedParams.outcomeDataStr = JSON.stringify(outcomeData, null, 2);
-        this.permanovaMedParams.mediatorDataStr = JSON.stringify(mediatorData, null, 2);
-        this.permanovaMedParams.predictorDataStr = JSON.stringify(predictorData, null, 2);
-        this.permanovaMedParams.covariatesStr = covariatesData ?
-          JSON.stringify(covariatesData, null, 2) : '';
-
-        // 验证数据
-        this.validateOutcomeData();
-        this.validateMediatorData();
-        this.validatePredictorData();
-        this.validateCovariates();
-
-        this.showImportDialog = false;
-        ElMessage.success('数据导入成功！');
-      } catch (error) {
-        console.error('[PERMANOVA-med] Import error:', error);
-        ElMessage.error('导入失败：' + error.message);
+      const res = mapWorkbook(sheets, MED_IMPORT_SHEETS, { primary: 'outcome' });
+      this.importWarnings = res.warnings || [];
+      if (!res.ok) {
+        this.importError = res.error;
+        return;
       }
+      this.importWarnings = this.importWarnings.concat(medWarnings(res.fields, res.ids));
+      this.importFields = res.fields;
+      this.importIds = res.ids;
+      this.importTabs = previewFromFields(res.ids, res.fields.outcome, res.fields, {
+        matrixKeys: [
+          ['outcome', '结局 Y'],
+          ['mediator', '中介 M'],
+          ['predictor', '暴露 X'],
+          ['covariates', '协变量 Z']
+        ]
+      });
     },
 
-    // 转换导入数据格式
-    convertImportData(dataArray) {
-      const result = {};
-      if (dataArray.length === 0) return result;
-
-      const keys = Object.keys(dataArray[0]);
-      const sampleIdKey = keys.find(k => k.includes('样本') || k.toLowerCase().includes('sample') || k === 'id');
-
-      if (!sampleIdKey) {
-        // 如果没有样本 ID 列，使用索引
-        for (let i = 0; i < dataArray.length; i++) {
-          result[`Sample${i + 1}`] = keys
-            .filter(k => k !== 'id')
-            .map(k => dataArray[i][k]);
-        }
-      } else {
-        // 使用样本 ID 列
-        for (const row of dataArray) {
-          const sampleId = row[sampleIdKey];
-          result[sampleId] = keys
-            .filter(k => k !== sampleIdKey)
-            .map(k => row[k]);
-        }
+    /** 先看后填：用户点头才动表单 */
+    applyImport() {
+      if (!this.importFields) {
+        // 已经报过的错优先（「缺哪张表」比「先选一个文件」有用得多）
+        if (!this.importError) this.importError = '先选一个文件';
+        return;
       }
-
-      return result;
+      const patch = medToFormPatch(this.importFields, this.importIds);
+      Object.assign(this.permanovaMedParams, patch);
+      // 校验顺序与数据模板一致：先中介（它定义 mediatorN），再 X / Y / Z
+      this.validateMediatorData();
+      this.validatePredictorData();
+      this.validateOutcomeData();
+      this.validateCovariates();
+      this.showImportDialog = false;
+      this.$message.success({
+        message: `已填入 ${this.importIds.length} 个样本（按结局 Y 的样本顺序对齐）`,
+        duration: 2500
+      });
     },
 
-    // 导出结果
+    openExport() {
+      this.exportError = '';
+      this.showExportDialog = true;
+    },
+
+    /** 勾选 -> 任务表：文件名与内容全在 medSheetSpec 里算，这里不拼 */
+    exportJobs(keys) {
+      return planExport(keys || this.exportOptions, this.exportContext(), this.stamp());
+    },
+
+    exportContext() {
+      let params = this.lastRunParams;
+      if (!params) {
+        try { params = this.buildRunParams(); } catch (e) { params = null; }
+      }
+      return { analysisResult: this.analysisResult, pathData: this.pathData, params };
+    },
+
     async confirmExport() {
+      this.exportError = '';
       if (!this.analysisResult) {
-        ElMessage.error('没有可导出的分析结果');
+        this.exportError = '还没有分析结果可导出';
         return;
       }
-
+      const jobs = this.exportJobs();
       try {
-        const XLSX = await import('xlsx');
-        const { saveAs } = await import('file-saver');
-
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-
-        // 导出 JSON
-        if (this.exportOptions.includes('json')) {
-          const jsonStr = JSON.stringify(this.analysisResult, null, 2);
-          const blob = new Blob([jsonStr], { type: 'application/json' });
-          saveAs(blob, `PERMANOVA-med 结果_${timestamp}.json`);
+        for (const job of jobs) {
+          if (job.type === 'xlsx') await writeWorkbook(await this.xlsx(), job.sheets, job.filename);
+          else if (job.type === 'json') await this.saveJson(job.filename, job.data);
+          else await this.exportPng(job.filename);
         }
-
-        // 导出分组置换检验（LDM 的真实输出）
-        if (this.exportOptions.includes('globalEffect')) {
-          const rows = (this.analysisResult.covariate_tests || []).map((t) => ({
-            协变量组: t.term, 公式项: t.label,
-            F统计量: t.F_statistic, R2: t.R2, p值: t.p_value,
-          }));
-          const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 说明: '本次结果无分组检验数据' }]);
-          const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, 'Covariate_Tests');
-          const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-          const blob = new Blob([wbout], { type: 'application/octet-stream' });
-          saveAs(blob, `分组置换检验_${timestamp}.xlsx`);
-        }
-
-        // 导出路径分解
-        if (this.exportOptions.includes('mediatorEffects')) {
-          const p = this.pathData;
-          const rows = p ? [
-            { 路径: 'a: X → M轴', 估计: p.a, p值: p.a_p, CI下: p.a_ci?.[0], CI上: p.a_ci?.[1] },
-            { 路径: 'b: M轴 → Y｜X', 估计: p.b, p值: p.b_p, CI下: p.b_ci?.[0], CI上: p.b_ci?.[1] },
-            { 路径: "c': X → Y｜M轴", 估计: p.c_prime, p值: p.c_prime_p, CI下: p.c_prime_ci?.[0], CI上: p.c_prime_ci?.[1] },
-            { 路径: '间接效应 a×b', 估计: p.indirect, p值: null, CI下: p.indirect_ci?.[0], CI上: p.indirect_ci?.[1] },
-            { 路径: '总效应', 估计: p.total, p值: p.total_p, CI下: null, CI上: null },
-            { 路径: '中介比例', 估计: p.proportion_mediated, p值: null, CI下: null, CI上: null },
-          ] : [{ 说明: '本次结果无路径分解数据（请更新 r-scripts/permanova_med.R）' }];
-          const ws = XLSX.utils.json_to_sheet(rows);
-          const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, 'Path_Decomposition');
-          const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-          const blob = new Blob([wbout], { type: 'application/octet-stream' });
-          saveAs(blob, `路径分解_${timestamp}.xlsx`);
-        }
-
-        // 导出图表
-        if (this.exportOptions.includes('chartPNG')) {
-          const chartContainer = this.$refs.medChart;
-          if (chartContainer) {
-            const echarts = await import('echarts');
-            const myChart = echarts.getInstanceByDom(chartContainer);
-            if (myChart) {
-              const url = myChart.getDataURL({
-                type: 'png',
-                pixelRatio: 2,
-                backgroundColor: '#ffffff'
-              });
-              saveAs(url, `分析图表_${timestamp}.png`);
-            }
-          }
-        }
-
         this.showExportDialog = false;
-        ElMessage.success('导出成功！');
-      } catch (error) {
-        console.error('[PERMANOVA-med] Export error:', error);
-        ElMessage.error('导出失败：' + error.message);
+        this.$message.success(`已导出 ${jobs.length} 项`);
+      } catch (e) {
+        console.error('[PERMANOVA-med] Export error:', e);
+        this.exportError = '导出失败：' + (e.message || e);
       }
+    },
+
+    async downloadInput() {
+      try {
+        await this.saveJson(`PERMANOVA-med 输入_${this.stamp()}.json`, this.buildRunParams());
+      } catch (e) {
+        this.$message.error('导出输入失败：' + (e.message || e));
+      }
+    },
+
+    /** 送给 R 的参数只有一个来源：运行、下载输入、导出输入项都用它，不再各拼一遍 */
+    buildRunParams() {
+      const p = this.permanovaMedParams;
+      // 统一转成「样本 × 变量」二维数组，避开历史三种格式在 R 侧的歧义
+      const toRows = (field) => {
+        const ref = field === 'mediatorDataStr' ? this.refSampleN('mediatorDataStr') : p.mediatorN;
+        const r = this.inspectMatrix(p[field], ref);
+        if (!r.ok) throw new Error(r.error);
+        return r.rows;
+      };
+      return {
+        outcomeData: toRows('outcomeDataStr'),
+        mediatorData: toRows('mediatorDataStr'),
+        predictorData: toRows('predictorDataStr'),
+        covariates: p.covariatesStr.trim() ? toRows('covariatesStr') : null,
+        permutations: p.permutations
+      };
+    },
+
+    /** 时间戳统一由 sheetIo.fileStamp 给（三个模块的文件名要能对上） */
+    stamp() {
+      return fileStamp();
+    },
+
+    async xlsx() {
+      const m = await import('xlsx');
+      return m.utils ? m : m.default;
+    },
+
+    async saveJson(filename, data) {
+      const { saveAs } = await import('file-saver');
+      saveAs(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), filename);
+    },
+
+    /** 只导得出正在看的那张图：其它 tab 还没实例化 */
+    async exportPng(filename) {
+      const el = this.$refs.medChart;
+      if (!el) throw new Error('图表还没渲染');
+      const echarts = await import('echarts');
+      const chart = echarts.getInstanceByDom(el);
+      if (!chart) throw new Error('当前图表未初始化');
+      const url = chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#ffffff' });
+      const { saveAs } = await import('file-saver');
+      saveAs(url, filename);
     },
 
     // 获取显著性样式
@@ -1995,101 +1810,9 @@ export default defineComponent({
   pointer-events: none;
 }
 
-.toolbar-btn {
-  width: calc(100% - 24px);
-  margin: 0 12px;
-  justify-content: flex-start;
-  padding: 12px 16px;
-  border-radius: 12px;
-  font-size: 14px;
-  font-weight: 600;
-  transition: all 0.3s ease;
-  border: 2px solid transparent;
-  height: 48px;
-  display: flex;
-  align-items: center;
-}
-
-.toolbar-btn .el-icon {
-  font-size: 18px;
-  margin-right: 10px;
-  flex-shrink: 0;
-}
-
-.toolbar-btn .btn-text {
-  white-space: nowrap;
-}
-
-.toolbar-btn:hover {
-  transform: translateX(-4px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.toolbar-btn[type="success"] {
-  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-  border-color: #86efac;
-  color: #166534;
-}
-
-.toolbar-btn[type="success"]:hover {
-  background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
-  border-color: #4ade80;
-}
-
-.toolbar-btn[type="primary"] {
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  border-color: #93c5fd;
-  color: #1e40af;
-}
-
-.toolbar-btn[type="primary"]:hover {
-  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-  border-color: #60a5fa;
-}
-
-.toolbar-btn[type="warning"] {
-  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
-  border-color: #fcd34d;
-  color: #92400e;
-}
-
-.toolbar-btn[type="warning"]:hover {
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  border-color: #fbbf24;
-}
-
-.toolbar-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-/* 导入/导出对话框 */
-.import-preview {
-  margin-top: 20px;
-}
-
-.export-dialog-content {
-  padding: 20px 0;
-}
-
-.export-hint {
-  font-size: 15px;
-  color: #475569;
-  margin: 0 0 20px;
-}
-
-.export-options {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.checkbox-wrapper {
-  display: flex;
-  align-items: center;
-}
+/* 工具栏按钮与导入/导出对话框的排版现在归外壳组件自己管（ToolbarActions /
+   ImportDialog / ExportDialog）。视图的 scoped 样式选不到子组件内部元素，
+   写在这里只会变成看起来能改、实际改了没反应的那种死 CSS。 */
 
 /* 响应式 */
 @media (max-width: 768px) {

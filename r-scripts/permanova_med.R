@@ -161,8 +161,16 @@ tryCatch({
   z_mat     <- parsed$z
   n_samples <- nrow(med_mat)
 
-  if (n_samples < 4)
-    stop(sprintf("样本数过少（%d），LDM 置换检验至少需要 4 个样本", n_samples))
+  # 实测下限（扫过 n=4..20 × perm=100/1000 × 有/无协变量）：
+  #   n=4        必崩（无 Z：BiocParallel errors；有 Z：下标出界）
+  #   n=5        看运气（无 Z 且 perm=1000 时 NA 相关崩溃）
+  #   n>=6       都能跑完
+  # 旧版本写“至少 4 个样本”，于是 n=4/5 会被放行到一个跟用户输入毫无关系的内部错。
+  if (n_samples < 6)
+    stop(sprintf(paste0(
+      "样本数过少（%d）。LDM 的多元置换在 n<=4 直接崩、n=5 会随机崩（本次实测），至少需要 6 个样本；",
+      "而 n<15 的中介检验功效极低（即使真有效应也很可能报不显著），建议 n>=20"),
+      n_samples))
 
   # ---------- 坑 1：规整置换次数到 100 的整数倍 ----------
   n_perm_req <- suppressWarnings(as.numeric(params$permutations %|||% 999))
@@ -248,7 +256,33 @@ tryCatch({
   assign("MEDMAT", med_mat, envir = .GlobalEnv)
 
   # ---------- 运行 ----------
+  # 常量列先进去报错：否则 LDM 只给“对比只适用于有两个或多于两个水平的因子”，
+  # 看不出是哪个变量、为什么不能是常量（用户手填数据最常踩的一个坑）
+  const_cols <- names(df)[sapply(df, function(v) length(unique(v[!is.na(v)])) < 2)]
+  if (length(const_cols))
+    stop(sprintf(paste0(
+      "这些变量只有一个取值（常量），没法检验：%s。X 需要至少两个水平/取值；",
+      "Y、M 的变量列全相同时请删掉该列或补真实变异"),
+      paste(const_cols, collapse = ', ')))
+
+  # 饱和设计也拦住：encode_var 会把“<=10 个不同整数值”的列当因子，于是
+  # 整岁记录的年龄（10 个样本 10 个不同岁）会变成 10 水平因子，模型吃掉全部自由度，
+  # LDM 只回一句“需要TRUE/FALSE值的地方不可以用缺少值”——跟真实原因完全看不出关系。
+  rank_needed <- 1L + sum(vapply(df, function(v)
+    if (is.factor(v)) nlevels(v) - 1L else 1L, integer(1)))
+  if (rank_needed >= n_samples) {
+    big <- head(order(-sapply(df, function(v) if (is.factor(v)) nlevels(v) else 1)), 3)
+    stop(sprintf(paste0(
+      "设计数矩阵自由度不够：%d 个样本只能支撑 %d 列（公式实际需要 %d），水平最多的变量是 %s。",
+      "常见原因：协变量用了整数值记录连续量（如年龄逐行写 28/29/30…）被当成了多水平因子——",
+      "请把它保留小数（如 28.4）或先分成少数几档；要么增加样本数"),
+      n_samples, n_samples - 1L, rank_needed,
+      paste(sprintf("%s(%d 水平)", names(df)[big], sapply(df[big], function(v) if (is.factor(v)) nlevels(v) else 1)),
+            collapse = ', ')))
+  }
+
   cat("[PERMANOVA-med] 运行 permanovaFL (test.mediation = TRUE) ...\n")
+  ldm_err <- NULL
   res <- tryCatch(
     LDM::permanovaFL(
       formula          = as.formula(formula_str),
@@ -260,12 +294,17 @@ tryCatch({
       verbose          = FALSE
     ),
     error = function(e) {
-      cat("[PERMANOVA-med] permanovaFL 错误:", conditionMessage(e), "\n"); NULL
+      ldm_err <<- conditionMessage(e)
+      cat("[PERMANOVA-med] permanovaFL 错误:", ldm_err, "\n"); NULL
     }
   )
 
   if (is.null(res))
-    stop("permanovaFL 分析失败。请确认：(1) 置换次数为 100 的整数倍；(2) mediatorData 是中介矩阵（非负计数或对称距离矩阵）。")
+    stop(paste0(
+      "permanovaFL 分析失败。LDM 原话：", if (is.null(ldm_err)) "（未拿到错误信息）" else ldm_err,
+      "。常见原因：置换次数不是 100 的整数倍、mediatorData 不是非负计数矩阵或对称距离矩阵、",
+      "样本数太少（本版本要求 n>=6）"
+    ))
 
   # ---------- 提取结果 ----------
   cat("[PERMANOVA-med] 提取结果...\n")

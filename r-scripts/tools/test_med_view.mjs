@@ -10,10 +10,12 @@
 import fs from 'fs';
 import os from 'node:os';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { loadFrontendUtils } from './load_frontend_utils.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const RSCRIPT = process.env.RSCRIPT || path.join(ROOT, 'r-portable', 'bin', process.platform === 'win32' ? 'Rscript.exe' : 'Rscript');
 const FRONTEND = path.join(ROOT, 'frontend');
 const VIEW = path.join(FRONTEND, 'src/views/r-analysis/PERMANOVA_Med.vue');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'medview-'));
@@ -71,9 +73,7 @@ const driveImport = async (vm, sheets) => {
   await vm.handleFileChange(oldStyle ? { raw: file } : file);
   await tick();
   const applier = vm.applyImport || vm.confirmImport;
-  // Med 直接调 ElMessage（要 DOM）。这里测的是状态，不是提示怎么弹：
-  // 表单字段在弹提示之前就写好了，所以吞掉这个异常不影响断言。
-  try { if (applier) applier.call(vm); } catch (e) { if (!/document/.test(String(e.message))) throw e; }
+  if (applier) applier.call(vm);
   return oldStyle ? '旧写法' : '外壳写法';
 };
 const keysOf = (str) => Object.keys(str ? JSON.parse(str) : {});
@@ -91,6 +91,8 @@ console.log('\n=== 2. 导入：四张表必须按样本 ID 对齐 ===');
   console.log(`      （入口：${how}）`);
   const p = vm.permanovaMedParams;
   check('四张表都进了表单', ['outcomeDataStr', 'mediatorDataStr', 'predictorDataStr', 'covariatesStr'].every((k) => (p[k] || '').length > 10));
+  // Non-random 实机就是坑在这一条上：解析都对了但对话框不关，用户看到的就是“点了没反应”
+  check('填入后对话框关掉', vm.showImportDialog === false, String(vm.showImportDialog));
   check('校验状态全绿', p.outcomeDataValid && p.mediatorDataValid && p.predictorDataValid && p.covariatesValid,
     `${p.outcomeDataError} | ${p.mediatorDataError} | ${p.predictorDataError} | ${p.covariatesError}`);
   check('每个样本一行（不是把向量拆成多行）', keysOf(p.outcomeDataStr).length === 4 && keysOf(p.mediatorDataStr).length === 4,
@@ -152,7 +154,58 @@ console.log('\n=== 3. 导出任务表 ===');
   }
 }
 
-console.log('\n=== 4. 外壳 props 契约 ===');
+console.log('\n=== 4. 「下载模板 → 导入 → 运行」必须真的跑得通 ===');
+{
+  // 实机报的就是这条：模板只有 2 个样本，下载完导入一点运行就撞「样本数过少」。
+  // 模板不只是格式说明，它是用户第一次接触这个功能时会真跑的那份数据。
+  const { medSheetSpec: ms } = await loadFrontendUtils(['medSheetSpec']);
+  const sheets = ms.medTemplateSheets();
+  const vm = makeVm();
+  const dataSheets = sheets.filter(([n]) => n !== '填写说明');
+  const names = dataSheets.map(([n]) => n);
+  check('模板四张表齐全', ['Outcome', 'Mediator', 'Predictor', 'Covariates'].every((x) => names.includes(x)), names.join(','));
+
+  const idsOf = (aoa) => aoa.slice(1).map((r) => String(r[0]));
+  const Y = dataSheets.find(([n]) => n === 'Outcome')[1];
+  const ids = idsOf(Y);
+  check('模板样本数 >= 6（LDM 实测下限）', ids.length >= 6, `${ids.length} 个`);
+  for (const [n, aoa] of dataSheets) {
+    check(`${n} 的样本 ID 与 Outcome 逐字一致`, idsOf(aoa).join(',') === ids.join(','), idsOf(aoa).join(','));
+  }
+
+  // 用整份下载模板（含「填写说明」表）——用户导入的就是这个文件，不是去掉说明的版本
+  const how = await driveImport(vm, sheets);
+  check('模板能被自己的导入器解析', !vm.importError, vm.importError);
+  const p = vm.permanovaMedParams;
+  check('四个表单都填上了', ['outcomeDataStr', 'mediatorDataStr', 'predictorDataStr', 'covariatesStr'].every((k) => (p[k] || '').length > 10));
+
+  let payload = null, buildErr = '';
+  try { payload = vm.buildRunParams(); } catch (e) { buildErr = e.message; }
+  check('模板能拼出送给 R 的参数', !!payload, buildErr);
+  if (payload) {
+    payload.permutations = 100;                    // 100 的整数倍（LDM 硬要求）
+    const inp = path.join(TMP, 'tpl.json'), outp = inp + '.out', err = inp + '.err';
+    fs.writeFileSync(inp, JSON.stringify(payload));
+    let res = null, rerr = '';
+    try {
+      execFileSync(RSCRIPT, [path.join(ROOT, 'r-scripts', 'permanova_med.R'), inp, outp, err],
+        { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], timeout: 300000 });
+      res = JSON.parse(fs.readFileSync(outp, 'utf8'));
+    } catch (e) {
+      rerr = String((e.stdout || '') + (e.stderr || '')).split('\n').filter((l) => /Error|错误/.test(l)).slice(0, 2).join(' / ');
+    }
+    check('模板真跑 R 成功（不报样本数过少）', !!res && res.success === true, rerr || (res && res.error) || '');
+    check('模板的中介检验显著（第一次用就该看到一个真结果）',
+      !!res && res.success === true && Number(res.mediation_p) < 0.05,
+      res ? `p=${res.mediation_p}` : rerr);
+    // 模板填了协变量，就必须真的进了模型（否则“可选表”写了也没用）
+    check('模板里的协变量 Z 真的进了模型',
+      !!res && (res.model_info?.confounder_vars ?? 0) >= 1, res ? JSON.stringify(res.model_info) : rerr);
+  }
+}
+
+
+console.log('\n=== 5. 外壳 props 契约 ===');
 {
   const tpl = src.slice(0, src.indexOf('<script>'));
   const state = new Set([...Object.keys(makeVm()), ...Object.keys(comp.computed)]);
@@ -169,7 +222,23 @@ console.log('\n=== 4. 外壳 props 契约 ===');
     }
   }
   check('工具栏四个动作都接上方法', ['template', 'import', 'export', 'input'].every((ev) => tpl.includes(`@${ev}="`)));
+  // 少了 can-run / has-result 不会报错，只会让「下载输入 / 导出结果」永远灰着
+  const tbText = (tpl.match(/<ToolbarActions[^>]*>/s) || [''])[0];
+  for (const p of ['can-run', 'has-result']) {
+    check(`ToolbarActions 传了 :${p}`, tbText.includes(`:${p}="`), tbText.replace(/\s+/g, ' ').slice(0, 120));
+  }
   for (const m of ['downloadTemplate', 'openImport', 'openExport', 'downloadInput']) check(`${m} 存在`, typeof makeVm()[m] === 'function', m);
+  // 外壳事件只静态绑了名字，这里确认绑的确实是方法而不是一个拼错的字符串
+  for (const [ev, handler] of [['@file-change', 'handleFileChange'], ['@apply', 'applyImport'],
+    ['@confirm', 'confirmExport'], ['@input', 'downloadInput'], ['@import', 'openImport'],
+    ['@export', 'openExport'], ['@template', 'downloadTemplate']]) {
+    check(`${ev} 绑的方法 ${handler} 存在`, tpl.includes(`${ev}="${handler}"`) && typeof makeVm()[handler] === 'function',
+      tpl.includes(`${ev}="${handler}"`) ? '名字对但不一定是方法' : '模板里没有这个绑定');
+  }
+  check('下载模板的文件名走统一格式',
+    typeof makeVm().templateFileName === 'function' &&
+      /^PERMANOVA-med 数据模板_[0-9-]{19}\.xlsx$/.test(String(makeVm().templateFileName())),
+    String(makeVm().templateFileName && makeVm().templateFileName()));
   check('不再用 Sheets[\'Outcome\'] 精确取表', !/Sheets\['Outcome'\]/.test(src));
 }
 
