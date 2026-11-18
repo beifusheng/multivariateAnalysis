@@ -154,6 +154,25 @@ console.log('\n=== 5. 25 个模板真实数据三格式往返（逐元素比对�
   check('顶层非对象报错', st('"abc"').ok === false && st('null').ok === false);
 }
 
+console.log('\n=== 6. 空输入 ≠ 格式错（刚进页面不该看到 JSON 报错）===');
+{
+  const { inspectMatrix, inspectSampleTable } = mi;
+  for (const [name, f] of [['inspectMatrix', inspectMatrix], ['inspectSampleTable', inspectSampleTable]]) {
+    for (const v of [[''], '   ', null, undefined]) {
+      const r = f(v);
+      check(`${name}(${JSON.stringify(v)}) -> 等待输入、带 empty 标记`,
+        r.ok === false && r.empty === true && r.error === '等待输入', JSON.stringify(r));
+    }
+    check(`${name} 不再把空输入说成“JSON 格式错误”`,
+      !/JSON|Unexpected/.test(String(f('').error)), f('').error);
+  }
+  // 只有真的填了坏东西才报格式错
+  check('坏 JSON 仍然报格式错', inspectMatrix('{abc').ok === false && /JSON/.test(inspectMatrix('{abc').error),
+    inspectMatrix('{abc').error);
+  // Med / PERMANOVA 的「下载输入」在空表单时应该报“还没填”，不是“Unexpected end of JSON input”
+  check('报错文案对用户可读（不含解析器术语）', !/JSON input/.test(inspectMatrix('').error), inspectMatrix('').error);
+}
+
 
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -71,6 +71,9 @@ export function inspectValue(data, refN = null) {
 
 /** JSON 字符串 -> inspectValue */
 export function inspectMatrix(str, refN = null) {
+  // 空与“格式错”是两件事：空只是还没填。不拦的话刚进页面就会看到
+  // 「JSON 格式错误：Unexpected end of JSON input」，让人以为自己的数据坏了
+  if (!String(str ?? '').trim()) return { ok: false, empty: true, error: '等待输入' };
   let data;
   try {
     data = JSON.parse(str);
@@ -126,6 +129,7 @@ export function sampleMismatchMessage(entries, refN = null) {
  * @returns {{ok:boolean,n?:number,rows?:object[],columns?:string[],error?:string}}
  */
 export function inspectSampleTable(str, refN = null) {
+  if (!String(str ?? '').trim()) return { ok: false, empty: true, error: '等待输入' };
   let data;
   try {
     data = JSON.parse(str);

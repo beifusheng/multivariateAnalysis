@@ -12,7 +12,7 @@
     </el-alert>
 
     <el-upload ref="uploadRef" drag :auto-upload="false" :limit="1" :show-file-list="false"
-      :accept="accept" :on-change="onChange">
+      :accept="accept" :on-change="onChange" :on-exceed="onExceed">
       <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
       <div class="el-upload__text">将文件拖到此处，或<em>点击选择</em></div>
     </el-upload>
@@ -79,6 +79,10 @@ export default {
         this.tab = v && v.length ? v[0].name : '';
       },
       immediate: true
+    },
+    // 每次打开都把队列清空：否则上次的文件还在 fileList 里，下面那个 limit=1 会吃掉选择动作
+    modelValue(v) {
+      if (v) this.resetUpload();
     }
   },
   methods: {
@@ -91,7 +95,29 @@ export default {
     onChange(uploadFile) {
       const raw = uploadFile && (uploadFile.raw || uploadFile);
       if (raw) this.$emit('file-change', raw);
+    },
+    /**
+     * limit=1 的坑（实机报“第二次选文件后点填入表单没反应”的真因）：
+     * Element Plus 的 uploadFiles 里 `if (limit && fileList.length + files.length > limit) { onExceed(...); return; }`
+     * ——auto-upload=false 时旧文件永远留在 fileList，于是新选的文件**连 on-change 都不会触发**，
+     * 不接 on-exceed 就是静默无反应。这里按“后选的覆盖先选的”接住，跟一个工作簿的心智一致。
+     */
+    onExceed(files) {
+      this.resetUpload();
+      const raw = Array.isArray(files) ? files[0] : files;
+      if (raw) this.$emit('file-change', raw);
+    },
+    resetUpload() {
+      const up = this.$refs && this.$refs.uploadRef;
+      if (up && typeof up.clearFiles === 'function') up.clearFiles();
     }
   }
 };
 </script>
+
+<style scoped>
+/* 与 ToolbarActions 同一个理由：视图的 scoped 样式选不到子组件内部的元素 */
+.import-preview {
+  margin-top: 20px;
+}
+</style>

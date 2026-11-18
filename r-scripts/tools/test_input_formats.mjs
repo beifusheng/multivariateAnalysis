@@ -9,18 +9,17 @@ import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { loadFrontendUtils } from './load_frontend_utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
 const RSCRIPT = process.env.RSCRIPT || path.join(ROOT, 'r-portable', 'bin', process.platform === 'win32' ? 'Rscript.exe' : 'Rscript');
 // 用 RSCRIPT 环境变量可做 R 版本 A/B（如 4.3.3 vs 4.6.1）);
 const MED_R = path.join(ROOT, 'r-scripts', 'permanova_med.R');
-const SRC = path.join(ROOT, 'frontend', 'src', 'utils', 'medTemplates.js');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-'));
-const mjs = path.join(tmp, 'medTemplates.mjs');
-fs.copyFileSync(SRC, mjs);
-const { MED_TEMPLATE_MAP, buildMedTemplateData } = await import(pathToFileURL(mjs).href);
+// medTemplates.js 现在依赖 ./rng.js，直接复制成 .mjs 会断，走统一的 ESM 沙箱
+const { medTemplates: { MED_TEMPLATE_MAP, buildMedTemplateData } } = await loadFrontendUtils(['medTemplates']);
 
 // 行字典：键=样本，值=该样本的各变量
 const rowDict = (m, prefix) => {

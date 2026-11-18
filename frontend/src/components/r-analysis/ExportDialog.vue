@@ -37,3 +37,27 @@ export default {
   emits: ['update:modelValue', 'update:selected', 'confirm']
 };
 </script>
+
+<style scoped>
+/* 同上：勾选框长在组件里，视图的 scoped 规则碰不到 */
+.export-dialog-content {
+  padding: 20px 0;
+}
+
+.export-hint {
+  font-size: 15px;
+  color: #475569;
+  margin: 0 0 20px;
+}
+
+.export-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.checkbox-wrapper {
+  display: flex;
+  align-items: center;
+}
+</style>

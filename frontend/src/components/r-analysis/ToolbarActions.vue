@@ -47,3 +47,59 @@ export default {
   emits: ['template', 'import', 'export', 'input']
 };
 </script>
+
+<style scoped>
+/*
+ * 工具栏样式必须写在组件自己这里。
+ * 父视图的 <style scoped> 编译成 `.toolbar-btn[data-v-父]`，而按钮是子组件内部的元素，
+ * 拿不到父组件的作用域属性（SSR 渲染出的标签确实没有 data-v-）——
+ * 把它们留在视图里，迁移到外壳以启的三个模块会同时失去对齐与尺寸。
+ *
+ * 注：旧 CSS 里的 `.toolbar-btn[type="success"]` 一类选择器从来没生效过——
+ * el-button 把 type 当 prop 吃掉了，渲染出来只有 type="button"，颜色走的是
+ * Element Plus 自己的 el-button--success。所以这里不搬那些死规则。
+ */
+.toolbar-actions {
+  /* 排版方向在这里，外边距/内边距由视图的 .toolbar-content 管（免得叠成两层）*/
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toolbar-btn {
+  width: calc(100% - 24px);
+  margin: 0 12px;
+  justify-content: flex-start;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  border: 2px solid transparent;
+  height: 48px;
+  display: flex;
+  align-items: center;
+}
+
+.toolbar-btn .el-icon {
+  font-size: 18px;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.toolbar-btn .btn-text {
+  white-space: nowrap;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  transform: translateX(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+</style>
