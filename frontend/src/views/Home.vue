@@ -272,7 +272,7 @@ export default {
     showComingSoon(methodName) {
       // 不只说“敬请期待”：把缺什么说清楚，否则用户会以为点了就能等到
       const detail = {
-        'GMR⁴': 'r-scripts/gmr4.R 目前是降秩回归的简化占位实现（源码里就标了“需根据论文完善”），还没和参考实现比对过 F/秩估计，也没有界面和路由。',
+        'GMR⁴': '引擎已重写为闭式解并通过 16 项验收（r-scripts/tools/verify_gmr4_engine.R：满秩等于 OLS/岭解的恒等式、RSS 随秩单调、真实秩 3 能被选型找回），缺的是界面与路由——frontend/src/views/r-analysis/GMR4.vue 还不存在。',
         'Bayesian ERA': 'r-scripts/bayesian_era_mediation.R 同样是占位实现，未跑过后验采样收敛校验，也没有界面和路由。'
       }[methodName] || '';
       this.$message({

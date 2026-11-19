@@ -1,3 +1,4 @@
+# STATUS: implemented   （implemented=已通过验收脚本；placeholder=占位，首页卡片必须标开发中）
 # ============================================================================
 # GMR4 —— 广义多响应降秩回归（Generalized Multi-response Reduced-Rank Regression）
 # ----------------------------------------------------------------------------
@@ -283,6 +284,13 @@ tryCatch({
   ss_res <- colSums((Y - Yhat)^2)
   r2_each <- ifelse(ss_tot > 0, 1 - ss_res / ss_tot, NA_real_)
   r2_total <- 1 - sum(ss_res) / sum(ss_tot)
+  # 偏掉 Z 之后的 R²：Y 里被 Z 解释掉的那部分方差已经不在分母里，
+  # 所以这才是"B 到底解释了多少可解释的变异"。带协变量时只看原尺度 R² 会严重低估，
+  # 我自己的模板就被这一点打过（原尺度 0.23 / 偏后 0.98）。
+  ss_tot_p <- colSums((Ys - colMeans(Ys))^2)
+  ss_res_p <- colSums((Ys - Yhat_s)^2)
+  r2_each_partialled <- ifelse(ss_tot_p > 0, 1 - ss_res_p / ss_tot_p, NA_real_)
+  r2_partialled <- 1 - sum(ss_res_p) / sum(ss_tot_p)
 
   # 全秩对照：降秩一定让 RSS 变大；不成立就是实现错了（verify 脚本也盯这条）
   full_fit <- rrr_ridge_fit(Xs, Ys, s_max, lam_sel)
@@ -310,7 +318,9 @@ tryCatch({
     coefficients_raw_scale = NULL,
     U = mk(final$U), V = mk(final$V),    # B = U V' 的因子形式
     R2 = r2_total,
+    R2_partialled = r2_partialled,
     R2_per_response = as.numeric(r2_each),
+    R2_per_response_partialled = as.numeric(r2_each_partialled),
     cv = list(mean = mk(as.matrix(cv_mean)), se = mk(as.matrix(cv_se)),
               best = list(rank = rank_grid[best_idx[1]], lambda = lam_grid[best_idx[2]],
                           value = cv_mean[best_idx[1], best_idx[2]])),

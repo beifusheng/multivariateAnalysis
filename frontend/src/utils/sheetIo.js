@@ -221,13 +221,31 @@ export function parseMatrixSheet(aoa) {
   return { ok: true, ids, columns, rows };
 }
 
+/**
+ * 键值参数表：两列「参数 / 值」（可以有更多列，只取前两列）。
+ * 之前没有这个 kind —— 声明里写了 kv 的表会被塞给 parseSampleSheet，
+ * 而它要求第一列是样本 ID，于是"参数表"报一句"缺少样本 ID 列"，用户完全无法理解。
+ */
+export function parseKvSheet(aoa) {
+  if (!Array.isArray(aoa) || aoa.length < 2) return { ok: false, error: '参数表至少要表头和一行参数' };
+  const kv = {};
+  for (const row of aoa.slice(1)) {
+    if (!Array.isArray(row) || isBlank(row[0])) continue;
+    if (isBlank(row[1])) continue;                       // 空值 = 用默认，不写进 kv
+    kv[String(row[0]).trim()] = String(row[1]).trim();
+  }
+  if (!Object.keys(kv).length) return { ok: false, error: '参数表里没有一行「参数 / 值」' };
+  return { ok: true, kv, rows: aoa.slice(1) };
+}
+
 const PARSERS = {
   community: parseCommunitySheet,
   sample: parseSampleSheet,
   coordinate: parseCoordinateSheet,
   distance: parseDistanceSheet,
   formula: parseFormulaSheet,
-  matrix: parseMatrixSheet
+  matrix: parseMatrixSheet,
+  kv: parseKvSheet
 };
 
 /**

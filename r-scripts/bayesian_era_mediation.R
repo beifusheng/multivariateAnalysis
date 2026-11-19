@@ -1,3 +1,4 @@
+# STATUS: placeholder   （implemented=已通过验收脚本；placeholder=占位，首页卡片必须标开发中）
 # Bayesian ERA with Mediation 脚本
 # 基于 2025 年 Psychometrika 论文
 
