@@ -108,21 +108,10 @@ export const GMR4_EXPORT_OPTIONS = [
     data(ctx) { return ctx.analysisResult; }
   },
   {
-    key: 'coefficients',
-    label: '系数矩阵 B（CSV，可直接代回原始数据）',
-    type: 'csv',
-    fileTag: '系数',
-    rows(ctx) {
-      const r = ctx.r;
-      // jsonlite 写矩阵是**行优先**（R 里 matrix(1:4,2) -> "[[1,3],[2,4]]"），
-      // 所以 coefficients 就是 p 行 q 列，不需要转置。
-      // 上一版按列优先去 slice(1) 剥表头，出来的表少一行少一列却“看着正常”——
-      // 这就是没人真跑过才会留下的错。
-      const B = asMatrix(r.coefficients_raw_scale != null ? r.coefficients_raw_scale : r.coefficients);
-      const q = B[0].length;
-      return [['X\\Y'].concat(Array.from({ length: q }, (_, i) => `Y${i + 1}`))]
-        .concat(B.map((row, i) => [`X${i + 1}`].concat(row)));
-    }
+    key: 'chart',
+    label: '图表 PNG（当前正在看的那张：CV 热图 / 选型曲线 / 载荷双标图）',
+    type: 'png',
+    fileTag: '图表'
   },
   {
     key: 'input',
@@ -135,20 +124,22 @@ export const GMR4_EXPORT_OPTIONS = [
 
 export const GMR4_EXPORT_DEFAULTS = ['excel', 'json'];
 
-/** 把勾选 key 列表变成下载任务清单（与另外两个模块同签名，视图才能共用外壳） */
+/**
+ * 把勾选 key 列表变成下载任务清单。
+ * job 形状与 nonrandomSheetSpec.planExport 一致：{ type, filename, sheets|data }，
+ * type 只有 xlsx / json / png 三种 —— 视图的执行代码因此能三个模块共用。
+ * （上一版这里自己发明了 kind 与 csv：项目里从来没有 CSV 写出通路，
+ * 于是"系数 CSV"这项勾了也只会拿到一个没人能执行的任务。）
+ */
 export function gmr4PlanExport(keys, ctx, stamp) {
   const jobs = [];
   for (const key of keys) {
     const opt = GMR4_EXPORT_OPTIONS.find((o) => o.key === key);
     if (!opt) continue;
-    const base = `GMR4 ${opt.fileTag}_${stamp}`;
-    if (opt.type === 'xlsx') {
-      jobs.push({ filename: `${base}.xlsx`, kind: 'xlsx', sheets: opt.sheets(ctx) });
-    } else if (opt.type === 'csv') {
-      jobs.push({ filename: `${base}.csv`, kind: 'csv', aoa: opt.rows(ctx) });
-    } else {
-      jobs.push({ filename: `${base}.json`, kind: 'json', data: opt.data(ctx) });
-    }
+    const filename = `GMR4 ${opt.fileTag}_${stamp}.${opt.type === 'xlsx' ? 'xlsx' : opt.type === 'json' ? 'json' : 'png'}`;
+    if (opt.type === 'xlsx') jobs.push({ type: 'xlsx', filename, sheets: opt.sheets(ctx) });
+    else if (opt.type === 'json') jobs.push({ type: 'json', filename, data: opt.data(ctx) });
+    else jobs.push({ type: 'png', filename });
   }
   return jobs;
 }
@@ -175,7 +166,7 @@ export function gmr4ToFormPatch(fields) {
     for (const r of fields.params.rows) {
       if (Array.isArray(r) && r.length >= 2 && r[0] && r[0] !== '参数') kv[String(r[0]).trim()] = r[1];
     }
-    const nums = (v) => String(v == null ? '' : v).split(/[,，\s]+/).map(Number).filter((x) => Number.isFinite(x));
+    const nums = (v) => String(v == null ? '' : v).split(/[,，\s]+/).map((x) => String(x).trim()).filter(Boolean).map(Number).filter((x) => Number.isFinite(x));
     if (kv.ranks) patch.ranks = nums(kv.ranks);
     if (kv.lambdas) patch.lambdas = nums(kv.lambdas);
     if (kv.kfold) patch.kfold = nums(kv.kfold)[0];
@@ -257,6 +248,40 @@ export function gmr4TemplateSheets() {
     }
   ];
 }
+
+/* ============================ 设计模板目录 ============================ */
+/**
+ * 只有一个模板，但 expect/spec 必须写：
+ * 视图要能把"预期结论"摊在界面上，harness 要能拿它跟真跑结果对账。
+ * 没有 expect 的模板等于"下载下来跑出什么算什么呢"—— 三个已上线模块都栽过这一条，
+ * 所以这里从第一个模板起就把判据钉死。
+ */
+export const GMR4_TEMPLATE_GROUPS = [
+  {
+    id: 'teaching',
+    name: '🎓 教学：多响应为什么要降秩',
+    items: [
+      {
+        id: 'lowrank3',
+        icon: '🧭',
+        label: '真实秩 3（36 样本 × 5 预测 × 8 响应，含 1 协变量）',
+        tip: '响应对是由 3 个潜在方向生成的：选型应回到 S=3；第 8 个响应的 X 载荷被故意压到 0.2，用来演示"整体好看但某个响应被降秩丢掉"',
+        spec: {
+          n: 36, p: 5, q: 8, trueRank: 3, covariates: 1, weakResponse: 8, seed: 12345, kfold: 4,
+          expect: { rank_selected: 3, R2_partialled_min: 0.85, weak_response_max: 0.8 },
+          note: '数据由确定性 LCG 合成（两次下载逐字节相同），不是实测数据'
+        }
+      }
+    ]
+  }
+];
+
+export const GMR4_TEMPLATE_MAP = GMR4_TEMPLATE_GROUPS.reduce((acc, g) => {
+  g.items.forEach((it) => { acc[it.id] = { ...it, group: g.name }; });
+  return acc;
+}, {});
+
+export const GMR4_TEMPLATE_COUNT = Object.keys(GMR4_TEMPLATE_MAP).length;
 
 /* ============================ 小工具 ============================ */
 function asMatrix(m) {

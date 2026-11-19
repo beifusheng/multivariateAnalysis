@@ -321,9 +321,12 @@ tryCatch({
     R2_partialled = r2_partialled,
     R2_per_response = as.numeric(r2_each),
     R2_per_response_partialled = as.numeric(r2_each_partialled),
+    # se_min 单独给出来：视图要画"1-SE 阈值线"，必须用引擎选型时**真正**用的那个
+    # 标准误。让前端自己去 cv.se 里猜最小值，图与结论可能各算各的（差一个格子就错）。
     cv = list(mean = mk(as.matrix(cv_mean)), se = mk(as.matrix(cv_se)),
               best = list(rank = rank_grid[best_idx[1]], lambda = lam_grid[best_idx[2]],
-                          value = cv_mean[best_idx[1], best_idx[2]])),
+                          value = cv_mean[best_idx[1], best_idx[2]]),
+              se_min = cv_se[best_idx[1], best_idx[2]]),
     rss_reduced = sum((Ys - Xs %*% final$B)^2),
     rss_full = rss_full,
     covariates_partialled_out = if (!is.null(Z)) ncol(Z) else 0,

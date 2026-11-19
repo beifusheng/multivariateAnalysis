@@ -169,6 +169,10 @@ cat("\u2500\u2500 9. 契约字段齐全（视图与 L3 要读的东西）\u2500\
   if (r$code == 0) {
     miss <- setdiff(need, names(r$out))
     ok(length(miss) == 0, "输出契约字段齐全", paste(miss, collapse = ", "))
+    # 嵌套字段不能用 names(r$out) 去比（那是顶层键），单独查一层
+    cvmiss <- setdiff(c("mean", "se", "best", "se_min"), names(r$out$cv))
+    ok(length(cvmiss) == 0, "cv 里 mean/se/best/se_min 齐（前端阈值线靠 se_min）",
+       paste(cvmiss, collapse = ", "))
     ok(nrow(as.matrix(r$out$predicted)) == 50 && ncol(as.matrix(r$out$predicted)) == 5, "predicted 形状 = n x q",
        paste(dim(as.matrix(r$out$predicted)), collapse = "x"))
     ok(nrow(as.matrix(r$out$coefficients)) == 4 && ncol(as.matrix(r$out$coefficients)) == 5,

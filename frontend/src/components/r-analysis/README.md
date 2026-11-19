@@ -261,6 +261,14 @@ tooltip 全渲染成 N/A，而且 `p.data < 0.05` 恒为 false——把 p=0.001 
 4. **Bayesian ERA 不要碰 JAGS/rjags/rstan**：打包侧已经删过 `jags.dll`（不让运行时依赖外部二进制），
    用 `MASS::mvrnorm` 手写共轭 Gibbs，ESS / R̂ / BAIC 自己实现——它们本来就要显示在结果里。
 
+### GMR⁴ 已于 2026-11-19 上线（下面的量级已做完，只剩 Bayesian ERA）
+引擎闭式重写（`# STATUS: implemented`）+ 17 项 `verify_gmr4_engine.R` + L3 `gmr4SheetSpec.js`
+（含确定性模板与 `expect` 判据）+ 视图 `GMR4.vue` + 路由 + 首页卡片可用。
+新增 harness：`test_gmr4_spec.mjs`(40) / `test_gmr4_view.mjs`(39)。glmnet 已从 required 去掉。
+
+**唯一剩余模块：Bayesian ERA**（脚本仍是 `# STATUS: placeholder`，视图不存在）。
+它的验收要点应当沿用 GMR⁴ 这一轮定下的三条：STATUS 状态行 + 恒等式级校验 + 模板 expect 对账。
+
 ### 开工顺序（每一步都要能单独提交且全套绿）
 L3 声明（`gmr4SheetSpec.js` + `test_gmr4_spec.mjs`）→ 引擎（`gmr4.R` 重写 + `verify_gmr4_engine.R`）→
 示例模板（**必须有统计下限**，见上面第 5 条：先实测出 p<0.05 再定样本数，别照抄 5 样本那种）→

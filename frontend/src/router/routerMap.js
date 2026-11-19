@@ -27,11 +27,12 @@ const constantRouterMap = [
     name: 'Nonrandom_PERMANOVA',
     component: () => import('@/views/r-analysis/Nonrandom_PERMANOVA.vue')
   },
-  // {
-  //   path: '/r-analysis/gmr4',
-  //   name: 'GMR4',
-  //   component: () => import('@/views/r-analysis/GMR4.vue')
-  // },
+  // GMR⁴：引擎已闭式实现并通过 17 项验收，视图与导出复用另三个模块的三层外壳
+  {
+    path: '/r-analysis/gmr4',
+    name: 'GMR4',
+    component: () => import('@/views/r-analysis/GMR4.vue')
+  },
   // {
   //   path: '/r-analysis/bayesian-era',
   //   name: 'Bayesian_ERA',

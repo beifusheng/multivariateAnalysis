@@ -114,19 +114,37 @@ if (r) {
   t('系数矩阵是 p×q = 5 行 × 8 列（行优先，不转置）',
     r.coefficients.length === 5 && r.coefficients.every((row) => row.length === 8),
     `${r.coefficients.length}×${(r.coefficients[0] || []).length}`);
+  t('CV 给出选型时真正用的那个标准误 se_min（前端画阈值线不许自己猜）',
+    Number.isFinite(r.cv.se_min) && r.cv.se_min > 0, JSON.stringify(r.cv.se_min));
   t('CV 网格行 = 候选秩个数、列 = lambda 个数',
     r.cv.mean.length === r.rank_grid.length && r.cv.mean[0].length === r.lambda_grid.length,
     JSON.stringify([r.cv.mean.length, r.lambda_grid.length]));
   t('模板不该带出退化诊断（带了就说明示例本身有问题）',
     (r.diagnostics || []).length === 0, JSON.stringify(r.diagnostics));
 
+  // 模板的"预期结论"必须跟真跑对上 —— 这条断了就说明示例本身在骗人
+  const tpl = spec.GMR4_TEMPLATE_MAP.lowrank3;
+  t('模板目录给出形状、种子与 expect 判据（视图与对账共用一份）',
+    tpl && tpl.spec.n === 36 && tpl.spec.p === 5 && tpl.spec.q === 8 &&
+      tpl.spec.expect.rank_selected === 3 && Number.isFinite(tpl.spec.expect.R2_partialled_min),
+    JSON.stringify(tpl && tpl.spec));
+  t('真跑结果满足模板 expect（选型与 R² 下限）',
+    r.rank_selected === tpl.spec.expect.rank_selected && r.R2_partialled > tpl.spec.expect.R2_partialled_min,
+    `S=${r.rank_selected} R²偏后=${r.R2_partialled}`);
+  t('被压弱的那个响应确实明显差（R² < 0.8），其余都 > 0.8',
+    r.R2_per_response_partialled[tpl.spec.weakResponse - 1] < tpl.spec.expect.weak_response_max &&
+      r.R2_per_response_partialled.slice(0, 7).every((v) => v > tpl.spec.expect.weak_response_max),
+    r.R2_per_response_partialled.map((v) => v.toFixed(2)).join(' '));
+  t('模板声明的种子/折数就是真跑用的那组（可复现不是口号）',
+    r.seed === tpl.spec.seed && r.kfold === tpl.spec.kfold, JSON.stringify([r.seed, r.kfold]));
+
   console.log('\n=== 4. 导出计划器吃真结果 ===');
   const ctx = { r, analysisResult: r, payload, templateLabel: 'GMR4 示例', diagnostics: r.diagnostics, stamp: '20261119_101500' };
-  const jobs = spec.gmr4PlanExport(['excel', 'json', 'coefficients', 'input'], ctx, ctx.stamp);
+  const jobs = spec.gmr4PlanExport(['excel', 'json', 'chart', 'input'], ctx, ctx.stamp);
   t('四项都出得来、文件名带模块名与时间戳',
-    jobs.length === 4 && jobs.every((j) => /^GMR4 .*_20261119_101500\.(xlsx|json|csv)$/.test(j.filename)),
+    jobs.length === 4 && jobs.every((j) => /^GMR4 .*_20261119_101500\.(xlsx|json|png)$/.test(j.filename)),
     jobs.map((j) => j.filename).join(' , '));
-  const xls = jobs.find((j) => j.kind === 'xlsx');
+  const xls = jobs.find((j) => j.type === 'xlsx');
   t('Excel 五张表：结论/选型路径/CV网格/系数矩阵/模型信息',
     xls.sheets.map((s) => s.name).join(',') === '结论,选型路径,CV网格,系数矩阵,模型信息',
     xls.sheets.map((s) => s.name).join(','));
@@ -143,11 +161,15 @@ if (r) {
   t('CV 网格表把 λ 写在表头、S 写在首列，另附标准误与最小点',
     String(cvSheet[1][0]).startsWith('S') && cvSheet.some((rw) => String(rw[0]).includes('CV 最小点')),
     JSON.stringify(cvSheet.slice(0, 2)));
-  const csv = jobs.find((j) => j.kind === 'csv');
-  t('系数 CSV 是 1 表头 + p 行，每行 1+q 列',
-    csv.aoa.length === 6 && csv.aoa[0].length === 9 && csv.aoa[0][0] === 'X\\Y',
-    `${csv.aoa.length}×${csv.aoa[0].length}`);
-  const inJob = jobs.find((j) => j.kind === 'json' && j.filename.includes('输入'));
+  // 导出类型只有 xlsx/json/png 三种（与 NR/PM/Med 一致）：上一版这里自己加了个 csv，
+  // 而项目里从来没有 CSV 写出通路 —— 勾了只会得到一个没人能执行的任务。
+  const pngs = jobs.filter((j) => j.type === 'png');
+  t('图表项出的是 png 任务（只带文件名，视图从当前 echarts 实例取图）',
+    pngs.length === 1 && /\.png$/.test(pngs[0].filename) && Object.keys(pngs[0]).join(',') === 'type,filename',
+    JSON.stringify(pngs[0]));
+  t('任务类型只有 xlsx/json/png 三种，没有视图执行不了的类型',
+    jobs.every((j) => ['xlsx', 'json', 'png'].includes(j.type)), jobs.map((j) => j.type).join(','));
+  const inJob = jobs.find((j) => j.type === 'json' && j.filename.includes('输入'));
   t('输入导出能把 X/Y/Z/参数原样带回来（可复现）',
     inJob.data.X.length === 36 && inJob.data.Y.length === 36 && inJob.data.Z.length === 36 && inJob.data.seed === 12345);
   t('未知 key 不出空任务', spec.gmr4PlanExport(['nope'], ctx, ctx.stamp).length === 0);

@@ -210,13 +210,20 @@ export default class RController {
 
   /**
    * 执行 GMR⁴ 分析
+   *
+   * 字段名以 r-scripts/gmr4.R 为准（不是以旧注释为准）：
+   *   引擎吃 ranks / lambdas 候选网格 + kfold + seed，而不是单个 rank / lambda。
+   *   旧声明写的 rank/lambda 在运行时不会报错（rService 把整包 JSON.stringify），
+   *   但它会让任何人改 API 时把真实参数删掉 —— 类型就得是合同，不是装饰。
    */
   async runGMR4(params: {
-    X: number[][]; // 预测变量
-    Y: number[][]; // 响应变量
-    Z?: number[][]; // 协变量
-    rank?: number;
-    lambda?: number;
+    X: number[][]; // 预测变量（n x p，行=样本）
+    Y: number[][]; // 响应变量（n x q，行序与 X 一致）
+    Z?: number[][]; // 协变量（可选，建模前偏掉）
+    ranks?: number[]; // 候选秩，缺省 1..min(p,q)
+    lambdas?: number[]; // 候选正则强度，缺省 10^-3..10^2
+    kfold?: number; // 交叉验证折数
+    seed?: number; // 固定随机源，同输入必同输出
   }): Promise<any> {
     logger.info('[RController] Running GMR4 with params:', params);
     

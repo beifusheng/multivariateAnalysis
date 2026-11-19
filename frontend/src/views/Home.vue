@@ -121,21 +121,22 @@
         </el-card>
 
         <!-- GMR⁴ -->
-        <el-card 
-          class="method-card coming-soon-card" 
+        <el-card
+          class="method-card"
           shadow="hover"
-          @click="showComingSoon('GMR⁴')"
+          @click="navigateTo('/r-analysis/gmr4')"
         >
           <div class="method-card-content">
             <div class="method-icon">📈</div>
             <h3 class="method-name">GMR⁴</h3>
-            <p class="method-desc">广义混合正则化降秩回归（Reduced Rank Regression）</p>
+            <p class="method-desc">多响应降秩回归（Reduced-Rank Regression + 岭正则，交叉验证选秩）</p>
             <div class="method-tags">
-              <el-tag size="small" type="info" effect="dark">🚧 开发中</el-tag>
-              <el-tag size="small" type="warning" effect="plain">算法未验收</el-tag>
+              <el-tag size="small" type="success" effect="dark">✅ 可用</el-tag>
             </div>
           </div>
-          <div class="ribbon">开发中</div>
+          <div class="card-action">
+            <el-button type="primary" size="small" round>立即使用 →</el-button>
+          </div>
         </el-card>
 
         <!-- Bayesian ERA -->
@@ -272,7 +273,6 @@ export default {
     showComingSoon(methodName) {
       // 不只说“敬请期待”：把缺什么说清楚，否则用户会以为点了就能等到
       const detail = {
-        'GMR⁴': '引擎已重写为闭式解并通过 16 项验收（r-scripts/tools/verify_gmr4_engine.R：满秩等于 OLS/岭解的恒等式、RSS 随秩单调、真实秩 3 能被选型找回），缺的是界面与路由——frontend/src/views/r-analysis/GMR4.vue 还不存在。',
         'Bayesian ERA': 'r-scripts/bayesian_era_mediation.R 同样是占位实现，未跑过后验采样收敛校验，也没有界面和路由。'
       }[methodName] || '';
       this.$message({

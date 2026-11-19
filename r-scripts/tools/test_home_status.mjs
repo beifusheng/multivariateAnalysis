@@ -89,8 +89,12 @@ for (const r of liveRoutes) {
 }
 
 // 3c) 注释掉的路由（GMR⁴ / Bayesian ERA）说明它们确实还没上线，首页不得出现同名可用卡片
-check('未注册路由仍留在 routerMap 注释里（GMR⁴ / Bayesian ERA）', commentedRoutes.length >= 2,
-  `只找到 ${commentedRoutes.length} 条注释路由`);
+// GMR⁴ 今天上线了，所以这条不能再写死 >=2：
+// 断言要盯着"还剩哪个没上线"，而不是"注释有几条"，否则上线一个就要来改一次测试。
+check('Bayesian ERA 仍留在 routerMap 注释里（还没上线）', /bayesian-era/.test(commentedRoutes.join('|')),
+  commentedRoutes.join(','));
+check('gmr4 不再以注释形式留在路由表里（已上线就不该两头都占着）',
+  !/gmr4/.test(commentedRoutes.join('|')), commentedRoutes.join(','));
 
 /** 从 Home.vue 的 showComingSoon 映射里取某个模块的"缺什么"说明 */
 function homeTipOf(name) {
@@ -117,7 +121,13 @@ const era = parsed.find((c) => c.name.startsWith('Bayesian'));
 for (const [c, script] of [[gmr, 'gmr4.R'], [era, 'bayesian_era_mediation.R']]) {
   if (!c) continue;
   const exists = fs.existsSync(path.join(ROOT, engineDir, script));
-  check(`${c.name}：脚本存在性(${script}) 与「开发中」自述一致`, exists ? c.devTag : true);
+  // "脚本存在 => 必须标开发中"是错的规则：脚本早就存在，能不能上线取决于
+  // 它是否只是占位、以及有没有界面。GMR⁴ 上线时这条会把红打得像回归被破坏。
+  const engSrc = exists ? read(path.join(engineDir, script)) : '';
+  const st = (/#\s*STATUS:\s*(implemented|placeholder)/i.exec(engSrc) || [])[1];
+  check(`${c.name}：STATUS=${st || '（缺失）'} 与卡片标签一致（placeholder 必须开发中，implemented 必须可用）`,
+    st === 'placeholder' ? c.devTag : st === 'implemented' ? !c.devTag : exists ? c.devTag : true,
+    `devTag=${c.devTag}, STATUS=${st}`);
   // 引擎是否已验收，与"能不能上线"是两回事。GMR4 今天把这一点顶出来了：
   // 引擎重写并通过 16 项验收，但 frontend/src/views/r-analysis/GMR4.vue 根本不存在，
   // 所以卡片必须仍然「开发中」——只是理由要从"算法未验收"换成"没有界面"。
@@ -130,10 +140,17 @@ for (const [c, script] of [[gmr, 'gmr4.R'], [era, 'bayesian_era_mediation.R']]) 
     // 缺什么的说明写在 Home.vue 的 showComingSoon 里，不是卡片字段：
     // 那里若还留着"简化占位/未验收"，就是过时说明（用户会以为引擎也没做）。
     const tip = homeTipOf(c.name);
-    check(`${c.name}：引擎已验收后，弹窗说明不能再写"简化占位/未验收"`,
-      !!tip && !/简化|占位|未验收|需根据论文完善/.test(tip), tip.slice(0, 90));
-    check(`${c.name}：弹窗说明必须点出真正缺的那一件（界面/路由）`,
-      /界面|路由/.test(tip), tip.slice(0, 90));
+    // 卡片已经可用时 showComingSoon 里那条说明就是死代码，文案断言只对仍在开发中的卡片生效
+    if (c.devTag) {
+      check(`${c.name}：引擎已验收后，弹窗说明不能再写"简化占位/未验收"`,
+        !!tip && !/简化|占位|未验收|需根据论文完善/.test(tip), tip.slice(0, 90));
+      check(`${c.name}：弹窗说明必须点出真正缺的那一件（界面/路由）`,
+        /界面|路由/.test(tip), tip.slice(0, 90));
+    } else {
+      check(`${c.name}：已上线 -> comingSoon 的 detail 表里不应再留它的条目`,
+        !home.slice(home.indexOf("const detail = {")).match(new RegExp("'" + c.name + "'\s*:")),
+        "卡片可点了还留着“开发中说明”，下一个人会以为还有两条实现路径");
+    }
   } else {
     check(`${c.name}：${script} 未被任何验收 harness 引用 -> 才能以"未验收"为由标开发中`, true);
   }
