@@ -237,3 +237,39 @@ tooltip 全渲染成 N/A，而且 `p.data < 0.05` 恒为 false——把 p=0.001 
 - `rService.runScript` 是把 `params` 整包 `JSON.stringify` 写入 input.json，**不做字段筛选**；
   所以改入参形状要同时改三处：rController 类型、视图 `buildPayload()`、R 脚本解析。
 
+
+---
+
+## 交接：GMR⁴ / Bayesian ERA 开工前必读（2026-11-18 核实）
+
+这三条是我今天逐条跑出来的事实，不是从旧文档抄的，能省掉一次返工：
+
+1. **依赖不用下载**。`r-runtime.lock.json` 里 177 个包、`missing_required = null`；
+   `verify_r_runtime.R` 对 `gmr4`（jsonlite, Matrix, glmnet）与 `bayesian_era`（jsonlite, MASS）
+   都报「依赖齐全」，真 exit=0。所有包都是 CRAN Windows 二进制（`Built: R 4.6.1; windows; Archs: x64`），
+   92 个含编译 DLL ⇒ 以后要补包走「下 zip 拷进 `r-portable/library` + 重跑
+   `export_r_lockfile.R` 并提交 lock」这条路，别装到用户库里去。
+2. **现状比"占位实现"更空**：`r-scripts/gmr4.R` 100 行、`r-scripts/bayesian_era_mediation.R` 103 行，
+   而 `frontend/src/views/r-analysis/` 里只有 PERMANOVA / Nonrandom / Med **三个视图**——
+   GMR⁴ 与 Bayesian ERA 连视图文件都不存在。所以这是整条模块的量级（L3 声明 + 视图 + 引擎 + harness），
+   不是"补 25 个模板"。
+3. **受限置换的 4 类互作有现成锚点**：`verify_r_runtime.R` 已经把 `LDM::permanovaFL` 的 23 个形参列全了
+   （`perm.within.type / perm.between.type / perm.within.ncol / perm.within.nrow / n.perm.max /
+   n.rej.stop / tree / cluster.id / strata / how / square.dist / center.dist / scale.otu.table /
+   binary / n.rarefy / test.mediation / n.cores …`）。GMR⁴ 的置换语义应当直接落在这套参数上，
+   自己另写一套置换 = 再造一遍 Non-random 已经踩过的坑。
+4. **Bayesian ERA 不要碰 JAGS/rjags/rstan**：打包侧已经删过 `jags.dll`（不让运行时依赖外部二进制），
+   用 `MASS::mvrnorm` 手写共轭 Gibbs，ESS / R̂ / BAIC 自己实现——它们本来就要显示在结果里。
+
+### 开工顺序（每一步都要能单独提交且全套绿）
+L3 声明（`gmr4SheetSpec.js` + `test_gmr4_spec.mjs`）→ 引擎（`gmr4.R` 重写 + `verify_gmr4_engine.R`）→
+示例模板（**必须有统计下限**，见上面第 5 条：先实测出 p<0.05 再定样本数，别照抄 5 样本那种）→
+视图（三层外壳 + 数据驱动画图）→ 端到端「下载模板 → 导入 → 真跑 R」。
+
+### 新会话最先该跑的三条命令
+```
+for t in r-scripts/tools/test_*.mjs; do node $t > /dev/null 2>&1 || echo "FAIL $t"; done
+./r-portable/bin/Rscript.exe r-scripts/tools/verify_r_runtime.R     # 看真 exit 码，别接 | tail
+cd frontend && npm run build
+```
+基线：16 个套件、960+ 项断言全绿（`test_pm_view` 90 项里含"陷阱/退化/ID 列"三类语义断言）。
