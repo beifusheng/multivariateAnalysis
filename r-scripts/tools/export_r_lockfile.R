@@ -50,8 +50,10 @@ required <- list(
   ),
   gmr4 = list(
     script = "gmr4.R",
-    packages = c("jsonlite", "Matrix", "glmnet"),
-    note = "glmnet 缺失时脚本会退化为内置坐标下降求解器，但精度与收敛性以 glmnet 为准"
+    packages = c("jsonlite", "Matrix"),
+    note = paste0("2026-11-18 重写为闭式解（Izenman RRR + 岭正则），不再依赖 glmnet。",
+                  "旧声明里的“缺失时退化为内置坐标下降求解器”从未实现过 —— ",
+                  "旧脚本真跑一次就 exit=1，那条 note 是凭空写的。")
   ),
   bayesian_era = list(
     script = "bayesian_era_mediation.R",

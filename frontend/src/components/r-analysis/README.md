@@ -245,7 +245,7 @@ tooltip 全渲染成 N/A，而且 `p.data < 0.05` 恒为 false——把 p=0.001 
 这三条是我今天逐条跑出来的事实，不是从旧文档抄的，能省掉一次返工：
 
 1. **依赖不用下载**。`r-runtime.lock.json` 里 177 个包、`missing_required = null`；
-   `verify_r_runtime.R` 对 `gmr4`（jsonlite, Matrix, glmnet）与 `bayesian_era`（jsonlite, MASS）
+   `verify_r_runtime.R` 对 `gmr4`（jsonlite, Matrix —— 2026-11-18 重写为闭式解后已去掉 glmnet）与 `bayesian_era`（jsonlite, MASS）
    都报「依赖齐全」，真 exit=0。所有包都是 CRAN Windows 二进制（`Built: R 4.6.1; windows; Archs: x64`），
    92 个含编译 DLL ⇒ 以后要补包走「下 zip 拷进 `r-portable/library` + 重跑
    `export_r_lockfile.R` 并提交 lock」这条路，别装到用户库里去。

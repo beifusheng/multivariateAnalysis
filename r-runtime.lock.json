@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-17T11:34:45+0800",
+  "generated_at": "2026-11-19T10:29:09+0800",
   "generated_by": "r-scripts/tools/export_r_lockfile.R",
   "r": {
     "version": "4.6.1",
@@ -502,7 +502,7 @@
       "priority": null,
       "source": "CRAN",
       "needs_compile": false,
-      "required_by": "gmr4",
+      "required_by": null,
       "depends": ["methods", "utils", "foreach", "shape", "survival", "RcppR", "Matrix"]
     },
     {
@@ -1622,8 +1622,8 @@
     },
     "gmr4": {
       "script": "gmr4.R",
-      "packages": ["jsonlite", "Matrix", "glmnet"],
-      "note": "glmnet 缺失时脚本会退化为内置坐标下降求解器，但精度与收敛性以 glmnet 为准"
+      "packages": ["jsonlite", "Matrix"],
+      "note": "2026-11-18 重写为闭式解（Izenman RRR + 岭正则），不再依赖 glmnet。旧声明里的“缺失时退化为内置坐标下降求解器”从未实现过 —— 旧脚本真跑一次就 exit=1，那条 note 是凭空写的。"
     },
     "bayesian_era": {
       "script": "bayesian_era_mediation.R",
