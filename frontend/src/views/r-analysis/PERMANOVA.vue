@@ -732,16 +732,26 @@ export default {
     },
 
     /** permanova_result 行 → 表格行（字段名跨 vegan 版本不一样，这里已做兼容） */
+    /** permanova_result 行 -> 表格行 */
     resultTerms() {
       const rows = (this.analysisResult && this.analysisResult.permanova_result) || [];
+      // 行名用引擎给的 _row（adonis2 单术语时是 Model / Residual / Total）。
+      // 不读 _row 就只能显示“顼 1 / 顼 2 / 顼 3”，用户分不清哪行是检验、哪行是残差。
+      const NAME = { Model: '模型（公式项）', Residual: '残差', Total: '总计' };
       return rows.map((r, i) => ({
-        term: r.term || r.Variable || r[`Terms`] || `项 ${i + 1}`,
+        term: NAME[r._row] || r._row || r.term || r.Variable || `顼 ${i + 1}`,
         Df: r.Df,
         SumOfSqs: r.SumOfSqs,
         R2: r.R2,
         F: r.F != null ? r.F : r.F_model,
         p: r.p_value != null ? r.p_value : r['Pr(>F)']
       }));
+    },
+
+    /** 样本表里能写进公式的列（去掉首列样本 ID） */
+    sampleColumns() {
+      const d = this.permanovaParams.sampleData;
+      return d && typeof d === 'object' && !Array.isArray(d) ? Object.keys(d).slice(1) : [];
     },
 
     resultSignificant() {
@@ -859,10 +869,18 @@ export default {
           permutations: params.permutations
         }, null, 2));
 
-        // 添加样本数据和公式（如果有效）
-        if (this.permanovaParams.sampleDataValid) {
-          params.sampleData = this.permanovaParams.sampleData;
-          params.formula = this.permanovaParams.formula || 'Treatment';
+        // 样本数据与公式一律由 buildRunParams() 给（就是上面那个 params）。
+        // 以这里还有一份“没公式就静默补 'Treatment'”的旧逻辑：同一个动作两处各写一遍，
+        // 而 'Treatment' 这个凭空捏造的列名根本不在用户的表里（实机报回来的
+        // “Df=8 / R²=1 / F=p=N/A” 就是这类默默降级造成的）。
+        if (this.permanovaParams.sampleDataValid && !String(this.permanovaParams.formula || '').trim()) {
+          loading.close();
+          this.$message.error({
+            message: '样本表已填，但「模型公式」是空的。空公式只能拿随机分组跑演示结果，'
+                   + '那不是你这份数据的答案。可用列：' + (this.sampleColumns.join(', ') || '（样本表没解析出列）'),
+            duration: 8000, showClose: true
+          });
+          return;
         }
 
         console.log('[PERMANOVA] Calling runPERMANOVA API...');
@@ -1960,7 +1978,18 @@ export default {
       try {
         // 获取分组变量
         const sampleData = this.permanovaParams.sampleData;
-        const formula = this.permanovaParams.formula || 'Treatment';
+        // 公式没填就直接说，不能凭空补一个 'Treatment'：
+        // 那个列名根本不在用户表里，接下来只会变成“变量不存在”这种看不出根因的错。
+        const formula = String(this.permanovaParams.formula || '').trim();
+        if (!formula) {
+          this.$message.error({
+            message: '事后检验需要从「模型公式」里取分组变量，但公式是空的。可用列：'
+                   + (this.sampleColumns.join(', ') || '（样本表没解析出列）'),
+            duration: 7000, showClose: true
+          });
+          this.posthocLoading = false;
+          return;
+        }
 
         // 从公式中提取第一个分类变量
         const firstVar = formula.split('+')[0].trim();

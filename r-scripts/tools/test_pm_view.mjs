@@ -458,7 +458,38 @@ console.log('\n=== 7. 编码语义：整数分组被当趋势拟合时必须开�
   check('结果区不再是裸 JSON：概览卡片与逐术语表格在模板里',
     /result-summary/.test(pmViewSource) && /rs-table/.test(pmViewSource) &&
       /原始输出（JSON，调试用）/.test(pmViewSource), '');
+
+  // --------- 实机报回来的那一组数字（Df=8 / R²=1 / F=p=N/A）就是下面两条 ----------
+  const idFit = pmErr({ ...base, formula: 'Sample' }, 'idfit');
+  check('样本 ID 列进公式 -> 明确拒绝并说清为什么（不再给 R²=1 的空模型）',
+    idFit.code !== 0 && /是样本 ID 列（第一列），不能当解释变量/.test(idFit.msg) && !/非数值参数/.test(idFit.msg),
+    idFit.msg.slice(0, 130));
+  const ghost = pmErr({ ...base, formula: 'Treatment' }, 'ghost');
+  check('公式引用了不存在的列 -> 列出可用列（不再抛 adonis2 的"找不到对象"）',
+    ghost.code !== 0 && /不在样本表里/.test(ghost.msg) && /可用列：Group/.test(ghost.msg),
+    ghost.msg.slice(0, 130));
+
+  const idTrend = runPm({ ...base, formula: 'Sample' === 'x' ? 'Group' : 'Group' }, 'trend2');
+  check('提醒只说公式真用到的列（ID 被拒时不该扯 Group）',
+    (idTrend.diagnostics || []).some((d) => /Group/.test(d)), JSON.stringify(idTrend.diagnostics));
+  const unused = runPm({
+    distanceMatrix: D9, permutations: 199,
+    sampleData: { Sample: Array.from({ length: 9 }, (_, i) => 'S' + (i + 1)), Group: codes, pH: [7.1, 7.2, 7.0, 7.3, 7.1, 7.2, 6.9, 7.0, 7.1] },
+    formula: 'pH'
+  }, 'unused');
+  check('整数编码列没进公式时不该报（上一版扫全部列，骂错了对象）',
+    (unused.diagnostics || []).every((d) => !/Group/.test(d)), JSON.stringify(unused.diagnostics));
+
+  check('视图按引擎的 _row 给行起名，不再显示"项 1/项 2"',
+    vm.resultTerms.map((t) => t.term).join(',') === '模型（公式项）,残差,总计',
+    vm.resultTerms.map((t) => t.term).join(','));
+  check('视图能列出可写进公式的列（首列 ID 排除在外）',
+    (() => { const v = makeVm(); v.permanovaParams.sampleData = base.sampleData; return v.sampleColumns.join(',') === 'Group'; })(),
+    JSON.stringify(vm.sampleColumns));
+  check("'Treatment' 这种凭空补列名的旧逻辑已删除",
+    !/formula \|\| 'Treatment'/.test(pmViewSource), '');
 }
+
 
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }

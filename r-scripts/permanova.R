@@ -76,6 +76,8 @@ tryCatch({
   #     ——图上每个点一个颜色，看上去像分组着色，其实没有分组。两边都能“跑成功”。
   # 现在：一份转换 + 一项歧义检测（只报告，不替用户猜），PCoA 分组跟随公式首项。
   ambiguous_terms <- character(0)
+  # 数值项逐样本唯一的提醒（不是错误：连续协变量合法，但 ID 喂进来也长这样）
+  output_note <- character(0)
 
   # 公式里被 as.factor(...) 包住的列：用户已经明确说了它是因子，不能再报“当连续量拟合”
   factored_terms <- character(0)
@@ -87,6 +89,25 @@ tryCatch({
       regmatches(params$formula,
                  gregexpr("(?<=as\\.factor\\()[^)]+(?=\\))", params$formula, perl = TRUE))))
   }
+
+  # 公式里的项名（只看右侧；拆 + * : 与 as.factor(x) 里的 x）
+  formula_terms_of <- function(f) {
+    if (!length(f) || !nzchar(f)) return(character(0))
+    rhs <- if (grepl("~", f)) trimws(strsplit(f, "~")[[1]][2]) else trimws(f)
+    parts <- trimws(unlist(strsplit(rhs, "[+*:{}]", perl = TRUE)))
+    parts <- trimws(gsub("^as\\.factor\\((.*)\\)$", "\\1", parts))
+    parts <- parts[nzchar(parts)]
+    unique(parts)
+  }
+
+  # 公式首项（PCoA 按它着色）
+  first_term_of <- function(f) {
+    t <- formula_terms_of(f)
+    if (length(t)) t[1] else ""
+  }
+
+  # 公式首项（PCoA 按它着色）之前先定下来：ambiguity 提醒只报公式真用到的列
+  formula_terms <- formula_terms_of(params$formula)
 
   to_sample_frame <- function(sample_data_raw) {
     col_names <- names(sample_data_raw)
@@ -112,7 +133,8 @@ tryCatch({
         # 3 层起才是真陷阱：1/2/3 被当“随编号上升的趋势”，而不是三组互相比较。
         if (all(uniq == round(uniq)) && length(uniq) >= 3 &&
             length(uniq) <= floor(length(num) / 2) &&
-            !(col_name %in% factored_terms)) {
+            !(col_name %in% factored_terms) &&
+            col_name %in% formula_terms) {
           ambiguous_terms <<- c(ambiguous_terms, col_name)
         }
         out[[col_name]] <- num
@@ -127,10 +149,6 @@ tryCatch({
     as.data.frame(out, stringsAsFactors = FALSE)
   }
 
-  # 公式首项（PCoA 按它着色）：支持 as.factor(x) / x
-  first_term_of <- function(f) trimws(strsplit(gsub("as\\.factor\\(", "", gsub("\\)", "", f)),
-                                               "[+*:]", perl = TRUE)[[1]][1])
-
   # 检查是否提供了样本数据和公式
   if (!is.null(params$sampleData) && !is.null(params$formula)) {
     sample_data <- to_sample_frame(params$sampleData)
@@ -138,6 +156,42 @@ tryCatch({
     if (grepl("~", formula_str)) {
       formula_str <- trimws(strsplit(formula_str, "~")[[1]][2])
     }
+
+    # ---------------- 公式项的合法性 ----------------
+    # 实机报回来的结果是 Df=8 / R²=1.0000 / F 与 p 全是 N/A：
+    # 签名指向“把样本 ID 当了解释变量”（9 个样本 9 个水平 = 逐字完美拟合）。
+    # 旧代码丱完全不管：adonis2 照跑，输出照样 success，前端把 N/A 端给用户看。
+    id_col <- colnames(sample_data)[1]
+    used_terms <- formula_terms_of(formula_str)
+    for (tt in used_terms) {
+      if (identical(tt, id_col)) {
+        stop(paste0("公式里的 ", tt, " 是样本 ID 列（第一列），不能当解释变量：",
+                    "每个样本一个水平，模型会“完美拟合”（R²=1），而 F 与 p 根本没有定义。",
+                    "请把公式改成分组列（如 Group）。"))
+      }
+      if (!(tt %in% colnames(sample_data))) {
+        stop(paste0("公式里的 ", tt, " 不在样本表里。可用列：",
+                    paste(colnames(sample_data)[-1], collapse = ", "),
+                    "（第一列 ", id_col, " 是样本 ID，不参与建模）"))
+      }
+      lev <- length(unique(sample_data[[tt]]))
+      # 只对**因子列**判“水平太多”。连续协变量天然有 n 个不同取值（Age=25/28/30/27），
+      # 那不算退化；拿它报错就是误报（上一版就是拿 4 样本夹具把 Age 误杀了）。
+      # 因子列水平数 >= 样本数才是真退化：每样本自成一组，残差自由度为 0，F/p 无定义。
+      if (is.factor(sample_data[[tt]]) && lev >= nrow(sample_data)) {
+        stop(paste0("公式里的因子项 ", tt, " 有 ", lev, " 个水平，而样本一共 ", nrow(sample_data),
+                    " 个 —— 每个样本自成一组，残差自由度为 0，F 与 p 没有定义。",
+                    "请合并水平或增加样本；如果它本来就是连续量，直接写列名（不要包 as.factor）。"))
+      }
+      if (!is.factor(sample_data[[tt]]) && lev >= nrow(sample_data) && length(used_terms) == 1L) {
+        # 数值列且逐样本唯一，又是公式里唯一一项：合法（真连续协变量就长这样），
+        # 但这恰好也是“把数字 ID 喂进模型”的形状。不拒，只说出来。
+        output_note <- c(output_note, paste0(
+          "公式项 ", tt, " 是数值列且每个样本的取值都不同：拟合的 R² 会接近 1。",
+          "如果它是连续协变量（如 pH）则正常；如果它其实是样本编号，请改用分组列。"))
+      }
+    }
+
     cat(sprintf("[PERMANOVA.R] 建模表: %d 行 × %d 列；公式: dist ~ %s\n",
                 nrow(sample_data), ncol(sample_data), formula_str))
 
@@ -232,16 +286,20 @@ tryCatch({
   }
 
   # ---------------- 歧义列提醒 ----------------
-  # 整数编码且取值很少的列（如 Group = 1/2）在 adonis2 里是**连续变量**：
-  # 检验的是“随编号单调上升”的斜率，不是组间差异。机器不该替用户猜，
-  # 但必须把后果说清楚 —— 只删掉数字列不给说法，用户会以为软件拒收他的数据。
+  # 整数编码且取值很少的列（如 Group = 1/2/3）在 adonis2 里是**连续变量**：
+  # 检验的是“随编号单调上升”的趋势，不是组间差异。机器不该替用户猜，
+  # 但必须把后果说清楚 —— 只拒收不给说法，用户会以为软件拒收他的数据。
+  diags <- character(0)
   if (length(ambiguous_terms)) {
-    output$diagnostics <- list(paste0(
-      "公式里这些列是整数编码且取值很少：", paste(unique(ambiguous_terms), collapse = ", "),
+    cols <- unique(ambiguous_terms)
+    diags <- c(diags, paste0(
+      "公式里这些列是整数编码且取值很少：", paste(cols, collapse = ", "),
       "。它们被当连续协变量拟合（Df=1，检验的是斜率而不是组间差异）——",
       "如果它们其实是分组编码（如 1=病例 / 2=对照），请改成文本（Case/Control），",
-      "或在公式里写成 as.factor(Group)。"))
+      "或在公式里写成 ", paste0("as.factor(", cols, ")", collapse = " / "), "。"))
   }
+  if (length(output_note)) diags <- c(diags, unique(output_note))
+  if (length(diags)) output$diagnostics <- as.list(diags)
   
   # ========== 添加 PCoA 分析 ==========
   cat("Starting PCoA analysis...\n")
