@@ -483,6 +483,22 @@ console.log('\n=== 7. 编码语义：整数分组被当趋势拟合时必须开�
   check('视图按引擎的 _row 给行起名，不再显示"项 1/项 2"',
     vm.resultTerms.map((t) => t.term).join(',') === '模型（公式项）,残差,总计',
     vm.resultTerms.map((t) => t.term).join(','));
+  // 实机反馈的形状：上面绿框 0.0070，下面一句“你检验的不是组间差异”——颜色先替用户下了结论
+  check('引擎带提醒时头部不再是绿色"显著"，而是 caveat', vm.headlineState === 'caveat', vm.headlineState);
+  check('caveat 时标题明说"显著性先别信"', /显著性先别信/.test(vm.headlineCaption), vm.headlineCaption);
+  {
+    const vmClean = makeVm();
+    vmClean.analysisResult = factored;   // as.factor(Group)：同一数据、无提醒
+    check('无提醒时仍按显著性上色（不是一律变橙）',
+      vmClean.headlineState === 'sig' && /置换/.test(vmClean.headlineCaption) && !/别信/.test(vmClean.headlineCaption),
+      vmClean.headlineState + ' | ' + vmClean.headlineCaption);
+    const vmNsig = makeVm();
+    vmNsig.analysisResult = { p_value: 0.61, diagnostics: [], permutations: 999 };
+    check('不显著且无提醒 -> nsig', vmNsig.headlineState === 'nsig', vmNsig.headlineState);
+  }
+  check('caveat 样式在本视图 scoped 里（不靠共享 CSS 搬运）',
+    /\.rs-headline\.caveat/.test(pmViewSource), '');
+
   check('视图能列出可写进公式的列（首列 ID 排除在外）',
     (() => { const v = makeVm(); v.permanovaParams.sampleData = base.sampleData; return v.sampleColumns.join(',') === 'Group'; })(),
     JSON.stringify(vm.sampleColumns));

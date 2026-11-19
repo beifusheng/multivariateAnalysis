@@ -377,9 +377,9 @@
            用户打开自己的分析结果看到的是一堆键值对。引擎新加的 diagnostics
            （整数编码被当趋势拟合等）塑在那个 JSON 里根本没人看得见。 -->
       <div class="result-summary">
-        <div class="rs-headline" :class="resultSignificant ? 'sig' : 'nsig'">
+        <div class="rs-headline" :class="headlineState">
           <div class="rs-p">{{ fmtP(analysisResult.p_value) }}</div>
-          <div class="rs-cap">p 值（置换 {{ analysisResult.permutations }} 次）</div>
+          <div class="rs-cap">{{ headlineCaption }}</div>
           <div class="rs-nums">
             F = {{ fmt(analysisResult.F_model != null ? analysisResult.F_model : analysisResult.F, 4) }}
             ｜R² = {{ fmt(analysisResult.R2, 4) }}
@@ -757,7 +757,25 @@ export default {
     resultSignificant() {
       const p = this.analysisResult && this.analysisResult.p_value;
       return typeof p === 'number' && p < 0.05;
-    }
+    },
+
+    /**
+     * 引擎带提醒时不能继续用绿色“显著”去总结。
+     * 实机反馈就是这个形状：上面绿框 0.0070，下面一句“你检验的是斜率而不是组间差异”——
+     * 颜色先回答了“有发现”，文字再说“这个问题问错了”，用户只会记住颜色。
+     */
+    headlineState() {
+      if (this.diagnostics.length) return 'caveat';
+      return this.resultSignificant ? 'sig' : 'nsig';
+    },
+
+    headlineCaption() {
+      const n = this.analysisResult && this.analysisResult.permutations;
+      if (this.diagnostics.length) {
+        return `p 值（置换 ${n} 次）—— 显著性先别信，见下方提醒`;
+      }
+      return `p 值（置换 ${n} 次）`;
+    },
   },
 
   watch: {
@@ -2794,6 +2812,9 @@ export default {
 }
 .rs-headline.sig { border-left-color: #67c23a; background: #f0f9eb; }
 .rs-headline.nsig { border-left-color: #e6a23c; background: #fdf6ec; }
+/* 引擎带提醒：橙底 + 左侧红条，既不报喜也不装死 */
+.rs-headline.caveat { border-left-color: #f56c6c; background: #fdf6ec; }
+.rs-headline.caveat .rs-p { color: #b8560f; }
 .rs-p { font-size: 30px; font-weight: 700; line-height: 1.1; }
 .rs-cap { font-size: 12px; color: #606266; }
 .rs-nums { margin-left: auto; font-size: 13px; color: #303133; }
