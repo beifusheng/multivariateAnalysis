@@ -170,9 +170,17 @@ tryCatch({
                     "请把公式改成分组列（如 Group）。"))
       }
       if (!(tt %in% colnames(sample_data))) {
-        stop(paste0("公式里的 ", tt, " 不在样本表里。可用列：",
-                    paste(colnames(sample_data)[-1], collapse = ", "),
-                    "（第一列 ", id_col, " 是样本 ID，不参与建模）"))
+        # 实测有人把"取值"当"列名"写进公式（写成 G1/G2/G3，而 G1/G2/G3 是 Group 列的值）。
+        # 光列可用列名不够，要把每列的取值一并给出，用户才能一眼看出该写哪个。
+        others <- setdiff(colnames(sample_data), id_col)
+        detail <- vapply(others, function(cc) {
+          v <- unique(as.character(sample_data[[cc]]))
+          paste0(cc, "（取值：", paste(utils::head(v, 4), collapse = ", "),
+                 if (length(v) > 4) sprintf(", …共 %d 个", length(v)) else "", "）")
+        }, character(1))
+        stop(paste0("公式里的 ", tt, " 不是样本表里的列名。公式要写**列名**（取值不写进公式）。",
+                    "可用列：", if (length(detail)) paste(detail, collapse = "; ") else "（无）",
+                    "；第一列 ", id_col, " 是样本 ID，不参与建模。"))
       }
       lev <- length(unique(sample_data[[tt]]))
       # 只对**因子列**判“水平太多”。连续协变量天然有 n 个不同取值（Age=25/28/30/27），
@@ -424,6 +432,8 @@ tryCatch({
   writeLines(output_json, output_file)
   
 }, error = function(e) {
-  writeLines(as.character(e), error_file)
+  # as.character(error) 会连调用帧一起写出来（"Error in doTryCatch(return(expr), ...): 真消息"），
+  # 那层噪声把真正的原因埋到最后面。取 conditionMessage，并留一行可追溯的脚本标记。
+  writeLines(sprintf("[PERMANOVA] %s", conditionMessage(e)), error_file)
   quit(status = 1)
 })

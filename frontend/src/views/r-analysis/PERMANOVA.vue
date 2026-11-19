@@ -584,6 +584,37 @@ import { readWorkbook, mapWorkbook, previewFromFields, writeWorkbook, templateFi
 import { makeFormatters } from '@/utils/format';
 
 const FORMATTERS = makeFormatters();
+
+/**
+ * 剥掉三层无意义的包裹，只留用户看得懂的那句。实机反馈原文长这样：
+ *   PERMANOVA 分析失败：Error invoking remote method 'controller/r/runPERMANOVA':
+ *   Error: PERMANOVA 分析失败：Error in doTryCatch(return(expr), name, parentenv, handler):
+ *   公式里的 ... 不在样本表里。
+ * IPC 层、Electron 层、R 调用帧各加了一句壳，真正的原因排在第三层后面。
+ */
+function unwrapRError(err) {
+  let msg = String((err && err.message) || (err && String(err)) || '');
+  if (msg === 'Error' || msg === 'undefined') msg = '';
+  const strip = [
+    /Error invoking remote method '[^']*': ?/,          // IPC 层
+    /Error in doTryCatch\(.*?\): ?/,                   // R 调用帧（里面有嵌套括号，必须非贪婪）
+    /\[?(?:PERMANOVA|GMR4|Bayesian ERA|Non-random PERMANOVA|PERMANOVA\.R|\.R)\]? Error: ?/,
+    /Error: ?/,                                          // Electron 转发层
+    /^PERMANOVA 分析失败： ?/                             // 本视图自己加的
+  ];
+  // 一层层剥，直到不再变化（顺序无关，也不怕同一个前缀出现两次）
+  for (let guard = 0; guard < 12; guard++) {
+    const before = msg;
+    for (const re of strip) msg = msg.replace(re, '');
+    if (msg === before) break;
+  }
+  // 前缀被重复加过（控制器一次、视图一次）时只留最后一句实质内容
+  const parts = msg.split('PERMANOVA 分析失败：');
+  msg = parts[parts.length - 1];
+  msg = msg.replace(/^\s*[:：]\s*/, '').trim();
+  return msg || '未知错误（R 没有给出原因，请查看控制台与 error.txt）';
+}
+
 import {
   PM_IMPORT_SHEETS,
   PM_EXPORT_OPTIONS,
@@ -923,7 +954,7 @@ export default {
       } catch (error) {
         console.error('[PERMANOVA] PERMANOVA error:', error);
         this.$message.error({
-          message: 'PERMANOVA 分析失败：' + error.message,
+          message: 'PERMANOVA 分析失败：' + unwrapRError(error),
           duration: 5000,
           showClose: true
         });

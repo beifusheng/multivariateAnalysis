@@ -465,9 +465,10 @@ console.log('\n=== 7. 编码语义：整数分组被当趋势拟合时必须开�
     idFit.code !== 0 && /是样本 ID 列（第一列），不能当解释变量/.test(idFit.msg) && !/非数值参数/.test(idFit.msg),
     idFit.msg.slice(0, 130));
   const ghost = pmErr({ ...base, formula: 'Treatment' }, 'ghost');
-  check('公式引用了不存在的列 -> 列出可用列（不再抛 adonis2 的"找不到对象"）',
-    ghost.code !== 0 && /不在样本表里/.test(ghost.msg) && /可用列：Group/.test(ghost.msg),
-    ghost.msg.slice(0, 130));
+  check('公式引用了不存在的列 -> 说清"公式写列名"并列出可用列与取值',
+    ghost.code !== 0 && /不是样本表里的列名/.test(ghost.msg) && /公式要写\*\*列名\*\*/.test(ghost.msg) &&
+      /可用列：Group（取值：/.test(ghost.msg) && !/找不到对象/.test(ghost.msg) && !/doTryCatch/.test(ghost.msg),
+    ghost.msg.slice(0, 150));
 
   const idTrend = runPm({ ...base, formula: 'Sample' === 'x' ? 'Group' : 'Group' }, 'trend2');
   check('提醒只说公式真用到的列（ID 被拒时不该扯 Group）',

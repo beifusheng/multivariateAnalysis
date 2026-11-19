@@ -95,6 +95,8 @@ tryCatch({
   writeLines(output_json, output_file)
   
 }, error = function(e) {
-  writeLines(as.character(e), error_file)
+  # as.character(error) 会连调用帧一起写出来（"Error in doTryCatch(return(expr), ...): 真消息"），
+  # 那层噪声把真正的原因埋到最后面。取 conditionMessage，并留一行可追溯的脚本标记。
+  writeLines(sprintf("[GMR4] %s", conditionMessage(e)), error_file)
   quit(status = 1)
 })
