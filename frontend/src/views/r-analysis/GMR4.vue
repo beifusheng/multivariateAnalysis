@@ -127,10 +127,24 @@
             <el-icon><WarningFilled /></el-icon>
             <span>{{ paramWarnings.join('；') }}</span>
           </div>
-        </div>
-      </div>
 
-      <div class="result-section" v-if="analysisResult">
+          <!-- 运行按钮就在输入区下方（与另三个模块同一位置）。外壳 ToolbarActions 只有
+               下载模板/导入/导出/下载输入四个动作，运行从来不在那里 —— 上一版以
+               为它在，结果整个页面根本没法开始分析。 -->
+          <div class="run-button-container">
+            <button class="btn-run" :disabled="!canRun" @click="runAnalysis">
+              <el-icon><VideoPlay /></el-icon>
+              运行分析
+            </button>
+            <span v-if="!canRun" class="run-hint">
+              <el-icon><InfoFilled /></el-icon>
+              <span>{{ runHint }}</span>
+            </span>
+            <span v-else class="run-hint">{{ runReadyHint }}</span>
+          </div>
+        </div>
+
+        <div v-if="analysisResult" class="result-section">
         <ResultCard :title="headlineTitle" :note="headlineNote">
           <StatGrid :items="headlineStats" />
           <el-alert v-if="diagnostics.length" :title="`引擎提醒（${diagnostics.length} 条）—— 先看这里再看数值`"
@@ -188,10 +202,7 @@
           <ChartPanel :tabs="chartTabs" v-model:active="activeChart" :ready="!!analysisResult"
             :empty-text="`当前结果不足以画这张图（例如秩只有 1 时没有双标图可看）`" />
         </ResultCard>
-      </div>
-
-      <div class="result-section" v-else>
-        <ResultCard title="还没有结果" :note="runHint" />
+        </div>
       </div>
     </div>
   </div>
@@ -204,7 +215,7 @@
 
 <script>
 import { ElMessage, ElLoading } from 'element-plus';
-import { InfoFilled, WarningFilled } from '@element-plus/icons-vue';
+import { InfoFilled, WarningFilled, VideoPlay } from '@element-plus/icons-vue';
 import AnalysisHeader from '@/components/r-analysis/AnalysisHeader.vue';
 import AnalysisToolbar from '@/components/r-analysis/AnalysisToolbar.vue';
 import ToolbarActions from '@/components/r-analysis/ToolbarActions.vue';
@@ -230,6 +241,14 @@ import {
 } from '@/utils/gmr4SheetSpec';
 
 const FORMATTERS = makeFormatters();
+
+/** 中位数：弱响应判定用。用 min 会被一个偶然很小的值拖低阈值（实测漏判过） */
+function medianOf(a) {
+  const s = a.filter((x) => Number.isFinite(x)).slice().sort((x, y) => x - y);
+  if (!s.length) return NaN;
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
 
 /**
  * 表单里的文本 -> 数值行数组。
@@ -283,11 +302,11 @@ export default {
   name: 'GMR4Analysis',
   components: {
     AnalysisHeader, AnalysisToolbar, ToolbarActions, ImportDialog, ExportDialog,
-    DataTemplateSelector, ChartPanel, ResultCard, StatGrid, InfoGrid, InfoFilled, WarningFilled
+    DataTemplateSelector, ChartPanel, ResultCard, StatGrid, InfoGrid, InfoFilled, WarningFilled, VideoPlay
   },
   data() {
     return {
-      isToolbarExpanded: true,
+      isToolbarExpanded: false,          // 与另三个模块一致：进页面时工具栏是收缩的
       form: { xStr: '', yStr: '', zStr: '', ranksStr: '', lambdasStr: '', kfold: 5, seed: 12345 },
       analysisResult: null,
       selectedTplId: '',
@@ -360,6 +379,11 @@ export default {
       if (!this.checks.y.ok) return this.checks.y.error || '再填响应变量 Y（行数与 X 一致）';
       return '';
     },
+    runReadyHint() {
+      const c = this.checks;
+      return `将用 ${c.x.n} 样本 × ${c.x.p} 预测 × ${c.y.q} 响应${c.z.ok && !c.z.empty ? `，偏掉 ${c.z.q || 1} 个协变量` : '，不做协变量校正'}；` +
+        `秩上限 ${Math.min(c.x.p, c.y.q)}，lambda ${this.numList(this.form.lambdasStr).length || 12} 档`;
+    },
     diagnostics() {
       const d = this.analysisResult && this.analysisResult.diagnostics;
       return Array.isArray(d) ? d.filter(Boolean) : [];
@@ -413,15 +437,20 @@ export default {
       if (!r) return [];
       const after = r.R2_per_response_partialled || [];
       const before = r.R2_per_response || [];
-      const rest = after.slice(0, after.length - 1);
-      return after.map((v, i) => ({
-        name: `Y${i + 1}`,
-        after: this.fmt(v, 4),
-        before: this.fmt(before[i], 4),
-        // 判定阈值用"其余响应的最小值"而不是固定 0.5：
-        // 拿固定阈值判，一批本来就都 0.4 的数据会全员"正常"，一个 0.05 的也照样不被标出来
-        weak: after.length >= 3 && rest.length > 0 && v < Math.min(...rest) * 0.6
-      }));
+      return after.map((v, i) => {
+        // “其余响应”是除自己以外全部，不是前 n-1 个（那样最后一个永远不参与比较）
+        const rest = after.filter((_, j) => j !== i);
+        return {
+          name: `Y${i + 1}`,
+          after: this.fmt(v, 4),
+          before: this.fmt(before[i], 4),
+          // 阈值必须相对其余响应，不能写死 0.5：一批本来就都在 0.4 的数据里，
+          // 0.05 那个才是真正的离群者，写死阈值会判成全员“正常”。
+          // 系数从 min×0.6 改为 median×0.8 —— 前者被真模板当场漏判过
+          // （Y8=0.602，其余 min=0.989，0.989×0.6=0.593 刚好放过）
+          weak: after.length >= 3 && rest.length > 0 && v < medianOf(rest) * 0.8
+        };
+      });
     },
     coefRows() {
       const r = this.analysisResult;
@@ -458,7 +487,9 @@ export default {
     loadTemplate(id) {
       const tpl = GMR4_TEMPLATE_MAP[id];
       if (!tpl) { this.notify('error', '模板不存在'); return; }
-      const sheets = gmr4TemplateSheets();
+      // 模板数据只有一个源头：gmr4SheetSpec.gmr4TemplateSheets(id)。
+      // 视图里再抄一份数字数组的话，spec 改了这边不会跟着改（另三个模块就是这么漂的）。
+      const sheets = gmr4TemplateSheets(id);
       const pick = (name) => {
         const sh = sheets.find((x) => x.name === name);
         return sh ? sh.aoa.slice(1).map((r) => r.slice(1).map(Number)) : null;
@@ -467,7 +498,7 @@ export default {
       if (!X || !Y) { this.notify('error', '模板数据读不出来，请反馈'); return; }
       this.form.xStr = JSON.stringify(X);
       this.form.yStr = JSON.stringify(Y);
-      this.form.zStr = JSON.stringify(Z || []);
+      this.form.zStr = Z && Z.length ? JSON.stringify(Z) : '';
       const params = sheets.find((x) => x.name === '模型参数');
       const kv = {};
       (params ? params.aoa.slice(1) : []).forEach((row) => { if (row[0]) kv[String(row[0])] = row[1]; });
@@ -545,8 +576,9 @@ export default {
     },
     async downloadTemplate() {
       const XLSX = await this.xlsx();
-      await writeWorkbook(XLSX, gmr4TemplateSheets(), this.templateFileName());
-      this.notify('success', '模板已下载：预测变量X / 响应变量Y / 协变量Z / 模型参数');
+      // 选了设计就下那一份，没选则下默认第一个：模板与表单同源，不存在"下的和用的不一样"
+      await writeWorkbook(XLSX, gmr4TemplateSheets(this.selectedTplId), this.templateFileName());
+      this.notify('success', '模板已下载：预测变量X / 响应变量Y' + (this.selectedTplId ? '（当前设计）' : '') + ' / 模型参数');
     },
     templateFileName() { return templateFilename('GMR4', this.stamp()); },
 
@@ -634,6 +666,13 @@ export default {
 </script>
 
 <style scoped>
+.run-button-container {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+}
+
 .params-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 12px; }
 .param-item label { display: block; font-size: 12px; color: #606266; margin-bottom: 6px; }
 .param-warning { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: #fdf6ec; border-left: 3px solid #e6a23c; display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: #b8560f; }

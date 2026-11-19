@@ -145,10 +145,18 @@ tryCatch({
   Z <- as_num_matrix(params$Z, "协变量 Z")
   if (is.null(X) || is.null(Y)) stop("必须同时提供 X（预测变量）与 Y（响应变量）", call. = FALSE)
   if (ncol(X) < 1L || ncol(Y) < 1L) stop("X 与 Y 都至少要有一列", call. = FALSE)
-  if (nrow(X) == ncol(X) && !isTRUE(params$X_is_vectors)) {
-    # 本项目栽过两次：矩阵被当成"样本×变量"表喂进来。形状可疑时必须开口，不能静默默认。
-    stop(sprintf(paste0("X 是 %d x %d 的方阵 —— 看起来像距离矩阵而不是「样本 x 变量」表。",
-                        "GMR4 要的是原始变量表（每行一个样本）。"), nrow(X), ncol(X)), call. = FALSE)
+  # 方阵不等于距离矩阵！上一版按 nrow==ncol 一刀切，把 8 样本 x 8 变量这种**合法设计**
+  # 直接拒了（实测：n=8、p=8 报“看起来像距离矩阵”）。判据必须是距离矩阵的真特征：
+  # 对称 + 对角全为 0。两者都成立才拒，否则至多是误报。
+  looks_like_distance <- function(M) {
+    if (nrow(M) != ncol(M)) return(FALSE)
+    if (!isSymmetric(unname(as.matrix(M)), tol = 1e-8)) return(FALSE)
+    all(abs(diag(as.matrix(M))) < 1e-8)
+  }
+  if (looks_like_distance(X) && !isTRUE(params$X_is_vectors)) {
+    stop(sprintf(paste0("X 是 %d x %d 的对称阵且对角全为 0 —— 这是距离矩阵，不是「样本 x 变量」表。",
+                        "GMR4 要的是原始变量表（每行一个样本）；要吃距离矩阵请用 PERMANOVA。"),
+                 nrow(X), ncol(X)), call. = FALSE)
   }
 
   n <- nrow(X)

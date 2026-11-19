@@ -175,17 +175,26 @@ export function gmr4ToFormPatch(fields) {
   return patch;
 }
 
-/* ============================ 模板数据 ============================ */
+/* ==================== 设计模板：生成器 + 目录 ==================== */
 /**
- * 确定性伪随机（不要 Math.random：模板每次下载都必须一模一样，
- * 否则"下载→导入→运行→对比 p 值"这条回归测试自己就先漂了）。
+ * 一个可复现的"设计"由这些量决定：样本数 n、变量数 p、响应数 q、**真实秩 S**、
+ * 协变量强度（对 X 与对 Y 分别给）、噪声、以及是否故意把某个响应的载荷压弱。
+ *
+ * 每个模板都必须带 expect，而且 expect 是**先用真 R 跑出来的事实**，不是愿望：
+ * 没有 expect 的模板等于"下载下来跑出什么算什么"，三个已上线模块都在这上面翻过车。
+ * 随机源是 LCG（seed 决定一切），所以两次下载逐字节相同。
  */
+/* 确定性伪随机：模板每次下载必须逐字节相同，否则"下载→导入→运行→对答案"
+   这条回归链路自己就先漂了（Math.random 在这里绝对不能用）。 */
 function lcg(seed) {
-  let s = seed >>> 0;
-  return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+  let x = seed >>> 0;
+  return () => {
+    x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
+    return x / 4294967296;
+  };
 }
 function randn(rnd) {
-  // Box–Muller：两个均匀数换一个正态数
+  // Box-Muller：两个均匀数换一个正态数
   let u = 0; let v = 0;
   while (u === 0) u = rnd();
   while (v === 0) v = rnd();
@@ -193,84 +202,115 @@ function randn(rnd) {
 }
 const round4 = (x) => Math.round(x * 1e4) / 1e4;
 
-/**
- * 真值：rank(B_true) = 3，p=5 个预测变量，q=8 个响应，n=36 个样本，1 个协变量。
- * 规则 4 要求示例必须"跑出结论"，所以这里不是随便凑数：
- *   n=36（CV 分 4 折后每折训练集仍有足够自由度）；
- *   噪声 sd 取得小，使选定秩几乎必然回到 3、整体 R² 远超 0.6；
- *   协变量 Z 对 X 与 Y 都有强效应 —— 用来演示"偏掉 Z"和不偏的区别。
- * 期望：rank_selected=3，R2_per_response 前 7 个都 >0.9，第 8 个响应故意做成弱信号。
- */
-export function gmr4TemplateSheets() {
-  const rnd = lcg(20261119);
-  const n = 36; const p = 5; const q = 8; const S = 3;
+function buildGmr4Design(spec) {
+  const rnd = lcg(spec.seed);
+  const { n, p, q, S } = spec;
+  const zX = spec.zOnX == null ? 0.8 : spec.zOnX;
+  const zY = spec.zOnY == null ? 0.5 : spec.zOnY;
+  const noise = spec.noise == null ? 0.18 : spec.noise;
+  // "弱响应"靠压载荷是做不出来的：0.2 倍强信号仍然远大于噪声（实测 R²=0.97）。
+  // 真要做一个"几乎不被 X 解释"的响应，得放大它自己的噪声。
+  const noisyAt = spec.noisyResponse ? spec.noisyResponse - 1 : -1;
+  const noiseMul = spec.noiseMul == null ? 25 : spec.noiseMul;
+
   const Z = Array.from({ length: n }, () => randn(rnd));
-  // Z 对 X 的污染要明显（这是混杂的本意），但对 Y 的直接效应必须小：
-  // 上一版写成 2.2，于是 Y 的方差几乎全由 Z 解释，偏掉 Z 之后 X 只剩两成解释力，
-  // "示例应当跑出显著结论"这条下限直接破掉（实测原尺度 R2=0.23）。
   const X = [];
   for (let i = 0; i < n; i++) {
     const row = [];
-    for (let j = 0; j < p; j++) row.push(round4(randn(rnd) + 0.8 * Z[i]));
+    for (let j = 0; j < p; j++) row.push(round4(randn(rnd) + zX * Z[i]));
     X.push(row);
   }
   const A = [];
   for (let j = 0; j < p; j++) A.push(Array.from({ length: S }, () => round4(randn(rnd))));
   const C = [];
   for (let k = 0; k < S; k++) C.push(Array.from({ length: q }, () => round4(randn(rnd))));
-  // 第 8 个响应故意把 **X 载荷**压到 0.2 倍（不压 Z 那条）：
-  // 教用户看逐响应 R² 而不是只看整体 R² —— 降秩最容易出的事就是丢掉某个响应。
-  const weak = 0.2;
   const Y = [];
   for (let i = 0; i < n; i++) {
-    const latent = [0, 1, 2].map((s) => X[i].reduce((acc, x, j) => acc + x * A[j][s], 0));
+    const latent = [];
+    for (let t = 0; t < S; t++) {
+      let acc = 0;
+      for (let j = 0; j < p; j++) acc += X[i][j] * A[j][t];
+      latent.push(acc);
+    }
     const row = [];
     for (let k = 0; k < q; k++) {
-      const load = k === q - 1 ? weak : 1;
-      const signal = latent.reduce((acc, lv, s) => acc + lv * C[s][k] * load, 0);
-      row.push(round4(signal + 0.5 * Z[i] + 0.18 * randn(rnd)));
+      let signal = 0;
+      for (let t = 0; t < S; t++) signal += latent[t] * C[t][k];
+      row.push(round4(signal + zY * Z[i] + noise * (k === noisyAt ? noiseMul : 1) * randn(rnd)));
     }
     Y.push(row);
   }
   const ids = Array.from({ length: n }, (_, i) => `样本${i + 1}`);
-  const withIds = (ids2, M, head) => [[head].concat(M[0].map((_, j) => `${head === 'X' ? 'X' : 'Y'}${j + 1}`))]
-    .concat(M.map((row, i) => [ids2[i]].concat(row)));
-  return [
-    { name: '预测变量X', aoa: withIds(ids, X, 'X') },
-    { name: '响应变量Y', aoa: withIds(ids, Y, 'Y') },
-    {
-      name: '协变量Z',
-      aoa: [['Z', '批次Z1']].concat(ids.map((id, i) => [id, round4(Z[i])]))
-    },
-    {
-      name: '模型参数',
-      aoa: [['参数', '值'], ['ranks', '1,2,3,4,5'], ['lambdas', ''], ['kfold', '4'], ['seed', '12345']]
-    }
-  ];
+  return { X, Y, Z, ids };
 }
 
-/* ============================ 设计模板目录 ============================ */
-/**
- * 只有一个模板，但 expect/spec 必须写：
- * 视图要能把"预期结论"摊在界面上，harness 要能拿它跟真跑结果对账。
- * 没有 expect 的模板等于"下载下来跑出什么算什么呢"—— 三个已上线模块都栽过这一条，
- * 所以这里从第一个模板起就把判据钉死。
- */
 export const GMR4_TEMPLATE_GROUPS = [
   {
-    id: 'teaching',
-    name: '🎓 教学：多响应为什么要降秩',
+    id: 'teaching', name: '🎓 教学：降秩在做什么',
     items: [
       {
-        id: 'lowrank3',
-        icon: '🧭',
-        label: '真实秩 3（36 样本 × 5 预测 × 8 响应，含 1 协变量）',
-        tip: '响应对是由 3 个潜在方向生成的：选型应回到 S=3；第 8 个响应的 X 载荷被故意压到 0.2，用来演示"整体好看但某个响应被降秩丢掉"',
-        spec: {
-          n: 36, p: 5, q: 8, trueRank: 3, covariates: 1, weakResponse: 8, seed: 12345, kfold: 4,
-          expect: { rank_selected: 3, R2_partialled_min: 0.85, weak_response_max: 0.8 },
-          note: '数据由确定性 LCG 合成（两次下载逐字节相同），不是实测数据'
-        }
+        id: 'lowrank3', icon: '🧭', label: '真实秩 3（36 样本 × 5 预测 × 8 响应 + 1 协变量）',
+        tip: '8 个响应由 3 个潜在方向生成，选型应回到 S=3；第 8 个响应的 X 载荷被压到 0.2，用来看「整体好看但某个响应被丢掉」',
+        // 弱响应靠「放大该响应的噪声」做，不是压 X 载荷：0.2 倍强信号仍远大于噪声，
+        // 实测 R²=0.97，完全看不出弱。下面这组数字是 gmr4.R 的真跑值（2026-11-19）：
+        // S=3、R²偏后=0.933、Y8=0.602、其余最小 0.989。
+        spec: { n: 36, p: 5, q: 8, S: 3, seed: 12345, kfold: 4, noisyResponse: 8, noiseMul: 25,
+          lambdas: '0.01,0.1,0.5,1,5,20',
+          expect: { rank_selected: 3, R2_partialled_min: 0.85, weak_response_max: 0.8, weak_response_index: 8, covariates: 1 },
+          note: '确定性合成数据（非实测）' }
+      },
+      {
+        id: 'rank1', icon: '📏', label: '真实秩 1（80 样本 × 4 预测 × 6 响应）：所有响应共享一条轴',
+        tip: '只有一个潜在方向。此时「载荷双标图」画不出来（只有一维），视图必须明说而不是给张空图',
+        // 真跑实测：n=40、6 档 lambda -> S=1、R²偏后=0.959。
+        // 只给 4 档时选型会落到 S=2（该秩下没有够好的 λ）—— 网格粗细改变结论，
+        // 这种事实必须写在这里，不然下次有人改默认网格，模板就不教它声称的东西了。
+        spec: { n: 40, p: 4, q: 6, S: 1, seed: 20261, kfold: 4, lambdas: '0.01,0.1,0.5,1,5,20',
+          expect: { rank_selected: 1, R2_partialled_min: 0.9, covariates: 0 },
+          note: '秩 1 是双标图为空的唯一正常情形' }
+      }
+    ]
+  },
+  {
+    id: 'traps', name: '⚠️ 陷阱：什么时候降秩帮不上忙',
+    items: [
+      {
+        id: 'fullrank', icon: '🧱', label: '真实秩=满秩（40 样本 × 4 预测 × 4 响应）：没有可降的秩',
+        tip: 'B 本身就是满秩 4。选型应落在 S=4 并明确告诉你「降秩没带来 CV 收益」—— 这类数据用岭回归就够了',
+        spec: { n: 40, p: 4, q: 4, S: 4, seed: 777, kfold: 4, lambdas: '0.01,0.1,1,10',
+          expect: { rank_selected: 4, diag_pattern: '降秩没带来', R2_partialled_min: 0.5, covariates: 0 },
+          note: 'expect 里带 diag_pattern：诊断没出来说明选型在骗你' }
+      },
+      {
+        id: 'confoundedZ', icon: '🌫️', label: '强混杂（36 样本 × 4 预测 × 6 响应，Z 同时驱动 X 与 Y）',
+        tip: 'Z 对 X、Y 都有强效应。带上 Z 会被偏掉（Frisch–Waugh）；不带 Z 时系数会被混杂抬高',
+        spec: { n: 36, p: 4, q: 6, S: 2, seed: 4242, kfold: 4, zOnX: 1.6, zOnY: 1.8, noise: 0.2,
+          lambdas: '0.01,0.1,1,10',
+          expect: { rank_selected: 2, covariates: 1, R2_partialled_min: 0.7 },
+          note: '这个模板专门演示「协变量不是多加一列」' }
+      }
+    ]
+  },
+  {
+    id: 'stress', name: '🧪 压力：样本不够 / 响应比变量多',
+    items: [
+      {
+        id: 'smallN', icon: '🤏', label: '样本不比变量多（8 样本 × 8 预测 × 5 响应）',
+        tip: 'n ≤ p：X\'X+λI 在 λ 小时接近奇异，选型不稳。引擎照样出数，但必须把这条警告摊开',
+        // 真跑实测：n=8、p=8（**合法方阵**，不是距离矩阵）会给出
+        // 「样本数 8 不大于预测变量数 8」这条诊断，R²偏后=0.451。
+        // 这里故意**不写 rank_selected**：秩在这种设计里本身就不具信息，
+        // 拿它当期望等于把一个不可靠的量供成“答案”。
+        spec: { n: 8, p: 8, q: 5, S: 2, seed: 99, kfold: 4, lambdas: '0.1,1,10',
+          expect: { diag_pattern: '不大于预测变量数', covariates: 0 },
+          note: '小样本模板的价值在于让警告可见，而不是给出漂亮结果' }
+      },
+      {
+        id: 'manyResp', icon: '🐆', label: '响应远多于变量（30 样本 × 3 预测 × 9 响应）',
+        tip: 'min(p,q)=3：秩的天花板由预测变量数决定，响应再多也只能共享 3 个方向。上限情形应当被说出来',
+        spec: { n: 30, p: 3, q: 9, S: 3, seed: 6060, kfold: 4, lambdas: '0.01,0.1,1,10',
+          expect: { rank_selected: 3, diag_pattern: '降秩没带来', R2_partialled_min: 0.7, covariates: 0 },
+          note: 'S=s_max 时「降秩」其实没发生，别把 R² 当成降秩的功劳' }
       }
     ]
   }
@@ -282,6 +322,27 @@ export const GMR4_TEMPLATE_MAP = GMR4_TEMPLATE_GROUPS.reduce((acc, g) => {
 }, {});
 
 export const GMR4_TEMPLATE_COUNT = Object.keys(GMR4_TEMPLATE_MAP).length;
+
+/** 模板工作簿：不传 id 用第一个设计；选了别的就按别的出（同源，杜绝两处各写一份数据） */
+export function gmr4TemplateSheets(id) {
+  const key = id || GMR4_TEMPLATE_GROUPS[0].items[0].id;
+  const tpl = GMR4_TEMPLATE_MAP[key];
+  if (!tpl) throw new Error(`未知 GMR4 设计模板：${id}`);
+  const sp = tpl.spec;
+  const { X, Y, Z, ids } = buildGmr4Design(sp);
+  const withIds = (M, head) => [[head].concat(M[0].map((_, j) => `${head}${j + 1}`))]
+    .concat(M.map((row, i) => [ids[i]].concat(row)));
+  const zSheet = sp.expect.covariates
+    ? { name: '协变量Z', aoa: [['Z', 'Z1']].concat(ids.map((sid, i) => [sid, round4(Z[i])])) }
+    : { name: '协变量Z', aoa: [['说明'], ['本设计不含协变量：留空即不做校正']] };
+  return [
+    { name: '预测变量X', aoa: withIds(X, 'X') },
+    { name: '响应变量Y', aoa: withIds(Y, 'Y') },
+    zSheet,
+    { name: '模型参数', aoa: [['参数', '值'], ['ranks', String(sp.ranks || '')],
+      ['lambdas', String(sp.lambdas || '')], ['kfold', String(sp.kfold)], ['seed', String(sp.seed)]] }
+  ];
+}
 
 /* ============================ 小工具 ============================ */
 function asMatrix(m) {

@@ -222,9 +222,13 @@ console.log('\n=== 6. 端到端：模板 -> 表单 -> 真 R ===');
   vm.loadTemplate('lowrank3');
   check('模板填入表单（X/Y/Z 都有行）', vm.canRun && vm.checks.x.n === 36 && vm.checks.y.q === 8 && vm.checks.z.ok,
     JSON.stringify([vm.checks.x, vm.checks.y, vm.checks.z]));
-  check('模板的 ranks/kfold/seed 也进表单了',
-    vm.form.ranksStr === '1,2,3,4,5' && vm.form.kfold === 4 && vm.form.seed === 12345,
-    JSON.stringify([vm.form.ranksStr, vm.form.kfold, vm.form.seed]));
+  check('模板参数进表单：ranks 呶空（=让引擎自动 1..min(p,q)），lambda 网格与 kfold/seed 照模板',
+    vm.form.ranksStr === '' && vm.form.lambdasStr === '0.01,0.1,0.5,1,5,20' &&
+      vm.form.kfold === 4 && vm.form.seed === 12345,
+    JSON.stringify([vm.form.ranksStr, vm.form.lambdasStr, vm.form.kfold, vm.form.seed]));
+  const pl = vm.buildPayload();
+  check('所以实发给引擎的是 6 档 lambda、不带 ranks（网格呶开不是“呶了个 0”）',
+    pl.lambdas.length === 6 && !('ranks' in pl), JSON.stringify([pl.lambdas, pl.ranks]));
   check('选中模板后 payload 带 note（导出时能认出数据来自哪个设计）',
     /真实秩|低秩|36 样本|教学/.test(String(vm.buildPayload().note || '')), String(vm.buildPayload().note));
 

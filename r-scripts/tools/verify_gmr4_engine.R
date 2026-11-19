@@ -122,8 +122,17 @@ cat("\u2500\u2500 6. 退化输入的诊断（常量列 / p>=n / 方阵形状）\
   ok(r$code == 0 && length(r$out$diagnostics) >= 1 &&
        any(grepl("常量列", unlist(r$out$diagnostics))), "常量列被剔除并报告",
      paste(unlist(r$out$diagnostics), collapse = " | "))
-  r2 <- run_gmr4(list(X = matrix(rnorm(6 * 6), 6), Y = tr$Y[, 1:5]), "squareX")
-  ok(r2$code != 0 && grepl("方阵", r2$err), "6x6 方阵形状的 X 被拒（像距离矩阵）", r2$err)
+  # 方阵 != 距离矩阵：上一版按 nrow==ncol 一刀切，把 8 样本 x 8 变量这种合法设计也拒了
+  legit <- run_gmr4(list(X = matrix(rnorm(8 * 8), 8), Y = matrix(rnorm(8 * 5), 8)), "squareLegit")
+  ok(legit$code == 0, "8 样本 x 8 变量的合法方阵 X 不再被误判成距离矩阵", legit$err %||% "")
+  ok(length(legit$out$diagnostics) >= 1 &&
+       any(grepl("不大于预测变量数", unlist(legit$out$diagnostics))),
+     "同一份数据改以警告的形式说话（n<=p 选型不稳）",
+     paste(unlist(legit$out$diagnostics %||% character(0)), collapse = " | "))
+  Dsym <- as.matrix(stats::dist(matrix(rnorm(9 * 2), 9)))
+  dres <- run_gmr4(list(X = unname(Dsym), Y = matrix(rnorm(9 * 3), 9)), "realDistance")
+  ok(dres$code != 0 && grepl("对称阵且对角全为 0", dres$err),
+     "真的距离矩阵（对称 + 零对角）仍然被拒，并指名改用 PERMANOVA", dres$err)
   r3 <- run_gmr4(list(X = as.vector(tr$X), Y = tr$Y), "flatvec")
   ok(r3$code != 0 && grepl("一维数组", r3$err), "一维数组被拒并说明要二维", r3$err)
 }

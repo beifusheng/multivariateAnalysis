@@ -28,6 +28,15 @@ const t = (name, cond, extra = '') => {
   else { fail++; fails.push(name + (extra ? ` —— ${extra}` : '')); console.log('  ✗ ' + name + (extra ? `\n      ${extra}` : '')); }
 };
 
+
+/** 中位数：弱响应判定要的是"相对其余"，而 min 会被单个偶然小值拖低阈值（实测漏判过） */
+const median = (a) => {
+  const v = a.filter((x) => Number.isFinite(x)).slice().sort((x, y) => x - y);
+  if (!v.length) return NaN;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+};
+
 const { gmr4SheetSpec: spec, sheetIo } = await loadFrontendUtils(['gmr4SheetSpec', 'sheetIo']);
 const XLSX = require_(path.join(ROOT, 'frontend/node_modules/xlsx'));
 
@@ -81,10 +90,16 @@ const Zrows = JSON.parse(patch.zStr || '[]');
 t('formPatch 拿到行数组而不是列数组', Xrows.length === 36 && Xrows[0].length === 5,
   JSON.stringify([Xrows.length, (Xrows[0] || []).length]));
 t('Z 也按样本对齐了 36 行', Zrows.length === 36, String(Zrows.length));
-t('参数表解析出 ranks/kfold/seed', (patch.ranks || []).join(',') === '1,2,3,4,5' && patch.kfold === 4 && patch.seed === 12345,
-  JSON.stringify([patch.ranks, patch.kfold, patch.seed]));
+t('参数表解析：ranks 留空=不传（让引擎自动 1..min(p,q)），kfold/seed 照模板',
+  patch.ranks === undefined && patch.kfold === 4 && patch.seed === 12345 &&
+    patch.lambdas.length === 6,
+  JSON.stringify([patch.ranks, patch.kfold, patch.seed, patch.lambdas && patch.lambdas.length]));
 
-const payload = { X: Xrows, Y: Yrows, Z: Zrows, ranks: patch.ranks, kfold: patch.kfold, seed: patch.seed };
+// 必须用模板**自己声明**的 lambda 网格：引擎默认 12 档会下探到 1e-3，那个 λ 会把
+// 被故意压弱的响应也过拟合回去（实测 Y8 从 0.602 变成 1.00），
+// 于是"示例演示的是真实现象"这句话当场作废。
+const payload = { X: Xrows, Y: Yrows, Z: Zrows, kfold: patch.kfold, seed: patch.seed };
+if (patch.lambdas && patch.lambdas.length) payload.lambdas = patch.lambdas;
 const fIn = path.join(TMP, 'in.json'), fOut = fIn + '.out', fErr = fIn + '.err';
 fs.writeFileSync(fIn, JSON.stringify(payload));
 let code = 0;
@@ -103,8 +118,8 @@ if (r) {
   t('原尺度 R² 明显更低（说明 Z 确实带走了变异，两个数不是复制粘贴）',
     r.R2 < r.R2_partialled - 0.02, `${r.R2} vs ${r.R2_partialled}`);
   const rr = r.R2_per_response_partialled;
-  t('前 7 个响应 R² > 0.8，第 8 个（故意压弱的 X 载荷）明显更低',
-    rr.slice(0, 7).every((v) => v > 0.8) && rr[7] < Math.min(...rr.slice(0, 7)),
+  t('前 7 个响应 R² > 0.8，第 8 个（噪声 x25）明显更低',
+    rr.slice(0, 7).every((v) => v > 0.8) && rr[7] < Math.min(...rr.slice(0, 7)) * 0.8,
     rr.map((v) => v.toFixed(2)).join(' '));
   t('偏掉了 1 个协变量', r.covariates_partialled_out === 1, String(r.covariates_partialled_out));
   t('selection_rule 用中文写清了怎么选的（不是只给个数）',
@@ -131,9 +146,13 @@ if (r) {
   t('真跑结果满足模板 expect（选型与 R² 下限）',
     r.rank_selected === tpl.spec.expect.rank_selected && r.R2_partialled > tpl.spec.expect.R2_partialled_min,
     `S=${r.rank_selected} R²偏后=${r.R2_partialled}`);
-  t('被压弱的那个响应确实明显差（R² < 0.8），其余都 > 0.8',
-    r.R2_per_response_partialled[tpl.spec.weakResponse - 1] < tpl.spec.expect.weak_response_max &&
-      r.R2_per_response_partialled.slice(0, 7).every((v) => v > tpl.spec.expect.weak_response_max),
+  // 弱响应用的量是 R2_per_response_partialled（不是原尺度那个）：
+  // 原尺度里噪声被 Z 掩盖，两个数混用会得出"什么都没丢"的假安心
+  t('被压弱的那个响应确实明显差（< 0.8 且低于其余中位数的 0.8 倍）',
+    (() => { const widx = tpl.spec.expect.weak_response_index - 1;
+      const arr = r.R2_per_response_partialled;
+      const rest = arr.filter((_, j) => j !== widx);
+      return arr[widx] < tpl.spec.expect.weak_response_max && arr[widx] < median(rest) * 0.8; })(),
     r.R2_per_response_partialled.map((v) => v.toFixed(2)).join(' '));
   t('模板声明的种子/折数就是真跑用的那组（可复现不是口号）',
     r.seed === tpl.spec.seed && r.kfold === tpl.spec.kfold, JSON.stringify([r.seed, r.kfold]));
