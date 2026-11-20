@@ -344,6 +344,50 @@ export function gmr4TemplateSheets(id) {
   ];
 }
 
+/**
+ * 导入预览 tab —— 不能用 sheetIo.previewFromFields：那个函数是给**群落矩阵**写的
+ * （内部 `if (primary.matrix && primary.species)` 才 push tab），GMR⁴ 的 fields.X 是
+ * 行优先的 {ids, headers, rows}，传进去只会得到空数组 —— 于是导入对话框既不显示数据，
+ * 「填入表单」按钮又被 `:disabled="!tabs.length"` 按住，看上去像两个 bug，其实是一个。
+ *
+ * ImportDialog 的契约：每个 tab 需要 { name, label, cols, rows }，且 rows 必须是
+ * **以 cols 为键的对象数组**（它用 :prop="colKey(c)" 取值），二维数组喂进去是空表。
+ */
+export function gmr4ImportTabs(ids, fields) {
+  const tabs = [];
+  const push = (key, name, label) => {
+    const f = fields[key];
+    if (!f || !f.rows || !f.rows.length) return;
+    // mapWorkbook 的真实形状是 { ok, ids, columns, rows } —— 表头键名是 columns。
+    // 上一版按 fields.X_columns / f.headers 去取，两处都取不到，于是 cols 只剩
+    // "样本"一列、每一行都是 {样本:'样本1'}，表格看着就是空的（数据明明在 rows 里）。
+    const cols = f.columns || [];
+    tabs.push({
+      name,
+      label: `${label}（${f.rows.length} 样本 × ${cols.length} 列，前 8 行）`,
+      cols: ['样本', ...cols],
+      rows: f.rows.slice(0, 8).map((row, i) => {
+        const o = { 样本: (f.ids && f.ids[i]) || (ids && ids[i]) || `第${i + 1}行` };
+        cols.forEach((h, j) => { o[h] = row[j]; });
+        return o;
+      })
+    });
+  };
+  push('X', 'gmr4_x', '预测变量 X');
+  push('Y', 'gmr4_y', '响应变量 Y');
+  push('Z', 'gmr4_z', '协变量 Z');
+  const kv = (fields.params && fields.params.kv) || fields.kv;
+  if (kv && Object.keys(kv).length) {
+    tabs.push({
+      name: 'gmr4_params',
+      label: '模型参数（ranks / lambdas / kfold / seed）',
+      cols: ['参数', '值'],
+      rows: Object.keys(kv).map((k) => ({ 参数: k, 值: String(kv[k]) }))
+    });
+  }
+  return tabs;
+}
+
 /* ============================ 小工具 ============================ */
 function asMatrix(m) {
   if (!m) return [[]];

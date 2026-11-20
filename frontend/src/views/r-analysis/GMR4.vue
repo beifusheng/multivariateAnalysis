@@ -232,10 +232,10 @@ import { makeFormatters } from '@/utils/format';
 import { GMR4_CHART_TABS, GMR4_CHART_BUILDERS } from '@/utils/gmr4Charts';
 import { runGMR4 } from '@/api/r';
 import {
-  readWorkbook, mapWorkbook, previewFromFields, writeWorkbook, templateFilename, fileStamp
+  readWorkbook, mapWorkbook, writeWorkbook, templateFilename, fileStamp
 } from '@/utils/sheetIo';
 import {
-  GMR4_IMPORT_SHEETS, GMR4_EXPORT_OPTIONS, GMR4_EXPORT_DEFAULTS, GMR4_PREVIEW_TABS,
+  GMR4_IMPORT_SHEETS, gmr4ImportTabs, GMR4_EXPORT_OPTIONS, GMR4_EXPORT_DEFAULTS, GMR4_PREVIEW_TABS,
   GMR4_TEMPLATE_GROUPS, GMR4_TEMPLATE_MAP, GMR4_TEMPLATE_COUNT,
   gmr4PlanExport, gmr4ToFormPatch, gmr4TemplateSheets
 } from '@/utils/gmr4SheetSpec';
@@ -617,7 +617,8 @@ export default {
         }
         this.importWarnings = res.warnings;
         this.imported = res.fields;
-        this.importTabs = previewFromFields(res.ids, res.fields.X, res.fields);
+        // 必须用自己的预览器：previewFromFields 只认群落矩阵形状，喂行优先表会返回空数组
+        this.importTabs = gmr4ImportTabs(res.ids, res.fields);
       } catch (e) {
         this.importError = '读取失败：' + (e.message || e);
       }

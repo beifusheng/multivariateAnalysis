@@ -321,6 +321,65 @@ console.log('\n=== 8. 实机三轮反馈各留一条防复发断言 ===');
     /class="btn-run"[\s\S]{0,80}runAnalysis|@click="runAnalysis"/.test(viewSource), '');
 }
 
+console.log('\n=== 9. 导入：真 xlsx 走视图函数（两轮都没抓到的那条路径）===');
+{
+  // readWorkbook 只依赖 file.arrayBuffer()，不需要真浏览器 File
+  const shim = (buf, name) => ({ name, arrayBuffer: async () => buf });
+  let XLSX = null;
+  for (const cand of ['xlsx/xlsx.mjs', 'xlsx', 'node_modules/xlsx/dist/xlsx.esm.js']) {
+    try {
+      const m = await import(pathToFileURL(path.join(FRONTEND, 'node_modules', cand)).href);
+      XLSX = m.utils ? m : m.default;
+      if (XLSX) break;
+    } catch (e) { /* 接着试下一个路径 */ }
+  }
+  if (!XLSX) {
+    check('能拿到 xlsx（本节的先决条件）', false, '三条候选路径都失败了');
+  } else {
+    const mkFile = (sheets, name) => {
+      const wb = XLSX.utils.book_new();
+      for (const sh of sheets) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sh.aoa), sh.name);
+      return shim(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), name);
+    };
+    const vm = makeVm();
+    await vm.handleFileChange(mkFile(spec.gmr4TemplateSheets('lowrank3'), 'GMR4 模板.xlsx'));
+    check('读真 xlsx 不报错（importError 为空）', vm.importError === '', vm.importError);
+    check('预览 tab 出得来（曾经返回 0 个 -> 对话框空白 + 填入表单被 disabled）',
+      Array.isArray(vm.importTabs) && vm.importTabs.length === 4,
+      JSON.stringify((vm.importTabs || []).map((t) => t.name)));
+    const tx = (vm.importTabs || []).find((t) => t.name === 'gmr4_x');
+    check('X 预览 cols 真含变量名（表头在 mapWorkbook 的 columns 键，不是 headers / X_columns）',
+      tx && tx.cols[0] === '样本' && tx.cols.slice(1).join(',') === 'X1,X2,X3,X4,X5',
+      JSON.stringify(tx && tx.cols));
+    check('X 预览首行是 {列:值} 对象（ImportDialog 用 :prop 取值，喂二维数组等于空表）',
+      tx && Object.keys(tx.rows[0]).length === 6 && Number.isFinite(tx.rows[0].X1),
+      JSON.stringify(tx && tx.rows[0]));
+    check('行数标签说清样本数与前 8 行', /36 样本 × 5 列，前 8 行/.test(tx ? tx.label : ''), tx && tx.label);
+    const tp = (vm.importTabs || []).find((t) => t.name === 'gmr4_params');
+    check('参数 tab 读 fields.params.kv（不是把整个 {ok,kv,rows} 扫一遍）',
+      tp && tp.rows.some((r) => r['参数'] === 'seed' && r['值'] === '12345') &&
+        !tp.rows.some((r) => r['参数'] === 'ok'), JSON.stringify(tp && tp.rows));
+    vm.applyImport();
+    check('applyImport 后表单真的被填入（曾经：按钮 disabled，点下去毫无反应）',
+      vm.checks.x.ok && vm.checks.y.ok && vm.checks.x.n === 36 && vm.checks.y.q === 8 && vm.checks.z.ok,
+      JSON.stringify([vm.checks.x.n, vm.checks.y.q, vm.checks.z.state]));
+    check('参数同步填入（lambdas 6 档、kfold=4、seed=12345）',
+      vm.numList(vm.form.lambdasStr).length === 6 && vm.form.kfold === 4 && vm.form.seed === 12345,
+      JSON.stringify([vm.form.lambdasStr, vm.form.kfold, vm.form.seed]));
+    check('导入完 canRun=true，直接能跑', vm.canRun, vm.runHint);
+    check('导入后模板选择被清掉（真实数据不许盖着模板名导出）', vm.selectedTplId === '', vm.selectedTplId);
+    const vm2 = makeVm();
+    await vm2.handleFileChange(mkFile(spec.gmr4TemplateSheets('rank1'), 'r1.xlsx'));
+    vm2.applyImport();   // 上一版这里没填表就去查 Y -> q=0 是断言的错，不是代码的错
+    check('无协变量模板导入：3 个 tab、无报错、填入后 Y 是 6 列且 Z 留空',
+      vm2.importError === '' && vm2.importTabs.length === 3 && vm2.checks.y.q === 6 &&
+        vm2.form.zStr === '' && vm2.checks.z.empty,
+      JSON.stringify([vm2.importError, vm2.importTabs && vm2.importTabs.length, vm2.checks.y.q]));
+    check('视图里不再调用 previewFromFields（它对行优先表只能返回空数组）',
+      !/previewFromFields\(/.test(viewSource), '出现即说明又用回了那个只认 {matrix,species} 的函数');
+  }
+}
+
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }
 process.exit(fail ? 1 : 0);
