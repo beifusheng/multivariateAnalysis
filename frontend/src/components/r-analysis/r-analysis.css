@@ -711,9 +711,14 @@
 }
 
 /* 页头文字必须左对齐（实机反馈：GMR⁴ 的 page-title/page-subtitle 看起来居中）。
-   仓库里查不到居中来源：全局样式没有 text-align:center，本文件里三条 center 分别属于
-   .stat-item / .headline-left / .chart-empty，都不作用于页头。所以这条是**显式兜底**，
-   不是根因修复 —— 若仍居中，请用开发者工具看该元素的实际规则来源（Computed -> 谁赢了）。 */
+   【根因已找到，2026-11-20】不是哪条裸 h1 规则，而是**继承**：
+   `src/assets/global.less` 里 `#app { text-align: center }` 把居中转给了整棵组件树 ——
+   所以按 `h1 {` 去搜永远搜不到，得找“谁的祖先声明了 text-align”。
+   本块是外壳层的**显式接管**：只要页面走 .ra-shell，就不依赖 #app 那个默认值。
+   彻底修法是把 #app 的居中拿掉（或限定到真需要居中的页），但那会同时改变
+   Non-random / PERMANOVA / Med 三个已上线页的默认对齐 —— 属于设计变更，
+   要用户逐页看过再动（细节见 development-doc/GMR4-HANDOFF.md）。
+   另：本文件里三条 center 属于 .stat-item / .headline-left / .chart-empty，都不作用于页头。 */
 .ra-shell .page-header,
 .ra-shell .page-header .page-title,
 .ra-shell .page-header .page-subtitle {

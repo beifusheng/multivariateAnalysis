@@ -71,6 +71,30 @@ const makeVm = () => {
   return vm;
 };
 
+/* 真 xlsx：第 9 / 10 节共用（读的是 frontend/node_modules 里那一份，
+   与浏览器里 downloadTemplate 用的同一个包）—— 只写一份，避免两处取包路径飘。*/
+let XLSX = null;
+for (const cand of ['xlsx/xlsx.mjs', 'xlsx', 'node_modules/xlsx/dist/xlsx.esm.js']) {
+  try {
+    const m = await import(pathToFileURL(path.join(FRONTEND, 'node_modules', cand)).href);
+    XLSX = m.utils ? m : m.default;
+    if (XLSX) break;
+  } catch (e) { /* 接着试下一个路径 */ }
+}
+/** 模板 sheets -> 视图能吃的 file 桩（readWorkbook 只依赖 arrayBuffer） */
+const mkFile = (sheets, name) => {
+  const wb = XLSX.utils.book_new();
+  for (const sh of sheets) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sh.aoa), sh.name);
+  return { name, arrayBuffer: async () => XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) };
+};
+/** 弱响应判据用的中位数（与 spec 套件同一口径：min 会被单个偶然小值拖低阈值） */
+const median = (a) => {
+  const v = a.filter((x) => Number.isFinite(x)).slice().sort((x, y) => x - y);
+  if (!v.length) return NaN;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+};
+
 console.log('\n=== 1. 形状判定（A）===');
 {
   const vm = makeVm();
@@ -323,24 +347,10 @@ console.log('\n=== 8. 实机三轮反馈各留一条防复发断言 ===');
 
 console.log('\n=== 9. 导入：真 xlsx 走视图函数（两轮都没抓到的那条路径）===');
 {
-  // readWorkbook 只依赖 file.arrayBuffer()，不需要真浏览器 File
-  const shim = (buf, name) => ({ name, arrayBuffer: async () => buf });
-  let XLSX = null;
-  for (const cand of ['xlsx/xlsx.mjs', 'xlsx', 'node_modules/xlsx/dist/xlsx.esm.js']) {
-    try {
-      const m = await import(pathToFileURL(path.join(FRONTEND, 'node_modules', cand)).href);
-      XLSX = m.utils ? m : m.default;
-      if (XLSX) break;
-    } catch (e) { /* 接着试下一个路径 */ }
-  }
+  // readWorkbook 只依赖 file.arrayBuffer()，不需要真浏览器 File；XLSX / mkFile 已在文件头备好
   if (!XLSX) {
     check('能拿到 xlsx（本节的先决条件）', false, '三条候选路径都失败了');
   } else {
-    const mkFile = (sheets, name) => {
-      const wb = XLSX.utils.book_new();
-      for (const sh of sheets) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sh.aoa), sh.name);
-      return shim(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), name);
-    };
     const vm = makeVm();
     await vm.handleFileChange(mkFile(spec.gmr4TemplateSheets('lowrank3'), 'GMR4 模板.xlsx'));
     check('读真 xlsx 不报错（importError 为空）', vm.importError === '', vm.importError);
@@ -395,6 +405,131 @@ console.log('\n=== 9. 导入：真 xlsx 走视图函数（两轮都没抓到的�
       JSON.stringify([vm3.form.ranksStr]));
     check('视图里不再调用 previewFromFields（它对行优先表只能返回空数组）',
       !/previewFromFields\(/.test(viewSource), '出现即说明又用回了那个只认 {matrix,species} 的函数');
+  }
+}
+
+console.log('\n=== 10. 六个模板逐个真跑对账（交接清单里唯一没落地的那个循环）===');
+{
+  // 为什么不是“只跑默认模板”：expect 是六个模板各自写下的“真跑事实”，
+  // 只验默认那个等于其余五个可以随时劣化成“下载下来跑出什么算什么”（三个老模块都这么翻过车）。
+  const ids = Object.keys(spec.GMR4_TEMPLATE_MAP);
+  check('模板目录就是这 6 个（删模板必须同时删对账，加模板必须同时加判据）',
+    ids.length === 6 && ids.length === spec.GMR4_TEMPLATE_COUNT &&
+      ids.join(',') === 'lowrank3,rank1,fullrank,confoundedZ,smallN,manyResp', ids.join(','));
+  // 对账器能消费的判据。expect 里出现不在这里的键，就是写了个永远不被检查的愿望。
+  const JUDGED = ['rank_selected', 'R2_partialled_min', 'covariates', 'diag_pattern',
+    'weak_response_index', 'weak_response_max'];
+
+  if (!XLSX) {
+    check('能拿到 xlsx（本节的先决条件）', false, '三条候选路径都失败了');
+  } else {
+    for (const id of ids) {
+      const tpl = spec.GMR4_TEMPLATE_MAP[id];
+      const sp = tpl.spec;
+      const exp = sp.expect || {};
+      const tag = `[${id}]`;
+      const sheets = spec.gmr4TemplateSheets(id);
+      // 模板卡片/下载文件名上的三个数字必须与生成器用的 spec 一致。
+      // rank1 的 label 长期写“80 样本”而 spec 是 40 —— 文案吹数据，用户拿到的表与看到的对不上。
+      const lm = /（(\d+) 样本 × (\d+) 预测 × (\d+) 响应/.exec(tpl.label);
+      check(`${tag} label 里三个数字与 spec 一致（${sp.n}/${sp.p}/${sp.q}）`,
+        !!lm && Number(lm[1]) === sp.n && Number(lm[2]) === sp.p && Number(lm[3]) === sp.q,
+        JSON.stringify([lm && lm.slice(1), [sp.n, sp.p, sp.q]]));
+      const covM = /(\d+) 协变量/.exec(tpl.label);
+      check(`${tag} label 的协变量数与 expect 一致，发了 Z 的就要在文案里看得见`,
+        (!covM || Number(covM[1]) === exp.covariates) &&
+          (exp.covariates > 0 ? /协变量|Z/.test(`${tpl.label} ${tpl.tip}`) : true),
+        JSON.stringify([covM && covM[1], exp.covariates]));
+      check(`${tag} 模板确定：两次生成逐字节相同（seed 决定一切，不许碰 Math.random）`,
+        JSON.stringify(sheets) === JSON.stringify(spec.gmr4TemplateSheets(id)), '否则“下载→导入→对答案”这条链自己先漂');
+
+      // 用户真实路径：下载模板 -> 导入（真 xlsx 字节）-> 填入表单 -> 组 payload -> 真 R
+      const vm = makeVm();
+      await vm.handleFileChange(mkFile(sheets, `${id}.xlsx`));
+      check(`${tag} 导入无报错、tab 数与协变量声明一致（应为 ${exp.covariates ? 4 : 3} 个）`,
+        vm.importError === '' && vm.importTabs.length === (exp.covariates ? 4 : 3),
+        JSON.stringify([vm.importError, vm.importTabs && vm.importTabs.length]));
+      vm.applyImport();
+      check(`${tag} 形状 ${sp.n} 样本 × ${sp.p} 预测 × ${sp.q} 响应（Z=${exp.covariates}）进了表单`,
+        vm.canRun && vm.checks.x.n === sp.n && vm.checks.x.p === sp.p && vm.checks.y.q === sp.q &&
+          (exp.covariates ? vm.checks.z.ok && vm.checks.z.q === exp.covariates : vm.checks.z.empty),
+        JSON.stringify([vm.checks.x.n, vm.checks.x.p, vm.checks.y.q, vm.checks.z.state]));
+      check(`${tag} 参数走的是表单字段（lambdasStr/ranksStr/kfold/seed 逐字对上模板声明）`,
+        vm.form.lambdasStr === String(sp.lambdas || '') && vm.form.ranksStr === String(sp.ranks || '') &&
+          vm.form.kfold === sp.kfold && vm.form.seed === sp.seed,
+        JSON.stringify([vm.form.lambdasStr, vm.form.ranksStr, vm.form.kfold, vm.form.seed]));
+      const payload = vm.buildPayload();
+      const nLam = String(sp.lambdas || '').split(/[,，\s]+/).filter(Boolean).length;
+      check(`${tag} payload：${sp.n} 行、Y ${sp.q} 列、lambda ${nLam} 档、ranks ${sp.ranks ? '照声明' : '不带（让引擎自动）'}`,
+        payload.X.length === sp.n && payload.Y[0].length === sp.q && payload.Y.length === sp.n &&
+          payload.lambdas.length === nLam &&
+          (sp.ranks ? payload.ranks.length === String(sp.ranks).split(/[,，\s]+/).filter(Boolean).length : !('ranks' in payload)),
+        JSON.stringify([payload.lambdas, payload.ranks]));
+      if (sp.n <= sp.p) {
+        check(`${tag} n≤p 这个设计陷阱视图必须自己开口（paramWarnings 里有“不大于变量数”）`,
+          vm.paramWarnings.some((w) => /不大于变量数/.test(w)), JSON.stringify(vm.paramWarnings));
+      }
+
+      const f = path.join(TMP, `tpl-${id}.json`);
+      fs.writeFileSync(f, JSON.stringify(payload));
+      let code = 0;
+      try {
+        execFileSync(RSCRIPT, [path.join(ROOT, 'r-scripts/gmr4.R'), f, f + '.out', f + '.err'],
+          { stdio: 'pipe', timeout: 600000 });
+      } catch (e) { code = e.status || 1; }
+      check(`${tag} 真跑通（exit=0）`, code === 0,
+        code ? String(fs.readFileSync(f + '.err', 'utf8')).slice(0, 200) : '');
+      if (code !== 0) continue;
+      const r = JSON.parse(fs.readFileSync(f + '.out', 'utf8'));
+
+      // expect 逐键消费：写下的每一条判据都必须真的被查，而不是摆在模板里做装饰
+      for (const [k, v] of Object.entries(exp)) {
+        if (k === 'weak_response_max') continue;   // 与 weak_response_index 合成一条
+        if (k === 'rank_selected') {
+          check(`${tag} expect.rank_selected=${v} 真对上`, r.rank_selected === v, `S=${r.rank_selected}`);
+        } else if (k === 'R2_partialled_min') {
+          check(`${tag} expect.R2偏后>${v} 真对上`, r.R2_partialled > v, String(r.R2_partialled));
+        } else if (k === 'covariates') {
+          check(`${tag} expect.covariates=${v} 真对上`, (r.covariates_partialled_out || 0) === v,
+            String(r.covariates_partialled_out));
+        } else if (k === 'diag_pattern') {
+          check(`${tag} 诊断里真说了「${v}」`, (r.diagnostics || []).some((d) => String(d).includes(v)),
+            JSON.stringify(r.diagnostics));
+        } else if (k === 'weak_response_index') {
+          const w = v - 1;
+          const arr = r.R2_per_response_partialled || [];
+          const rest = arr.filter((_, j) => j !== w);
+          check(`${tag} 弱响应 Y${v} < ${exp.weak_response_max} 且低于其余中位数的 0.8 倍`,
+            Number.isFinite(arr[w]) && arr[w] < exp.weak_response_max && arr[w] < median(rest) * 0.8,
+            arr.map((x) => x.toFixed(2)).join(' '));
+        } else {
+          check(`${tag} expect 键「${k}」无人消费（装饰品）`, false, `对账器只认：${JUDGED.join(' / ')}`);
+        }
+      }
+      check(`${tag} expect 的键全在认识表里（拼错的判据等于没有判据）`,
+        Object.keys(exp).every((k) => JUDGED.includes(k)),
+        Object.keys(exp).filter((k) => !JUDGED.includes(k)).join(','));
+
+      // 结果喂回视图：所有区块、四张图的 builder 都得活过六个设计
+      vm.analysisResult = r;
+      const built = {};
+      let threw = '';
+      for (const [k, fn] of Object.entries(gmr4Charts.GMR4_CHART_BUILDERS)) {
+        try { built[k] = fn(r, FMT); } catch (e) { threw += `${k}:${e.message} `; }
+      }
+      // 秩 1 时双标图**应该**是 null（只有一维可看），其余情形四个都得出图
+      const wantNull = r.rank_selected < 2 ? ['biplot'] : [];
+      const gotNull = Object.keys(built).filter((k) => !built[k]);
+      check(`${tag} 四图 builder 不炸、该出图都出图（S=${r.rank_selected} 时只许 ${wantNull.join(',') || '无'} 为空）`,
+        threw === '' && gotNull.join(',') === wantNull.join(',') &&
+          Object.values(built).every((o) => !o || (Array.isArray(o.series) && o.series.length > 0)),
+        threw || JSON.stringify([gotNull, Object.keys(built).length]));
+      check(`${tag} 结果喂给视图后所有区块都有内容（概览/选型/两张表）`,
+        vm.headlineStats.length >= 6 && vm.selectionInfo.length >= 6 &&
+          vm.coefRows.length === r.p && vm.cvRows.length === r.rank_grid.length,
+        JSON.stringify([vm.headlineStats.length, vm.selectionInfo.length,
+          vm.coefRows.length, r.p, vm.cvRows.length, r.rank_grid.length]));
+    }
   }
 }
 
