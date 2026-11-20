@@ -108,6 +108,13 @@ S2 选了“严格语义”（行为会变，已得到同意）：表名走别�
 3. `frontend/src/utils/<name>Charts.js`：纯函数 `chart_data -> ECharts option`，NaN 一律转 null。
 4. 视图放 `views/r-analysis/`，用本目录的组件 + `r-analysis.css`，`result-section` 放在
    `config-section` 内部（与 `PERMANOVA.vue`/`PERMANOVA_Med.vue` 版式一致）。
+   页头与内容列的**宽度、对齐不在视图里写**：它们归 `r-analysis.css` 末尾
+   `RA-MANUAL-BEGIN` 之后的手工块（max-width:1200 + box-sizing:border-box + 页头左对齐）。
+   两个已经踩过坑：全仓没 box-sizing reset（content-box 下 max-width 算内容宽，
+   页头卡片有 padding 76 → 比内容宽一挡）；居中来自 `global.less` 里 `#app` 的
+   **继承**而不是哪条 h1 规则。`r-analysis.css` 是生成物，但重跑抽取脚本会原样保留
+   这个手工块（`test_gmr4_view` 第 8 节真跑一次比对字节来守这条）。
+   路由也得带 `scrollBehavior`：hash 换页不重载文档，不写就把上一页的 scrollY 带过来。
 5. 校验脚本（都在 `r-scripts/tools/`）：
    - `verify_<name>_engine.R`：与成熟实现（如 vegan）对齐 + 边界条件必须报错
    - `verify_<name>_templates.mjs`：逐个模板真跑 R，断言 p 值方向与 `expect` 一致

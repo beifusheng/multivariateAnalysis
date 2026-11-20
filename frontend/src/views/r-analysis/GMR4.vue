@@ -24,11 +24,11 @@
           <div class="template-card-content">
             <div class="template-info-row">
               <span class="info-label">数据结构：</span>
-              <span class="info-value">{{ tpl.spec.n }} 样本 × {{ tpl.spec.p }} 预测变量 × {{ tpl.spec.q }} 响应（真实秩 {{ tpl.spec.trueRank }}，含 {{ tpl.spec.covariates }} 个协变量）</span>
+              <span class="info-value">{{ tplShapeLine }}</span>
             </div>
             <div class="template-info-row">
               <span class="info-label">预期结论：</span>
-              <span class="info-value">选型回到 S={{ tpl.spec.expect.rank_selected }}，偏掉协变量后 R² &gt; {{ tpl.spec.expect.R2_partialled_min }}；第 {{ tpl.spec.weakResponse }} 个响应被故意压弱，应当明显低于其余</span>
+              <span class="info-value">{{ tplExpectLine }}</span>
             </div>
             <div class="template-tip">
               <span class="tip-icon">💡</span><span>{{ tpl.spec.note }}</span>
@@ -200,6 +200,7 @@
           </div>
 
           <ChartPanel ref="chartPanel" :tabs="chartTabs" v-model:active="activeChart" :ready="!!analysisResult"
+            :note="chartNote"
             :empty-text="`当前结果不足以画这张图（例如秩只有 1 时没有双标图可看）`" />
         </ResultCard>
         </div>
@@ -326,6 +327,51 @@ export default {
     gmrCount() { return GMR4_TEMPLATE_COUNT; },
     tpl() { return GMR4_TEMPLATE_MAP[this.selectedTplId] || null; },
     selectedTemplate() { return this.tpl; },
+    /**
+     * 卡片上的字必须全部来自 spec 里真存在的键。
+     * 上一版这里写的是 tpl.spec.trueRank / tpl.spec.covariates / tpl.spec.weakResponse ——
+     * 三个全部不存在（真实秩叫 S、协变量在 expect.covariates、弱响应是
+     * expect.weak_response_index），于是卡片当着用户的面写 undefined。
+     * 更域的是 smallN 故意不声明 rank_selected（拿不成信息的量当“答案”本身就是错），
+     * 硬套旧模板就会写「选型回到 S=undefined」。所以这里只说声明过的东西。
+     */
+    tplShapeLine() {
+      const t = this.tpl;
+      if (!t) return '';
+      const s = t.spec;
+      const cov = s.expect && s.expect.covariates
+        ? `，含 ${s.expect.covariates} 个协变量` : '，不含协变量';
+      return `${s.n} 样本 × ${s.p} 预测变量 × ${s.q} 响应（真实秩 ${s.S}${cov}）`;
+    },
+    tplExpectLine() {
+      const t = this.tpl;
+      if (!t) return '';
+      const e = t.spec.expect || {};
+      const parts = [];
+      if (e.rank_selected != null) parts.push(`选型回到 S=${e.rank_selected}`);
+      else parts.push('这个设计里选型本身不具信息，故意不给“期望秩”');
+      if (e.R2_partialled_min != null) parts.push(`偏掉协变量后 R² > ${e.R2_partialled_min}`);
+      if (e.weak_response_index != null) {
+        parts.push(`第 ${e.weak_response_index} 个响应被故意压弱，应当明显低于其余`);
+      }
+      if (e.diag_pattern) parts.push(`诊断里必须说出「${e.diag_pattern}」`);
+      return parts.join('；');
+    },
+    /**
+     * 合法空白：结果在手，但这张图在数学上不存在（秩 < 2 没有二维可看）。
+     * 它必须是**计算属性而不是 renderChart 里写的状态**：切 tab 时 DOM 要同帧跟着变，
+     * 否则 renderChart 下一次量不到容器（note 期间它不在 DOM 里）就把真能画的图报成故障。
+     */
+    chartNote() {
+      const r = this.analysisResult;
+      if (!r) return '';
+      if (this.activeChart === 'biplot' && Number(r.rank_selected) < 2) {
+        return `本次选中的秩 S=${r.rank_selected}：只有一个典范方向，` +
+          '双标图需要至少两个方向才能把载荷画在平面上 —— 这不是数据缺失，也不是没画出来。' +
+          '想看载荷结构就把候选秩放宽到 ≥ 2 重跑，或换看「选型路径」/「CV 热图」。';
+      }
+      return '';
+    },
     tplSummary() {
       return this.tpl ? `已选：${this.tpl.label}` : '未选择模板（可直接粘贴数据或导入 Excel）';
     },
@@ -570,6 +616,10 @@ export default {
       try { option = builder(r, FORMATTERS); }
       catch (e) { return fail('builder-threw', e.message); }
       if (!option) {
+        // 合法空白（数学上就不存在这张图）走图区里的说明文字，不再弹警告。
+        // 警告只留给真故障：上一版 S=1 点双标图会挨一句「没画出来：no-data」，
+        // 用户把它当成 bug 报上来了 —— 一个说清事实的安静面板比一个挘心的吐司强。
+        if (this.chartNote) return Promise.resolve({ ok: false, reason: 'legit-empty', quiet: true });
         const need = { selection: 'rank_grid / cv.mean', cvHeat: 'rank_grid / lambda_grid / cv.mean',
           r2: 'R2_per_response_partialled', biplot: 'U / V（秩至少 2 才有二维可看）' }[tab];
         return fail('no-data', `结果里缺少 ${need}`);
@@ -599,7 +649,14 @@ export default {
       await writeWorkbook(XLSX, gmr4TemplateSheets(this.selectedTplId), this.templateFileName());
       this.notify('success', '模板已下载：预测变量X / 响应变量Y' + (this.selectedTplId ? '（当前设计）' : '') + ' / 模型参数');
     },
-    templateFileName() { return templateFilename('GMR4', this.stamp()); },
+    templateFileName() {
+      // 文件名必须能认出是哪份设计：六份模板都叫「GMR4 数据模板_时间戳.xlsx」的话，
+      // 用户下三份就分不清谁是谁（实测就是这个状态，只能一个个开文件看参数表）。
+      const base = templateFilename('GMR4', this.stamp());
+      const id = this.selectedTplId;
+      if (!id) return base;
+      return base.replace(/\.xlsx$/, `_${id}.xlsx`);
+    },
 
     openImport() {
       this.importTabs = null; this.importError = ''; this.importWarnings = []; this.imported = null;

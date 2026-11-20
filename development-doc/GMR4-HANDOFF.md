@@ -103,6 +103,25 @@ cd frontend && npm run build
   expect 加个没人消费的键 → 2 红；删掉 biplot 的列数（秩）守卫 → 4 红，
   其中两条是上一轮已有的秩 1 断言 —— 新旧网在这条性质上对得上。
 
+## 用户实机四条（2026-11-20 下午）与本轮处置
+
+| 用户看到的现象 | 真因 | 处置 |
+|---|---|---|
+| Non-random / GMR⁴ 的 page-header 比 main-content 宽一点 | 全仓**没有 box-sizing reset**，默认 content-box；手工块的 `max-width:1200` 说的是内容宽，而页头卡片另有 padding 36×2 + border 2×2 = 76 → 实际 1276 vs 1200。另两个页没这问题因为它们根本不走 `.ra-shell` 这条规则 | 手工块里给 `.page-header` / `.main-content` 加 `box-sizing: border-box`（没碰 `.side-toolbar`：它 fixed + width:180，顺手动会少 4px）。断言钉住 |
+| 刚进这两个页，视窗不在最上面而是“居中” | `router/index.js` 没有 `scrollBehavior`：hash 路由换页不重载文档，上一页的 scrollY 被带过来 | 加 `scrollBehavior`：新进入一律 `top: 0`，后退/前进才还给 `savedPosition`。源码断言钉住 |
+| 真实秩 1 运行后点最后一张图，弹「图表「biplot」没画出来：no-data」 | 这不是 bug（S=1 数学上不存在二维双标图），**但把合法空白报成故障是设计 bug** —— 挘心的吐司让人以为坏了 | 新增 `chartNote` 计算属性 + `ChartPanel` 的 `note` 入参（`v-else-if` 渲染说明）：合法空白走图区说明且**零警告**；秩>=2 却缺 U/V 仍走 `fail()` 开口。两条各一条断言，另加“不许用 v-show”（v-show 期间容器 display:none，下次切回来量不到尺寸，反而变成真故障） |
+| 选设计模板后卡片上写的是 undefined（本轮自查发现） | 卡片插值用了 `tpl.spec.trueRank` / `.covariates` / `.weakResponse` —— 三个键**全不存在**（真实秩叫 `S`、协变量在 `expect.covariates`、弱响应是 `expect.weak_response_index`）；而 smallN 故意没 `rank_selected`，硬套模板会写「S=undefined」 | 改成 `tplShapeLine` / `tplExpectLine` 两个计算属性，只说声明过的判据；断言：源码里不许再出现那三个插值，且六个模板卡片文字逐份验无 undefined/NaN |
+
+另：「下载模板」现在**文件名带设计 id**（`GMR4 数据模板_时间戳_rank1.xlsx`）。
+之前六份设计下出来的文件全叫同一个名字（内容确实跟着 `selectedTplId` 走，但名字不记），
+下三份就认不出谁是谁。现在断言逐模板钉住文件名与内容同源。
+
+手测样本：`node r-scripts/tools/make_gmr4_import_fixture.mjs` 生成到
+`data/GMR4_导入测试/`（data/ 在 .gitignore 里）。五份都附了**实测过的预期**：
+`01` ranks=1,2,3 进框、`02` ranks 留空（导二次必须把 01 的旧值清掉）、
+`03` ranks=1,2,9 要开口说越界（min(p,q)=5）、`04` lambda 只两档（网格列数=2）、
+`05` 分隔符带空格与多余逗号（框里原样显示，numList 仍解析出 3 个）。
+
 ## 这个项目的硬规矩（踩过的坑，别再踩）
 
 - 断言写完必须**看它红一次**，否则它可能在给 bug 发绿卡。

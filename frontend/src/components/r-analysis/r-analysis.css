@@ -704,8 +704,11 @@
 /* 手工维护块（不在 PERMANOVA_Med.vue 里；重跑抽取脚本必须原样保留）
    下面两条都是**实机反馈后的修复**，不是实验样式：删掉任意一条，
    test_gmr4_view 第 8 节对应断言必须变红。
-   顺序说明：它们从文件中部搬到了末尾 —— 特异度没变，也不与任何生成规则抢同一个属性
-   （margin: 0 auto 与 margin-left/right: auto 等效），所以画面与之前一致。 */
+   顺序说明：前两条从文件中部搬到了末尾 —— 特异度没变。搬动本身不会改画面，
+   但有一处要记准确：手工块的 margin-left/right: auto 与生成规则
+   .ra-shell .main-content 的 margin 简写（0 auto）**确实重写了同一批属性**，
+   只是两边取值等效（都是 auto，上下保 0），所以先后次序改变不了结果。
+   若将来有人把其中一边改成非 auto，这条等效就不再成立 —— 得重新看这一层。 */
 
 /* 内容列宽度：PERMANOVA / PERMANOVA-med 的 scoped 样式里都有 max-width: 1200px，
    而外壳这份没有 —— 结果凡走 .ra-shell 的页面（Non-random、GMR⁴）在宽屏上整页铺满，
@@ -717,6 +720,16 @@
   max-width: 1200px;
   margin-left: auto;
   margin-right: auto;
+}
+/* box-sizing 不可省，但也不许一把抹：全仓没有 global reset，默认 content-box，
+   而 content-box 下 max-width:1200 说的是**内容宽**。页头卡片自带
+   padding: 28px 36px + border: 2px（两边共 76）→ 实际宽 1276，比 main-content
+   （无 padding，实宽 1200）宽一挡 —— 用户实机报的“页头比内容宽一点”就是它。
+   只给这两张卡片加 border-box：.side-toolbar 是 fixed + 自带 width:180，
+   顺手动它会少 4px，那不是本次要修的。 */
+.ra-shell > .page-header,
+.ra-shell > .main-content {
+  box-sizing: border-box;
 }
 
 /* 页头文字必须左对齐（实机反馈：GMR⁴ 的 page-title/page-subtitle 看起来居中）。

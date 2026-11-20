@@ -253,9 +253,29 @@ console.log('\n=== 5. 图表：数据不足与容器未就绪都要开口（D）
   vm5.activeChart = 'biplot';
   vm5.$refs = { chartPanel: { getHost: () => ({ clientWidth: 800, clientHeight: 500 }) } };
   const resNoData = await vm5.renderChart();
-  check('数据不够画这张图 -> no-data 且把缺的键说出来（秩 1 没双标图）',
-    resNoData.reason === 'no-data' && vm5._notices.some((n) => /缺/.test(n.message) && /U \/ V/.test(n.message)),
-    JSON.stringify(vm5._notices));
+  // 秩 1 看双标图是**合法空白**：图区里要把“为什么没图”写成说明，而不是弹一个挘心的警告。
+  // 上一版就是只弹「图表「biplot」没画出来：no-data —— 用户把它当 bug 报上来了。
+  check('秩 1 点双标图 -> 不弹警告，quiet，chartNote 把“只有一个典范方向”说清',
+    resNoData.reason === 'legit-empty' && resNoData.quiet === true && vm5._notices.length === 0 &&
+      /S=1/.test(vm5.chartNote) && /双标图/.test(vm5.chartNote),
+    JSON.stringify({ res: resNoData, note: vm5.chartNote, notices: vm5._notices }));
+  // 反过来：秩 >=2 却缺 U/V 是真故障，必须照样开口 ——
+  // 不然「安静」就成了静默放弃的新借口（这个项目在这一点上已经挨过三次）。
+  const vm5b = makeVm();
+  vm5b.analysisResult = { ...full, rank_selected: 3, U: [], V: [] };
+  vm5b.activeChart = 'biplot';
+  vm5b.$refs = { chartPanel: { getHost: () => ({ clientWidth: 800, clientHeight: 500 }) } };
+  const resMissing = await vm5b.renderChart();
+  check('秩>=2 却缺 U/V -> 仍然 no-data + 警告（合法空白不许连着把真故障也闷掉）',
+    resMissing.reason === 'no-data' && vm5b._notices.some((n) => /U \/ V/.test(n.message)) &&
+      vm5b.chartNote === '',
+    JSON.stringify({ res: resMissing, notices: vm5b._notices }));
+  // 合法空白得有地方说话：视图递给 ChartPanel，ChartPanel 用 v-else-if 渲染说明
+  const panelSrc = fs.readFileSync(path.join(FRONTEND, 'src/components/r-analysis/ChartPanel.vue'), 'utf8');
+  check('ChartPanel 有 note 入参且用 v-else-if 渲染说明（不许用 v-show 把容器藏成 display:none）',
+    /note: \{ type: String/.test(panelSrc) && /v-else-if="note" class="chart-empty"/.test(panelSrc) &&
+      /v-else ref="host"/.test(panelSrc) && /:note="chartNote"/.test(viewSource),
+    'v-show 版本下容器量不到尺寸，下次切回来就变 zero-size 真故障');
 
   const vm6 = makeVm();
   vm6.analysisResult = full;
@@ -341,6 +361,19 @@ console.log('\n=== 8. 实机三轮反馈各留一条防复发断言 ===');
   check('共享样式里有内容列 max-width:1200 兜底（宽屏整页铺满那条实机反馈）',
     /\.ra-shell > \.page-header,\s*\.ra-shell > \.side-toolbar,\s*\.ra-shell > \.main-content \{[^}]*max-width: 1200px/.test(cssSrc),
     '丢了它宽屏下页头贴左沿（已上线的修复，之前没人守住）');
+  // 实机反馈：“Non-random 和 GMR⁴ 的 page-header 比 main-content 宽一点”。
+  // 根因是全仓没有 box-sizing reset：content-box 下 max-width 算的是内容宽，
+  // 而页头卡片多了 padding 36*2 + border 2*2 = 76px。
+  check('手工块里页头/内容列有 box-sizing:border-box（否则页头比内容宽 76px）',
+    /\.ra-shell > \.page-header,\s*\.ra-shell > \.main-content \{[^}]*box-sizing: border-box/.test(cssSrc),
+    '这条一旦丢，两个 shell 页的页头又会比内容宽一挡');
+  const routerSrc = fs.readFileSync(path.join(FRONTEND, 'src/router/index.js'), 'utf8');
+  check('路由有 scrollBehavior：新进页面从最上面开始，只有后退才回原位',
+    /scrollBehavior/.test(routerSrc) && /savedPosition/.test(routerSrc) && /top: 0/.test(routerSrc),
+    '没 scrollBehavior 时 hash 换页会把上一页的 scrollY 带过来（实机：“刚进来视窗居中”）');
+  check('模板卡片不再把不存在的键放进插值里（trueRank/covariates/weakResponse 都是 undefined）',
+    !/\{\{\s*tpl\.spec\.(trueRank|covariates|weakResponse)/.test(viewSource),
+    '写错键名的结果是当着用户的面显示 undefined（注：源码注释里提到这些名字不算违规）');
   check('样式里有 RA-MANUAL-BEGIN 标记（抽取脚本靠它保留手工块）',
     cssSrc.includes('/* ==== RA-MANUAL-BEGIN ==== */'), '没标记 = 下次重跑把两条实机修复抹掉');
   {
@@ -458,6 +491,22 @@ console.log('\n=== 10. 六个模板逐个真跑对账（交接清单里唯一没
         !!lm && Number(lm[1]) === sp.n && Number(lm[2]) === sp.p && Number(lm[3]) === sp.q,
         JSON.stringify([lm && lm.slice(1), [sp.n, sp.p, sp.q]]));
       const covM = /(\d+) 协变量/.exec(tpl.label);
+      // 卡片文字：字段名写错就是当用户面说 undefined，而 smallN 故意没 rank_selected
+      const vmCard = makeVm();
+      vmCard.loadTemplate(id);
+      const cardText = `${vmCard.tplShapeLine} | ${vmCard.tplExpectLine}`;
+      check(`${tag} 模板卡片文字无 undefined/NaN，且形状/真实秩真来自 spec`,
+        !/undefined|NaN/.test(cardText) &&
+          vmCard.tplShapeLine.includes(`${sp.n} 样本`) && vmCard.tplShapeLine.includes(`真实秩 ${sp.S}`) &&
+          (exp.rank_selected != null ? vmCard.tplExpectLine.includes(`S=${exp.rank_selected}`)
+            : /不具信息|故意不给/.test(vmCard.tplExpectLine)),
+        cardText.slice(0, 160));
+      // 六份设计下出来的文件以前全叫「GMR4 数据模板_时间戳.xlsx」，下三份就认不出谁是谁
+      check(`${tag} 下载模板的文件名带设计 id（六份不许同名）`,
+        new RegExp(`_${id}\\.xlsx$`).test(vmCard.templateFileName()), vmCard.templateFileName());
+      check(`${tag} 下载内容跟着 selectedTplId 走（不是永远默认那份）`,
+        JSON.stringify(spec.gmr4TemplateSheets(vmCard.selectedTplId)) === JSON.stringify(sheets),
+        `selectedTplId=${vmCard.selectedTplId}`);
       check(`${tag} label 的协变量数与 expect 一致，发了 Z 的就要在文案里看得见`,
         (!covM || Number(covM[1]) === exp.covariates) &&
           (exp.covariates > 0 ? /协变量|Z/.test(`${tpl.label} ${tpl.tip}`) : true),
@@ -551,6 +600,18 @@ console.log('\n=== 10. 六个模板逐个真跑对账（交接清单里唯一没
           vm.coefRows.length === r.p && vm.cvRows.length === r.rank_grid.length,
         JSON.stringify([vm.headlineStats.length, vm.selectionInfo.length,
           vm.coefRows.length, r.p, vm.cvRows.length, r.rank_grid.length]));
+      // 真跑出 S<2 的设计（rank1 / smallN）：双标图必须给安静说明，而不是弹警告
+      if (Number(r.rank_selected) < 2) {
+        const vmQ = makeVm();
+        vmQ.analysisResult = r;
+        vmQ.activeChart = 'biplot';
+        vmQ.$refs = { chartPanel: { getHost: () => ({ clientWidth: 800, clientHeight: 500 }) } };
+        const quiet = await vmQ.renderChart();
+        check(`${tag} 实跑 S=${r.rank_selected} 点双标图 -> 图区说明、零警告`,
+          quiet.reason === 'legit-empty' && quiet.quiet === true && vmQ._notices.length === 0 &&
+            /典范方向/.test(vmQ.chartNote),
+          JSON.stringify({ quiet, notices: vmQ._notices }));
+      }
     }
   }
 }
