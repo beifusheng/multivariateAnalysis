@@ -238,7 +238,7 @@ import {
 import {
   GMR4_IMPORT_SHEETS, gmr4ImportTabs, GMR4_EXPORT_OPTIONS, GMR4_EXPORT_DEFAULTS, GMR4_PREVIEW_TABS,
   GMR4_TEMPLATE_GROUPS, GMR4_TEMPLATE_MAP, GMR4_TEMPLATE_COUNT,
-  gmr4PlanExport, gmr4ToFormPatch, gmr4TemplateSheets
+  gmr4PlanExport, gmr4ToFormPatch, gmr4TemplateSheets, gmr4TemplateFileTag
 } from '@/utils/gmr4SheetSpec';
 
 const FORMATTERS = makeFormatters();
@@ -664,10 +664,11 @@ export default {
     templateFileName() {
       // 文件名必须能认出是哪份设计：六份模板都叫「GMR4 数据模板_时间戳.xlsx」的话，
       // 用户下三份就分不清谁是谁（实测就是这个状态，只能一个个开文件看参数表）。
+      // 后缀用卡片上的中文名（gmr4TemplateFileTag），不用内部 id：id 界面上看不到。
       const base = templateFilename('GMR4', this.stamp());
-      const id = this.selectedTplId;
-      if (!id) return base;
-      return base.replace(/\.xlsx$/, `_${id}.xlsx`);
+      const tag = this.selectedTplId ? gmr4TemplateFileTag(this.selectedTplId) : '';
+      if (!tag) return base;
+      return base.replace(/\.xlsx$/, `_${tag}.xlsx`);
     },
 
     openImport() {

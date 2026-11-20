@@ -334,6 +334,22 @@ export const GMR4_TEMPLATE_MAP = GMR4_TEMPLATE_GROUPS.reduce((acc, g) => {
 
 export const GMR4_TEMPLATE_COUNT = Object.keys(GMR4_TEMPLATE_MAP).length;
 
+/**
+ * 下载模板的文件名后缀 —— 用卡片上那个**中文名**，不用内部 id。
+ * 上一轮我用的是 id（smallN / confoundedZ / manyResp），结界用户拿着
+ * 「GMR4 数据模板_…_smallN.xlsx」根本对不上是哪份 —— 那串字符界面上从未出现过。
+ * 能被用户认出的身份只有 label 的前半段，所以从它派生（同源，不是再拄一份名字）。
+ */
+export function gmr4TemplateFileTag(id) {
+  const tpl = GMR4_TEMPLATE_MAP[id];
+  if (!tpl) return '';
+  return String(tpl.label)
+    .split('（')[0]                                  // 括号里的形状说明不进文件名
+    .replace(/[\\/:*?"<>|（）()\[\]×]/g, '')   // Windows 禁用字符与公式符号
+    .trim()
+    .replace(/\s+/g, '_');                          // 空格换成下划线，免得手抄/命令行易错
+}
+
 /** 模板工作簿：不传 id 用第一个设计；选了别的就按别的出（同源，杜绝两处各写一份数据） */
 export function gmr4TemplateSheets(id) {
   const key = id || GMR4_TEMPLATE_GROUPS[0].items[0].id;

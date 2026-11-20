@@ -112,9 +112,10 @@ cd frontend && npm run build
 | 真实秩 1 运行后点最后一张图，弹「图表「biplot」没画出来：no-data」 | 这不是 bug（S=1 数学上不存在二维双标图），**但把合法空白报成故障是设计 bug** —— 挘心的吐司让人以为坏了 | 新增 `chartNote` 计算属性 + `ChartPanel` 的 `note` 入参（`v-else-if` 渲染说明）：合法空白走图区说明且**零警告**；秩>=2 却缺 U/V 仍走 `fail()` 开口。两条各一条断言，另加“不许用 v-show”（v-show 期间容器 display:none，下次切回来量不到尺寸，反而变成真故障） |
 | 选设计模板后卡片上写的是 undefined（本轮自查发现） | 卡片插值用了 `tpl.spec.trueRank` / `.covariates` / `.weakResponse` —— 三个键**全不存在**（真实秩叫 `S`、协变量在 `expect.covariates`、弱响应是 `expect.weak_response_index`）；而 smallN 故意没 `rank_selected`，硬套模板会写「S=undefined」 | 改成 `tplShapeLine` / `tplExpectLine` 两个计算属性，只说声明过的判据；断言：源码里不许再出现那三个插值，且六个模板卡片文字逐份验无 undefined/NaN |
 
-另：「下载模板」现在**文件名带设计 id**（`GMR4 数据模板_时间戳_rank1.xlsx`）。
-之前六份设计下出来的文件全叫同一个名字（内容确实跟着 `selectedTplId` 走，但名字不记），
-下三份就认不出谁是谁。现在断言逐模板钉住文件名与内容同源。
+另：「下载模板」现在**文件名带卡片上的中文名**（`GMR4 数据模板_时间戳_真实秩_1.xlsx`）。
+数据本来就跟着 `selectedTplId` 走，但六份设计的文件名过去完全同名。
+中间那一版我用的是内部 id（`_rank1` / `_smallN`），用户拿着文件回不了界面 ——
+id 界面上从来不显示，所以后缀必须从 label 派生（`gmr4TemplateFileTag`）。
 
 手测样本：`node r-scripts/tools/make_gmr4_import_fixture.mjs` 生成到
 `data/GMR4_导入测试/`（data/ 在 .gitignore 里）。五份都附了**实测过的预期**：
@@ -154,7 +155,10 @@ cd frontend && npm run build
    那是在绕开双标图，可双标图本就不是默认页；结果是真实秩 1 / 小样本跑完直接跳到
    CV 热图，用户找不到主图。现在 `defaultChartTab()` 永远返回声明里的第一张。
 7. **下载模板文件名**：数据一直跟着 `selectedTplId` 走，但六份设计下出来的文件
-   全同名。现在 `GMR4 数据模板_时间戳_rank1.xlsx`，逐模板断言文件名与内容同源。
+   全同名。现在后缀取自卡片 label 的中文名（`gmr4TemplateFileTag`），逐模板断言文件名与内容同源。
+   id ↔ 卡片名对照（界面只看得到右边，下一轮别再拿 id 当用户语言）：
+   `lowrank3`=真实秩 3 · `rank1`=真实秩 1 · `fullrank`=真实秩=满秩 ·
+   `confoundedZ`=强混杂 · `smallN`=**样本不比变量多** · `manyResp`=响应远多于变量
 
 手测样本生成器（脚本入库、产物进 `data/`，data/ 被 gitignore）：
 `node r-scripts/tools/make_gmr4_import_fixture.mjs` → 五份真 xlsx（ranks 手填 /

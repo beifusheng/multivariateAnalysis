@@ -489,6 +489,18 @@ console.log('\n=== 10. 六个模板逐个真跑对账（交接清单里唯一没
   // 为什么不是“只跑默认模板”：expect 是六个模板各自写下的“真跑事实”，
   // 只验默认那个等于其余五个可以随时劣化成“下载下来跑出什么算什么”（三个老模块都这么翻过车）。
   const ids = Object.keys(spec.GMR4_TEMPLATE_MAP);
+  // 文件名的三条全局约束（逐模板那条只能证明“带了后缀”，证不了“认得出”）
+  {
+    const tags = ids.map((id) => spec.gmr4TemplateFileTag(id));
+    check('六个设计的文件名后缀非空且互不相同',
+      tags.every(Boolean) && new Set(tags).size === ids.length, JSON.stringify(tags));
+    check('后缀取自卡片 label 的中文名，不是界面上看不到的内部 id',
+      ids.every((id2, i) => spec.GMR4_TEMPLATE_MAP[id2].label.startsWith(tags[i].replace(/_/g, ' '))) &&
+        !tags.some((t) => /^(lowrank3|rank1|fullrank|confoundedZ|smallN|manyResp)$/.test(t)),
+      JSON.stringify(tags));
+    check('后缀不含路径非法字符/公式符号/空白（文件名要能直接双击打开）',
+      !tags.some((t) => /[\\/:*?"<>|（）()\[\]×\s]/.test(t)), JSON.stringify(tags));
+  }
   check('模板目录就是这 6 个（删模板必须同时删对账，加模板必须同时加判据）',
     ids.length === 6 && ids.length === spec.GMR4_TEMPLATE_COUNT &&
       ids.join(',') === 'lowrank3,rank1,fullrank,confoundedZ,smallN,manyResp', ids.join(','));
@@ -522,9 +534,14 @@ console.log('\n=== 10. 六个模板逐个真跑对账（交接清单里唯一没
           (exp.rank_selected != null ? vmCard.tplExpectLine.includes(`S=${exp.rank_selected}`)
             : /不具信息|故意不给/.test(vmCard.tplExpectLine)),
         cardText.slice(0, 160));
-      // 六份设计下出来的文件以前全叫「GMR4 数据模板_时间戳.xlsx」，下三份就认不出谁是谁
-      check(`${tag} 下载模板的文件名带设计 id（六份不许同名）`,
-        new RegExp(`_${id}\\.xlsx$`).test(vmCard.templateFileName()), vmCard.templateFileName());
+      // 文件名要能认出是哪份设计，而且用的必须是**卡片上那个中文名**。
+      // 上一轮我用内部 id（smallN / confoundedZ），用户拿着文件对不上界面，
+      // 直接报“smallN 是什么，我没找到对应的地方”——那是命名错了，不是用户错。
+      const fileTag = spec.gmr4TemplateFileTag(id);
+      check(`${tag} 下载模板的文件名带设计中文名（六份不许同名）`,
+        vmCard.templateFileName().endsWith(`_${fileTag}.xlsx`) &&
+          !vmCard.templateFileName().includes(id),
+        vmCard.templateFileName());
       check(`${tag} 下载内容跟着 selectedTplId 走（不是永远默认那份）`,
         JSON.stringify(spec.gmr4TemplateSheets(vmCard.selectedTplId)) === JSON.stringify(sheets),
         `selectedTplId=${vmCard.selectedTplId}`);
