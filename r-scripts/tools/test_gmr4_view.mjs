@@ -207,13 +207,41 @@ console.log('\n=== 5. 图表：数据不足与容器未就绪都要开口（D）
       vm.headlineStats.some((x) => x.label === 'R²（原尺度）'));
 
   // 容器拿不到时必须开口（这是 PERMANOVA 那轮"初次不画"的同一类问题）
+  // 失败路径必须逐条开口，并且说出的是哪一类失败（上一个版本把 no-ref 和 no-host 混为一谈）
   const vm3 = makeVm();
   vm3.analysisResult = full;
   vm3.$refs = {};
-  const res = await vm3.renderChart();
-  check('容器未就绪 -> 返回 no-host 且真的 notify 了（静默放弃就是"切 tab 才画"）',
-    res && res.ok === false && vm3._notices.some((n) => n.type === 'warning' && /容器/.test(n.message)),
-    JSON.stringify({ res, notices: vm3._notices }));
+  const resNoRef = await vm3.renderChart();
+  check('没有 ChartPanel 实例 -> no-ref 且 notify 指名要补 ref="chartPanel"',
+    resNoRef.reason === 'no-ref' && vm3._notices.some((n) => /no-ref/.test(n.message) && /chartPanel/.test(n.message)),
+    JSON.stringify(vm3._notices));
+
+  const vm4 = makeVm();
+  vm4.analysisResult = full;
+  vm4.$refs = { chartPanel: { getHost: () => null } };
+  const resNoHost = await vm4.renderChart();
+  check('外壳在但容器未就绪 -> no-host 且 notify（不静默放弃）',
+    resNoHost.reason === 'no-host' && vm4._notices.some((n) => n.type === 'warning' && /selection/.test(n.message)),
+    JSON.stringify({ res: resNoHost, notices: vm4._notices }));
+
+  const vm5 = makeVm();
+  vm5.analysisResult = { ...full, rank_selected: 1, U: full.U.map((x) => x.slice(0, 1)), V: full.V.map((x) => x.slice(0, 1)) };
+  vm5.activeChart = 'biplot';
+  vm5.$refs = { chartPanel: { getHost: () => ({ clientWidth: 800, clientHeight: 500 }) } };
+  const resNoData = await vm5.renderChart();
+  check('数据不够画这张图 -> no-data 且把缺的键说出来（秩 1 没双标图）',
+    resNoData.reason === 'no-data' && vm5._notices.some((n) => /缺/.test(n.message) && /U \/ V/.test(n.message)),
+    JSON.stringify(vm5._notices));
+
+  const vm6 = makeVm();
+  vm6.analysisResult = full;
+  vm6.activeChart = 'nonexistentTab';
+  const resNoBuilder = await vm6.renderChart();
+  check('未知图表类型 -> no-builder 并报出名字（切换 tab 后静默空白也算 bug）',
+    resNoBuilder.reason === 'no-builder' && /nonexistentTab/.test(vm6._notices[0].message),
+    JSON.stringify(vm6._notices));
+  check('源码里没有任何不开口的失败分支（renderChart 内部只能走 fail）',
+    !/return Promise\.resolve\(\{ ok: false/.test(viewSource.split('renderChart()')[1] || ''), '');
 }
 
 console.log('\n=== 6. 端到端：模板 -> 表单 -> 真 R ===');
@@ -268,6 +296,31 @@ console.log('\n=== 7. 源码层面（外壳与命名一致性）===');
 }
 
 await server.close();
+console.log('\n=== 8. 实机三轮反馈各留一条防复发断言 ===');
+{
+  // 漏 ref 曾经让每张图画不出来，而我那条断言当时是绿的（它只证明警告会响）
+  check('ChartPanel 带 ref="chartPanel"', /<ChartPanel ref="chartPanel"/.test(viewSource), '');
+  // 不含协变量的设计绝不能发"1 行说明表"：它会被解析成数据并报「写反了」
+  check('四个无协变量模板不发 协变量Z 表，两个有协变量的照发 n+1 行',
+    ['rank1', 'fullrank', 'smallN', 'manyResp'].every((id) =>
+      !spec.gmr4TemplateSheets(id).some((sh) => sh.name === '协变量Z')) &&
+      ['lowrank3', 'confoundedZ'].every((id) => {
+        const sh = spec.gmr4TemplateSheets(id).find((x) => x.name === '协变量Z');
+        return !!sh && sh.aoa.length === spec.GMR4_TEMPLATE_MAP[id].spec.n + 1;
+      }), '');
+  // 页头居中的根因是全局裸 h1 规则，这里是显式兜底（用户实测：兜底那条赢了）
+  const cssSrc = fs.readFileSync(path.join(FRONTEND, 'src/components/r-analysis/r-analysis.css'), 'utf8');
+  check('共享样式里有页头左对齐兜底规则（特异性必须高于裸 h1）',
+    /\.ra-shell \.page-header \.page-subtitle \{[^}]*text-align: left/.test(cssSrc), '');
+  // 结果区必须在 config-section 内（与另三个模块一致）
+  check('结果区写在 config-section 内部（不是它的兄弟节点）',
+    /<div v-if="analysisResult" class="result-section">/.test(viewSource) &&
+      viewSource.indexOf('class="config-section"') < viewSource.indexOf('v-if="analysisResult" class="result-section"'), '');
+  check('工具栏初始收缩（与 PERMANOVA / Med / Non-random 一致）', /isToolbarExpanded: false/.test(viewSource), '');
+  check('运行按钮在视图里（外壳 ToolbarActions 不负责运行）',
+    /class="btn-run"[\s\S]{0,80}runAnalysis|@click="runAnalysis"/.test(viewSource), '');
+}
+
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }
 process.exit(fail ? 1 : 0);

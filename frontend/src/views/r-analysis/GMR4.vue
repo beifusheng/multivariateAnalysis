@@ -552,22 +552,41 @@ export default {
       this.$nextTick(() => this.renderChart());
     },
     renderChart() {
+      const tab = this.activeChart;
+      const fail = (reason, extra) => {
+        // 每一条失败路径都必须开口并说清"缺什么"。本模块已经因为静默 return 挨过两次：
+        // 一次是漏 ref（画不出还不吭声），一次是 option 为 null 时直接 return ——
+        // 用户看到的都是同一件事：图表区一片空白，没有任何线索。
+        const msg = `图表「${tab}」没画出来：${reason}${extra ? ' —— ' + extra : ''}`;
+        console.warn('[GMR4]', msg, { activeChart: tab, keys: Object.keys(this.analysisResult || {}) });
+        this.notify('warning', msg);
+        return Promise.resolve({ ok: false, reason });
+      };
       const r = this.analysisResult;
-      if (!r) return Promise.resolve({ ok: false, reason: 'no-result' });
-      const option = (GMR4_CHART_BUILDERS[this.activeChart] || GMR4_CHART_BUILDERS.selection)(r, FORMATTERS);
-      if (!option) return Promise.resolve({ ok: false, reason: 'no-data' });
-      return drawWhenReady({
-        getHost: () => this.$refs.chartPanel?.getHost?.() || null,
-        nextTick: this.$nextTick,
-        option
-      }).then((res) => {
-        if (!res.ok && (res.reason === 'no-host' || res.reason === 'zero-size')) {
-          this.notify('warning', `图表容器${res.reason === 'zero-size' ? '量不出尺寸（0 宽/0 高）' : '还没就绪'}（等了 ${res.waited} 帧），切换一下图表类型可重画`);
-        } else if (res.ok && res.empty) {
-          this.notify('warning', '图表已生成但宽度为 0（布局未完成），切换图表类型或收缩侧边栏可重画');
-        }
+      if (!r) return fail('no-result', '先点「运行分析」');
+      const builder = GMR4_CHART_BUILDERS[tab];
+      if (!builder) return fail('no-builder', `未知的图表类型 ${tab}`);
+      let option = null;
+      try { option = builder(r, FORMATTERS); }
+      catch (e) { return fail('builder-threw', e.message); }
+      if (!option) {
+        const need = { selection: 'rank_grid / cv.mean', cvHeat: 'rank_grid / lambda_grid / cv.mean',
+          r2: 'R2_per_response_partialled', biplot: 'U / V（秩至少 2 才有二维可看）' }[tab];
+        return fail('no-data', `结果里缺少 ${need}`);
+      }
+      const host = () => {
+        const panel = this.$refs.chartPanel;
+        return panel && typeof panel.getHost === 'function' ? panel.getHost() : null;
+      };
+      if (!this.$refs.chartPanel) return fail('no-ref', '外壳 ChartPanel 的 ref 没注册（模板漏了 ref="chartPanel"）');
+      // drawWhenReady 里是 echarts.init/setOption —— 抛异常的话 promise 直接 reject，
+      // 用户看到的就是"容器在、canvas 没有、什么提示也没有"（实机就是这个现象）。
+      // 所以这一层必须包起来，异常也要变成一句能复现的话。
+      return Promise.resolve().then(() => drawWhenReady({ getHost: host, nextTick: this.$nextTick, option })).then((res) => {
+        if (!res.ok) return fail(res.reason || 'unknown', res.reason === 'zero-size' ? '容器量不出尺寸' : '容器还没挂上');
+        if (res.empty) this.notify('warning', `图表「${tab}」已生成但宽度为 0（布局未完成），切换图表类型可重画`);
         return res;
-      });
+      }).catch((e) => fail('echarts-threw', (e && e.message) || String(e)));
     },
 
     /* ---------------- 输入 / 模板 / 导入 / 导出 ---------------- */

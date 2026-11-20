@@ -261,6 +261,21 @@ tooltip 全渲染成 N/A，而且 `p.data < 0.05` 恒为 false——把 p=0.001 
 4. **Bayesian ERA 不要碰 JAGS/rjags/rstan**：打包侧已经删过 `jags.dll`（不让运行时依赖外部二进制），
    用 `MASS::mvrnorm` 手写共轭 Gibbs，ESS / R̂ / BAIC 自己实现——它们本来就要显示在结果里。
 
+### 图表空白这类"静默放弃"的收口办法（2026-11-19 GMR⁴ 实机三轮）
+实机报"图表还是不绘制、不弹提示"，F12 给的是 `[1079, 500, 0]`：容器宽高等都正常、
+`children.length === 0` —— 说明 echarts 从没 init 过。数据形状能排除（r.js / controller
+与 Non-random 完全一致），剩下的唯一可能全在**我自己写的静默 return** 上：`!option` 直接返回、
+`echarts.init/setOption` 抛异常时 promise reject 而没人接。所以现在 renderChart 的每条失败
+路径都必须走同一个 `fail(reason, extra)`：no-result / no-builder / builder-threw / no-data /
+no-ref / no-host / zero-size / echarts-threw，并且把"缺哪个键、缺哪一层"写进提示与 console.warn。
+教训：**"警告会响"不等于"图画得出来"**。上一轮我那条断言（容器未就绪 -> 必须 notify）
+恰恰是因为漏了 ref 才通过，等于给 bug 发了张绿卡。
+补断言时同时做了变异验证：删掉 `ref="chartPanel"` 和页头兜底规则，两条断言立刻变红；
+恢复后 50/50 —— 断言不看红一次就不知道它到底在看什么。
+页头居中的真根因是全局一条裸 `h1` 规则（用户 Computed 面板给出的顺序：兜底规则 >
+`.ra-shell .page-title` > `h1`），仓库里搜不到来源（应该在 public 下的 HTML 内联样式或
+运行时注入），目前靠更高特异性压住，**不算根因修复**。
+
 ### GMR⁴ 已于 2026-11-19 上线（下面的量级已做完，只剩 Bayesian ERA）
 引擎闭式重写（`# STATUS: implemented`）+ 17 项 `verify_gmr4_engine.R` + L3 `gmr4SheetSpec.js`
 （含确定性模板与 `expect` 判据）+ 视图 `GMR4.vue` + 路由 + 首页卡片可用。
