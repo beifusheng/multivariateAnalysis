@@ -58,7 +58,7 @@ function countRules(text) {
   return (stripComments(text).match(/\{/g) || []).length;
 }
 
-function process(text, isNested) {
+function rewriteBlocks(text, isNested) {
   let out = '';
   let i = 0;
   while (i < text.length) {
@@ -76,7 +76,7 @@ function process(text, isNested) {
 
     if (code.startsWith('@')) {
       const nested = /^@(media|supports|layer)/.test(code);
-      out += preludeRaw + '{\n' + (nested ? process(bodyRaw, true) : bodyRaw) + '\n}\n';
+      out += preludeRaw + '{\n' + (nested ? rewriteBlocks(bodyRaw, true) : bodyRaw) + '\n}\n';
     } else {
       const cut = commentSplit(preludeRaw);
       const head = preludeRaw.slice(0, cut);
@@ -89,7 +89,24 @@ function process(text, isNested) {
   return out;
 }
 
-const body = process(css, false);
+const body = rewriteBlocks(css, false);
+
+/*
+ * 「手工维护块」必须活过重跑。本文件不是纯生成物：分栏宽度（max-width: 1200px）
+ * 与页头左对齐这两块是实机反馈后加在生成文件里的，Med.vue 里没有它们。
+ * 上一版本重跑一次就把这两块静默抹掉（现象：GMR4 页头又居中、宽屏整页铺满），
+ * 而 CSS 不会报错 —— 所以这里显式把哨兵之后的内容原样接回输出。
+ * 哨兵之后的东西由人维护，本脚本不解释、不重排、不加前缀。
+ */
+const SENTINEL = '/* ==== RA-MANUAL-BEGIN ==== */';
+let managed = '';
+if (fs.existsSync(OUT)) {
+  const cur = fs.readFileSync(OUT, 'utf8');
+  // lastIndexOf：banner 里会提到这个标记的名字，不能被它自己匹到
+  const at = cur.lastIndexOf(SENTINEL);
+  if (at >= 0) managed = '\n' + cur.slice(at).trimEnd() + '\n';
+}
+
 const banner = `/**
  * R 分析界面共享样式
  * ---------------------------------------------------------------
@@ -100,9 +117,11 @@ const banner = `/**
  *
  * 所有选择器都限定在 .ra-shell 内，不会泄漏到 Home / PERMANOVA 等页面。
  * 要改样式请改 PERMANOVA_Med.vue 再重跑抽取脚本，不要直接编辑本文件。
+ * 例外：文件末尾 RA-MANUAL-BEGIN 标记行之后的内容不在 Med.vue 里，
+ * 重跑会被原样保留（不要往前插东西然后指望它还在）。
  */
 `;
-const out = banner + body.trim() + '\n';
+const out = banner + body.trim() + '\n' + managed;
 
 // ---- 自检：括号配对、规则数守恒、没有漏加前缀的选择器 ----
 const errors = [];
@@ -111,7 +130,13 @@ const closes = (out.match(/\}/g) || []).length;
 if (opens !== closes) errors.push(`括号不配对 { =${opens}, } =${closes}`);
 const srcRules = countRules(css);
 const outRules = countRules(out);
-if (outRules !== srcRules) errors.push(`规则数变化 ${srcRules} -> ${outRules}`);
+const managedRules = countRules(managed);
+// 自守：手工维护块自己不能丢（丢一条 = 重跑把实机修复抹了，CSS 不报错的那种事故）
+if (managed && managedRules === 0) errors.push('哨兵在但手工维护块是空的（正则错了？）');
+if (!managed && /max-width: 1200px/.test(fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8') : '')) {
+  errors.push('既有文件里有 max-width: 1200px 却没找到 RA-MANUAL-BEGIN 标记 —— 重跑会把实机修复抹掉');
+}
+if (outRules !== srcRules + managedRules) errors.push(`规则数变化 ${srcRules} + 手工 ${managedRules} -> ${outRules}`);
 if (/@media[^{]*\n/.test(out)) errors.push('@media 头后面丢了 {');
 if (/\.ra-shell\s+\.ra-shell/.test(out)) errors.push('出现 .ra-shell 套娃');
 if (/\*\/@?\.?ra-shell|\*\/\.(ra-)?[a-z]/.test(out)) errors.push('注释与选择器挤在同一行');
@@ -145,4 +170,4 @@ if (errors.length) {
   errors.forEach((e) => console.error('   - ' + e));
   process.exit(1);
 }
-console.log(`✅ ${path.relative(ROOT, OUT)}：${out.length} 字节，${outRules} 条规则，全部限定在 .ra-shell 内`);
+console.log(`✅ ${path.relative(ROOT, OUT)}：${out.length} 字节，${outRules} 条规则（含手工维护 ${managedRules} 条），全部限定在 .ra-shell 内`);

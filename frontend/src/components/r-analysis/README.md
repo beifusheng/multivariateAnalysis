@@ -6,7 +6,7 @@
 
 | 文件 | 作用 |
 | --- | --- |
-| `r-analysis.css` | **自动生成，不要手改**。由 `r-scripts/tools/extract_ra_styles.mjs` 从 `views/r-analysis/PERMANOVA_Med.vue` 的 `<style scoped>` 抽取，选择器统一限定在 `.ra-shell` 内 |
+| `r-analysis.css` | **生成物 + 手工块**，不要直接编辑。由 `r-scripts/tools/extract_ra_styles.mjs` 从 `views/r-analysis/PERMANOVA_Med.vue` 的 `<style scoped>` 抽取，选择器统一限定在 `.ra-shell` 内。末尾 `RA-MANUAL-BEGIN` 标记之后是手工维护的两条实机修复（内容列宽 1200 / 页头左对齐），重跑会被原样保留；幂等性由 `test_gmr4_view` 第 8 节守（它真去重跑一次再还原） |
 | `AnalysisHeader.vue` | 页头（标题 / 副标题 / 返回首页） |
 | `AnalysisToolbar.vue` | 侧边工具栏容器；按钮由父视图通过默认插槽给（三个分析的按钮语义不同，组件里不塞业务） |
 | `DataTemplateSelector.vue` | 「设计模板」区：分组 + 折叠 + 当前选中摘要 + 清除 |
@@ -272,9 +272,14 @@ no-ref / no-host / zero-size / echarts-threw，并且把"缺哪个键、缺哪�
 恰恰是因为漏了 ref 才通过，等于给 bug 发了张绿卡。
 补断言时同时做了变异验证：删掉 `ref="chartPanel"` 和页头兜底规则，两条断言立刻变红；
 恢复后 50/50 —— 断言不看红一次就不知道它到底在看什么。
-页头居中的真根因是全局一条裸 `h1` 规则（用户 Computed 面板给出的顺序：兜底规则 >
-`.ra-shell .page-title` > `h1`），仓库里搜不到来源（应该在 public 下的 HTML 内联样式或
-运行时注入），目前靠更高特异性压住，**不算根因修复**。
+页头居中的真根因（2026-11-20 定案）：**不是哪条裸 `h1` 规则** —— 全仓（含 dist 与
+ element-plus）根本不存在带 `text-align:center` 的 h1 规则，上一会话在 dist 里看到的
+ `h1{height:...}` 是 `.el-skeleton__h1` 的误匹配。真凶是**继承**：
+ `frontend/src/assets/global.less` 里 `#app { text-align: center }` 把居中转给了整棵组件树。
+ 按 `h1 {` 去搜永远搜不到 —— 得搜“哪个祖先声明了 text-align”。
+ 现在 `r-analysis.css` 末尾的手工块里 `.ra-shell` 自己接管了页头对齐，不再依赖 #app。
+ 彻底修法（把 #app 的居中拿掉或限定到 Home）会同时改变 Non-random / PERMANOVA / Med
+ 三个已上线页的默认对齐，属设计变更，要逐页看过再动。
 
 ### GMR⁴ 已于 2026-11-19 上线（下面的量级已做完，只剩 Bayesian ERA）
 引擎闭式重写（`# STATUS: implemented`）+ 17 项 `verify_gmr4_engine.R` + L3 `gmr4SheetSpec.js`

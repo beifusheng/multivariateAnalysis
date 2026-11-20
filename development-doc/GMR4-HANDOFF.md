@@ -77,6 +77,13 @@ cd frontend && npm run build
    现状：`.ra-shell` 系页头规则显式接管，分析页免疫；但 **Home / 任何新页面仍吃到居中**。
    彻底修法 = 去掉 #app 那行（或限定到 Home），代价是 Non-random / PERMANOVA / Med
    三个已上线页的默认对齐会一起变 —— 属设计变更，得用户逐页看过再动。
+1b. **重跑样式抽取脚本会静默抹掉实机修复（本会话已堵）**。`r-analysis.css` 是生成物，
+   但“内容列 max-width:1200”与“页头左对齐”两条是手工加在生成文件里的 ——
+   实测：跑一次 `extract_ra_styles.mjs`，两条都没了（CSS 不报错，没人会察觉）。
+   现在抽取脚本保留 `RA-MANUAL-BEGIN` 之后的内容、自检改为“生成 103 + 手工 2”守恒；
+   `test_gmr4_view` 第 8 节真去重跑一次、比对字节、再原样还原（拿旧脚本做变异 → 该条立刻红）。
+   附带修了一个潜伏 bug：脚本里 `function process()` 遮蔽了 Node 的 `process`，
+   自检一失败 `process.exit(1)` 就抛 TypeError（报错路自己跑不通），已改名 `rewriteBlocks`。
 2. **✅ 六个模板逐个真跑对账已落地**（`test_gmr4_view.mjs` 的 `=== 10.`）。
    而且**第一次跑就抓到 rank1 模板在骗人**（下面这一条就是那个循环的产出）。
 

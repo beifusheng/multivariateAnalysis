@@ -8,23 +8,13 @@
  *
  * 所有选择器都限定在 .ra-shell 内，不会泄漏到 Home / PERMANOVA 等页面。
  * 要改样式请改 PERMANOVA_Med.vue 再重跑抽取脚本，不要直接编辑本文件。
+ * 例外：文件末尾 RA-MANUAL-BEGIN 标记行之后的内容不在 Med.vue 里，
+ * 重跑会被原样保留（不要往前插东西然后指望它还在）。
  */
 .ra-shell {
   min-height: 100vh;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 40px 20px;
-}
-
-/* 内容列宽度：PERMANOVA / PERMANOVA-med 的 scoped 样式里都有 max-width: 1200px，
-   而外壳这份没有 —— 结果凡走 .ra-shell 的页面（Non-random、GMR⁴）在宽屏上整页铺满，
-   标题卡贴到视口左沿，与其它分析页看上去"没对齐"。
-   这不是某个视图的毛病，所以修在这里，两个 shell 页面一起好。 */
-.ra-shell > .page-header,
-.ra-shell > .side-toolbar,
-.ra-shell > .main-content {
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
 }
 .ra-shell .page-header {
   background: rgba(255, 255, 255, 0.98);
@@ -710,10 +700,29 @@
   border-radius: 8px;
 }
 
+/* ==== RA-MANUAL-BEGIN ==== */
+/* 手工维护块（不在 PERMANOVA_Med.vue 里；重跑抽取脚本必须原样保留）
+   下面两条都是**实机反馈后的修复**，不是实验样式：删掉任意一条，
+   test_gmr4_view 第 8 节对应断言必须变红。
+   顺序说明：它们从文件中部搬到了末尾 —— 特异度没变，也不与任何生成规则抢同一个属性
+   （margin: 0 auto 与 margin-left/right: auto 等效），所以画面与之前一致。 */
+
+/* 内容列宽度：PERMANOVA / PERMANOVA-med 的 scoped 样式里都有 max-width: 1200px，
+   而外壳这份没有 —— 结果凡走 .ra-shell 的页面（Non-random、GMR⁴）在宽屏上整页铺满，
+   标题卡贴到视口左沿，与其它分析页看上去"没对齐"。
+   这不是某个视图的毛病，所以修在这里，两个 shell 页面一起好。 */
+.ra-shell > .page-header,
+.ra-shell > .side-toolbar,
+.ra-shell > .main-content {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 /* 页头文字必须左对齐（实机反馈：GMR⁴ 的 page-title/page-subtitle 看起来居中）。
    【根因已找到，2026-11-20】不是哪条裸 h1 规则，而是**继承**：
-   `src/assets/global.less` 里 `#app { text-align: center }` 把居中转给了整棵组件树 ——
-   所以按 `h1 {` 去搜永远搜不到，得找“谁的祖先声明了 text-align”。
+   src/assets/global.less 里 #app 带了 text-align: center，把居中转给了整棵组件树 ——
+   所以按 h1 去搜永远搜不到，得找“哪个祖先声明了 text-align”。
    本块是外壳层的**显式接管**：只要页面走 .ra-shell，就不依赖 #app 那个默认值。
    彻底修法是把 #app 的居中拿掉（或限定到真需要居中的页），但那会同时改变
    Non-random / PERMANOVA / Med 三个已上线页的默认对齐 —— 属于设计变更，

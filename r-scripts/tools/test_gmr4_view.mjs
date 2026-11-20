@@ -333,9 +333,31 @@ console.log('\n=== 8. 实机三轮反馈各留一条防复发断言 ===');
         return !!sh && sh.aoa.length === spec.GMR4_TEMPLATE_MAP[id].spec.n + 1;
       }), '');
   // 页头居中的根因是全局裸 h1 规则，这里是显式兜底（用户实测：兜底那条赢了）
-  const cssSrc = fs.readFileSync(path.join(FRONTEND, 'src/components/r-analysis/r-analysis.css'), 'utf8');
-  check('共享样式里有页头左对齐兜底规则（特异性必须高于裸 h1）',
+  // 共享样式这份文件是「生成物 + 手工块」的混合体，得当场验三件事
+  const CSS = path.join(FRONTEND, 'src/components/r-analysis/r-analysis.css');
+  const cssSrc = fs.readFileSync(CSS, 'utf8');
+  check('共享样式里有页头左对齐兜底规则（.ra-shell 自己接管，不靠 #app 继承来的居中）',
     /\.ra-shell \.page-header \.page-subtitle \{[^}]*text-align: left/.test(cssSrc), '');
+  check('共享样式里有内容列 max-width:1200 兜底（宽屏整页铺满那条实机反馈）',
+    /\.ra-shell > \.page-header,\s*\.ra-shell > \.side-toolbar,\s*\.ra-shell > \.main-content \{[^}]*max-width: 1200px/.test(cssSrc),
+    '丢了它宽屏下页头贴左沿（已上线的修复，之前没人守住）');
+  check('样式里有 RA-MANUAL-BEGIN 标记（抽取脚本靠它保留手工块）',
+    cssSrc.includes('/* ==== RA-MANUAL-BEGIN ==== */'), '没标记 = 下次重跑把两条实机修复抹掉');
+  {
+    // 真去重跑一次抽取脚本，比对产物；跑完按原字节还原，不给工作区留副作用
+    const before = fs.readFileSync(CSS);
+    let runErr = '';
+    try {
+      execFileSync(process.execPath, [path.join(ROOT, 'r-scripts/tools/extract_ra_styles.mjs')],
+        { stdio: 'pipe', timeout: 120000 });
+    } catch (e) { runErr = String((e && e.stderr) || (e && e.message) || e).slice(0, 200); }
+    const after = fs.readFileSync(CSS);
+    fs.writeFileSync(CSS, before);
+    const flat = (b) => b.toString('utf8').replace(/\r\n/g, '\n');
+    check('重跑 extract_ra_styles 幂等：生成物 + 手工块一字不差（查完已还原）',
+      runErr === '' && flat(before) === flat(after),
+      runErr || '产物与仓库里的文件不一致：要么手工块被抹了，要么 Med.vue 改了却没重跑');
+  }
   // 结果区必须在 config-section 内（与另三个模块一致）
   check('结果区写在 config-section 内部（不是它的兄弟节点）',
     /<div v-if="analysisResult" class="result-section">/.test(viewSource) &&
