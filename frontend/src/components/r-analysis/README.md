@@ -284,9 +284,12 @@ no-ref / no-host / zero-size / echarts-threw，并且把"缺哪个键、缺哪�
  `h1{height:...}` 是 `.el-skeleton__h1` 的误匹配。真凶是**继承**：
  `frontend/src/assets/global.less` 里 `#app { text-align: center }` 把居中转给了整棵组件树。
  按 `h1 {` 去搜永远搜不到 —— 得搜“哪个祖先声明了 text-align”。
- 现在 `r-analysis.css` 末尾的手工块里 `.ra-shell` 自己接管了页头对齐，不再依赖 #app。
- 彻底修法（把 #app 的居中拿掉或限定到 Home）会同时改变 Non-random / PERMANOVA / Med
- 三个已上线页的默认对齐，属设计变更，要逐页看过再动。
+现在 `r-analysis.css` 末尾的手工块里 `.ra-shell` 自己接管了页头对齐，不再依赖 #app。
+**彻底修法已落地（2026-11-20 用户拍板）**：`#app` 不再写 `text-align: center`，
+真需要居中的页自己在根容器上声明（Home 的 `.home-container`）。
+三条断言守住这个约定：#app 不许再出现 text-align、Home 必须自己声明居中、
+`.ra-shell` 必须显式左对齐。
+回归重点：PERMANOVA / Med 两个页里“靠继承居中”的块从此变左对齐。
 
 ### GMR⁴ 已于 2026-11-19 上线（下面的量级已做完，只剩 Bayesian ERA）
 引擎闭式重写（`# STATUS: implemented`）+ 17 项 `verify_gmr4_engine.R` + L3 `gmr4SheetSpec.js`

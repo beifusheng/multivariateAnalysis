@@ -524,6 +524,18 @@ export default {
       return String(s || '').split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean)
         .map(Number).filter((x) => Number.isFinite(x));
     },
+    /**
+     * 分析后默认看哪张图：永远是声明里的第一张（选型路径）。
+     * 上一版写的是 `rank_selected >= 2 ? 'selection' : 'cvHeat'` —— 那是在绕开双标图，
+     * 可双标图本就不是默认页；结果是真实秩 1 / 小样本这两个设计跑完直接跳到 CV 热图，
+     * 用户找不到主图（实机反馈：“分析后默认选中的是 CV 热图”）。
+     * 第一张图只依赖 rank_grid / cv.mean，任何结果都画得出；秩 1 看双标图时
+     * 图区已经会写清“只有一个典范方向”（见 chartNote），不需要预先回避。
+     */
+    defaultChartTab() {
+      const t = this.chartTabs;
+      return t && t.length ? t[0].id : 'selection';
+    },
     isPicked(i, j) {
       const r = this.analysisResult;
       return r && r.rank_grid[i] === r.rank_selected && r.lambda_grid[j] === r.lambda_selected;
@@ -580,7 +592,7 @@ export default {
       try {
         const result = await runGMR4(this.buildPayload());
         this.analysisResult = result;
-        this.activeChart = result.rank_selected >= 2 ? 'selection' : 'cvHeat';
+        this.activeChart = this.defaultChartTab();
         this.notify('success', `完成：选定秩 S=${result.rank_selected}`);
         this.$nextTick(() => document.querySelector('.ra-shell .result-section')?.scrollIntoView({ behavior: 'smooth' }));
       } catch (e) {

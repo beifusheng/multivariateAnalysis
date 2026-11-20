@@ -95,6 +95,11 @@ const median = (a) => {
   return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
 };
 
+/** 源码断言专用：剥掉块注释与行注释。
+ * 不剥就会误报 —— 这一轮的修复把旧写法写进了注释里（“上一版这里是 …”），
+ * 而断言要拦的是**代码里的旧写法**，不是有人提起它。 */
+const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/[^\n]*/g, '$1');
+
 console.log('\n=== 1. 形状判定（A）===');
 {
   const vm = makeVm();
@@ -371,6 +376,22 @@ console.log('\n=== 8. 实机三轮反馈各留一条防复发断言 ===');
   check('路由有 scrollBehavior：新进页面从最上面开始，只有后退才回原位',
     /scrollBehavior/.test(routerSrc) && /savedPosition/.test(routerSrc) && /top: 0/.test(routerSrc),
     '没 scrollBehavior 时 hash 换页会把上一页的 scrollY 带过来（实机：“刚进来视窗居中”）');
+  /* 居中这件事的根：以前写在 #app 上，于是“谁没自己声明就居中”。
+     现在要求：广播不许回来，要居中就写在自己那一页的根上。 */
+  const globalLess = fs.readFileSync(path.join(FRONTEND, 'src/assets/global.less'), 'utf8');
+  check('#app 不再声明 text-align（居中的来源必须是具体页面，不能是全局广播）',
+    !/#app\s*\{[^}]*text-align/.test(globalLess),
+    '这条一坏，四个分析页的 h1 / 表格 / 正文又会“没来由地居中”，而按 h1 搜永远搜不到');
+  const homeSrc = fs.readFileSync(path.join(FRONTEND, 'src/views/Home.vue'), 'utf8');
+  check('Home 自己声明居中（画面靠显式规则维持，不靠顺手继承）',
+    /\.home-container\s*\{[^}]*text-align:\s*center/.test(homeSrc),
+    '少了它 Home 会从英雄页变成左对齐文字 —— 拿掉全局居中时必须把这一页接住');
+  check('外壳把正文默认左对齐写在 .ra-shell 本身（而不是逐块贴补丁）',
+    /\.ra-shell\s*\{[^}]*text-align:\s*left/.test(cssSrc), '');
+  check('分析后默认图走 defaultChartTab，不再按 rank_selected 分叉',
+    /this\.activeChart = this\.defaultChartTab\(\)/.test(codeOnly(viewSource)) &&
+      !/rank_selected >= 2 \? 'selection' : 'cvHeat'/.test(codeOnly(viewSource)),
+    '那个三元表达式让真实秩 1 / 小样本跑完直接跳到 CV 热图，用户找不到主图（注：源码注释里提到它不算违规，所以比对前先剥注释）');
   check('模板卡片不再把不存在的键放进插值里（trueRank/covariates/weakResponse 都是 undefined）',
     !/\{\{\s*tpl\.spec\.(trueRank|covariates|weakResponse)/.test(viewSource),
     '写错键名的结果是当着用户的面显示 undefined（注：源码注释里提到这些名字不算违规）');
@@ -612,6 +633,13 @@ console.log('\n=== 10. 六个模板逐个真跑对账（交接清单里唯一没
             /典范方向/.test(vmQ.chartNote),
           JSON.stringify({ quiet, notices: vmQ._notices }));
       }
+      // 分析后默认落在哪张图：必须是声明里的第一张，而且它必须真画得出来
+      const tab0 = vm.defaultChartTab();
+      const opt0 = gmr4Charts.GMR4_CHART_BUILDERS[tab0](r, FMT);
+      check(`${tag} 默认图 = 第一张 tab（${tab0}）且用这份真实结果画得出`,
+        tab0 === gmr4Charts.GMR4_CHART_TABS[0].id && !!opt0 &&
+          Array.isArray(opt0.series) && opt0.series.length > 0,
+        JSON.stringify([tab0, !!opt0, r.rank_selected]));
     }
   }
 }

@@ -710,6 +710,13 @@
    只是两边取值等效（都是 auto，上下保 0），所以先后次序改变不了结果。
    若将来有人把其中一边改成非 auto，这条等效就不再成立 —— 得重新看这一层。 */
 
+/* 外壳自己把文本默认改成左对齐（以前靠 #app 继承来的居中，四个分析页都被它拐走）。
+   写在容器本身上，而不是逐块贴补丁：卡片里的正文、表格单元格、说明文字
+   本来就该左对齐，不需要每条都写一遍。 */
+.ra-shell {
+  text-align: left;
+}
+
 /* 内容列宽度：PERMANOVA / PERMANOVA-med 的 scoped 样式里都有 max-width: 1200px，
    而外壳这份没有 —— 结果凡走 .ra-shell 的页面（Non-random、GMR⁴）在宽屏上整页铺满，
    标题卡贴到视口左沿，与其它分析页看上去"没对齐"。
@@ -733,14 +740,14 @@
 }
 
 /* 页头文字必须左对齐（实机反馈：GMR⁴ 的 page-title/page-subtitle 看起来居中）。
-   【根因已找到，2026-11-20】不是哪条裸 h1 规则，而是**继承**：
+   【根因已定案并彻底修掉，2026-11-20】不是哪条裸 h1 规则，而是**继承**：
    src/assets/global.less 里 #app 带了 text-align: center，把居中转给了整棵组件树 ——
    所以按 h1 去搜永远搜不到，得找“哪个祖先声明了 text-align”。
-   本块是外壳层的**显式接管**：只要页面走 .ra-shell，就不依赖 #app 那个默认值。
-   彻底修法是把 #app 的居中拿掉（或限定到真需要居中的页），但那会同时改变
-   Non-random / PERMANOVA / Med 三个已上线页的默认对齐 —— 属于设计变更，
-   要用户逐页看过再动（细节见 development-doc/GMR4-HANDOFF.md）。
-   另：本文件里三条 center 属于 .stat-item / .headline-left / .chart-empty，都不作用于页头。 */
+   用户已拍板拿掉广播：现在 #app 不再写 text-align，Home 在自己的
+   .home-container 上声明居中，分析页由上面那条 .ra-shell 的左对齐接管。
+   本块保留：它现在的作用是**防御** —— 万一将来有人把居中写回全局，
+   四个分析页仍然对。另：本文件里三条 center 属于 .stat-item / .headline-left /
+   .chart-empty，都不作用于页头。 */
 .ra-shell .page-header,
 .ra-shell .page-header .page-title,
 .ra-shell .page-header .page-subtitle {

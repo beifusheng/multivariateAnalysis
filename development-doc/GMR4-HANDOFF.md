@@ -122,14 +122,70 @@ cd frontend && npm run build
 `03` ranks=1,2,9 要开口说越界（min(p,q)=5）、`04` lambda 只两档（网格列数=2）、
 `05` 分隔符带空格与多余逗号（框里原样显示，numList 仍解析出 3 个）。
 
+## 这一轮（用户实机又报两条 + 拍板一条）
+
+1. **拿掉了全局广播**（用户拍板）：`global.less` 里 `#app` 不再写 `text-align: center`。
+   同时：Home 自己在 `.home-container` 上声明居中（同样的画面，不同的作用域，
+   Home 零变化）；`.ra-shell` 在手工块里显式 `text-align: left`。
+   三条都有断言（#app 不许再写 text-align / Home 必须自己声明 / 外壳必须显式左）。
+   **回归要看的**：PERMANOVA / Med 两个页以前正文是“顺手继承”来的居中，
+   现在靠它们自己的 scoped 声明 —— 没声明过的块会从居中变左对齐。
+2. **页头比 main-content 宽 76px**：根因不是那条 max-width 写错，而是
+   **全仓没有 box-sizing reset**：content-box 下 max-width 算的是内容宽，
+   页头卡片另有 padding 36×2 + border 2×2 = 76 → 1276 vs 1200。
+   另两个页看不出来是因为它们不走 `.ra-shell` 这条规则。
+   修：手工块里给 `.page-header` / `.main-content` 加 `box-sizing: border-box`；
+   没动 `.side-toolbar`（fixed + width:180，顺手动会少 4px）。
+3. **刚进页面不在顶部**：`router/index.js` 没有 `scrollBehavior`，hash 换页不重载文档，
+   上一页的 scrollY 被带过来。修：新进 `top: 0`，后退/前进才还给 `savedPosition`。
+4. **秩 1 点双标图弹橙色警告**：那**不是 bug**（S=1 数学上不存在二维双标图，
+   正是该模板要教的东西），但把合法空白报成故障是设计 bug。
+   修：`chartNote` 计算属性 + `ChartPanel` 的 `note` 入参（`v-else-if` 渲染 `.chart-empty`），
+   合法空白走图区说明且零警告；秩>=2 却真缺 U/V 仍必须 `fail()` 开口。
+   两个实现坑已经写进注释：chartNote 必须是计算属性而不是 renderChart 里写的状态
+   （切 tab 时 DOM 要同帧，否则量不到容器）；容器用 v-else-if 而不是 v-show
+   （v-show 期间 display:none，下次切回来反而变成真 zero-size 故障）。
+5. **自查出的第三个 bug**：模板卡片插值用了 `tpl.spec.trueRank` / `.covariates` /
+   `.weakResponse`——三个键**全不存在**（真实秩叫 `S`、协变量在 `expect.covariates`、
+   弱响应是 `expect.weak_response_index`），所以卡片当着用户面写 `undefined`；
+   而 smallN 故意不声明 rank_selected，硬套旧写法会写「选型回到 S=undefined」。
+   修：`tplShapeLine` / `tplExpectLine` 两个计算属性，只说声明过的判据。
+6. **分析后默认图**：旧代码 `rank_selected >= 2 ? 'selection' : 'cvHeat'` ——
+   那是在绕开双标图，可双标图本就不是默认页；结果是真实秩 1 / 小样本跑完直接跳到
+   CV 热图，用户找不到主图。现在 `defaultChartTab()` 永远返回声明里的第一张。
+7. **下载模板文件名**：数据一直跟着 `selectedTplId` 走，但六份设计下出来的文件
+   全同名。现在 `GMR4 数据模板_时间戳_rank1.xlsx`，逐模板断言文件名与内容同源。
+
+手测样本生成器（脚本入库、产物进 `data/`，data/ 被 gitignore）：
+`node r-scripts/tools/make_gmr4_import_fixture.mjs` → 五份真 xlsx（ranks 手填 /
+ranks 留空验不残留 / ranks 越界验开口 / lambda 只两档 / 分隔符带空格），
+每份的“预期”都是脚本实测出来的，不是猜的。
+
+本会话的变异记录（每条新断言都见过红）：
+- 两键都缺 / 只缺 lambdasStr / 只缺 ranksStr / ranksStr 改成条件写 → 2/1/1/1 红
+- 退回旧 rank1 模板 → 3 红；expect 加装饰品键 → 2 红；删 biplot 秩守卫 → 4 红
+- 拿旧版抽取脚本跑新断言 → 1 红（手工块被抹）
+- box-sizing / scrollBehavior / 卡片旧插值 / legit-empty 安静分支 / ChartPanel note 通道
+  → 各 1 红（删 note 通道时“真缺数据仍要开口”那条仍绿，两条确实各看各的）
+- #app 写回居中 / Home 删居中 / 外壳删左对齐 → 各 1 红；默认图退回三元 +
+  defaultChartTab 改返第二张 → 1 + 6 红
+
 ## 这个项目的硬规矩（踩过的坑，别再踩）
 
 - 断言写完必须**看它红一次**，否则它可能在给 bug 发绿卡。
-- python 的 `str.replace` 不报错就是没落地：改完必须自己 verify 结果（上一会话栽了 3 次）。
+- 源码层断言（“某某旧写法不许回来”）比对前必须**剥掉注释**：修复说明里往往会引用
+  旧写法原形，不剥就是误报（本轮真实地误报了一次）。
+- 脚本改文件先想清楚行尾：working tree 是 CRLF，python 拿 `\n` 去拼去匹配会
+  静默不落地（本轮又造一次，靠“断言没红”发现的）。改完必须 grep 回读。
+- 对齐类问题先想**继承**再想规则：按 `h1 {` 搜不到不等于不存在，
+  `#app` 这种根容器上的 text-align 会广播给整棵树。
+- `max-width` 在没有 box-sizing reset 的仓里算的是**内容宽**：
+  padding + border 都要算到总宽里去，不然“同宽”的两块卡片实际差 76px。
+- python 的 `str.replace` 不报错就是没落地：改完必须自己 verify 结果（本项目已栽 4 次）。
+  具体到行尾：working tree 是 CRLF，拿 `\n` 去拼/去匹配会静默不改（本轮靠“断言应该红却没红”才发现）。
+  真正可信的确认只有两种：grep 回读、以及看预期该红的断言真的红了。
 - 测试里用 `comp.methods` 全量覆盖 vm 时，桩（`notify`）必须**后置**，否则被真方法顶掉。
 - 不要用不存在的测试文件名跑套件（`MODULE_NOT_FOUND` 会被误读成回归）。
-- 脚本改文件的坑：**补一行“读回 + grep 确认”比什么打印都可信**。本会话用 python 改
-  `gmr4SheetSpec.js` 四次（包括三个变异），每次靠“测试行为变了”而非“脚本报成功”来确认落地。
 - 模板的 `expect` 必须是**今天重跑出来的事实**：隔了一天引擎/生成器一改，它就是愿望。
   只有默认模板被回归网兜住 = 其余五个可以随时劣化（rank1 就是这么假的）。
 - 矩阵方向、`String('')`→`Number`→`0`、"方阵 ≠ 距离矩阵"这三类形状假设，

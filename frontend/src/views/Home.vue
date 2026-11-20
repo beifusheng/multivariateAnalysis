@@ -323,6 +323,10 @@ export default {
   min-height: 100vh;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 40px 20px;
+  /* Home 就是英雄页 + 卡片网格，视觉上一直是居中的。以前这个居中来自
+     global.less 里 #app { text-align: center }（全局广播，四个分析页也被它带走），
+     现在拿掉广播、把它写回真正需要居中的这一页 —— 同样的画面，不同的作用域。 */
+  text-align: center;
 }
 
 /* 英雄区域 */

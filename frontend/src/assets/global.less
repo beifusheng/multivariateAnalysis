@@ -1,8 +1,14 @@
+/* 应用根容器：只放字体与颜色。
+   这里**过去写着 text-align: center** —— 那不是"某条规则"，而是一条会顺着 DOM
+   继承给整棵组件树的默认值：四个分析页的 h1/p、表格单元格、说明文字全被它拽成居中，
+   而任何人按 `h1 {` 或 "text-align" 去搜都搜不到来源（症状就是"页头莫名其妙居中"）。
+   要居中的页自己声明（Home 的 .home-container 就带着这条），分析页由
+   components/r-analysis/r-analysis.css 的 .ra-shell 显式左对齐。
+   别把 text-align 再写回这里。 */
 #app {
   font-family: Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-align: center;
   color: #2c3e50;
   height: 100%;
 }
