@@ -169,6 +169,11 @@ export function gmr4ToFormPatch(fields) {
     const nums = (v) => String(v == null ? '' : v).split(/[,，\s]+/).map((x) => String(x).trim()).filter(Boolean).map(Number).filter((x) => Number.isFinite(x));
     if (kv.ranks) patch.ranks = nums(kv.ranks);
     if (kv.lambdas) patch.lambdas = nums(kv.lambdas);
+    // ranks/lambdas 是给"程序化取参数"用的数组；表单认的是字符串字段 ranksStr/lambdasStr。
+    // 只发数组的话 Object.assign(this.form, patch) 写进了表单里不存在的属性，
+    // 导入后界面参数框永远是空的（用户报的「填入表单没反应」的第二半）。
+    patch.ranksStr = String(kv.ranks || '');
+    patch.lambdasStr = String(kv.lambdas || '');
     if (kv.kfold) patch.kfold = nums(kv.kfold)[0];
     if (kv.seed) patch.seed = nums(kv.seed)[0];
   }

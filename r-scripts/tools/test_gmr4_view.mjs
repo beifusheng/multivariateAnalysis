@@ -375,6 +375,24 @@ console.log('\n=== 9. 导入：真 xlsx 走视图函数（两轮都没抓到的�
       vm2.importError === '' && vm2.importTabs.length === 3 && vm2.checks.y.q === 6 &&
         vm2.form.zStr === '' && vm2.checks.z.empty,
       JSON.stringify([vm2.importError, vm2.importTabs && vm2.importTabs.length, vm2.checks.y.q]));
+    // 模板的 ranks 本来就留空（初值也是 ''，那空断言分不出「填对了」和「根本没填」），
+    // 所以 ranksStr 这条键只能靠一份手填了 ranks 的表来验 —— 否则它跟 lambdasStr 一样会静默失效。
+    const withRanks = spec.gmr4TemplateSheets('lowrank3').map((sh) => (
+      sh.name === '模型参数'
+        ? { ...sh, aoa: sh.aoa.map((r) => (r[0] === 'ranks' ? ['ranks', '1,2,3'] : r)) }
+        : sh
+    ));
+    const vm3 = makeVm();
+    await vm3.handleFileChange(mkFile(withRanks, 'hand-ranks.xlsx'));
+    vm3.applyImport();
+    check('导入填 ranksStr（手填 ranks=1,2,3 → 表单 ranksStr 与 numList 都要跟上）',
+      vm3.form.ranksStr === '1,2,3' && vm3.numList(vm3.form.ranksStr).join(',') === '1,2,3',
+      JSON.stringify([vm3.form.ranksStr, vm3.numList(vm3.form.ranksStr)]));
+    await vm3.handleFileChange(mkFile(spec.gmr4TemplateSheets('lowrank3'), 'blank-ranks.xlsx'));
+    vm3.applyImport();
+    check('ranks 留空的表再导入同一个表单：上一次的 1,2,3 必须被清掉（缺 ranksStr 键就残留）',
+      vm3.form.ranksStr === '' && vm3.numList(vm3.form.ranksStr).length === 0,
+      JSON.stringify([vm3.form.ranksStr]));
     check('视图里不再调用 previewFromFields（它对行优先表只能返回空数组）',
       !/previewFromFields\(/.test(viewSource), '出现即说明又用回了那个只认 {matrix,species} 的函数');
   }

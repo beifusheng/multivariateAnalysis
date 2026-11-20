@@ -4,7 +4,10 @@
 上一会话最后一个提交：`6743b51 fix(gmr4): 图表空白的收口`（本地领先 origin 18 个提交）。
 **工作区有未提交改动**，接手第一件事先 `git diff`（约 +107/−3，涉及下面三个文件）。
 
-## 待办：就一行
+> **本会话（11-20）已完成下面那条待办**，变异验证也做了，记录在 §待办 末尾。
+> 仍未闭环的只有两条：页头居中的全局裸 `h1` 规则来源、六个模板逐个真跑对账。
+
+## 待办：就一行 —— ✅ 已修（提交见 `git log` 的 `fix(gmr4): 导入参数进不了表单`）
 
 `frontend/src/utils/gmr4SheetSpec.js` 的 `gmr4ToFormPatch()` 返回对象里补两个键：
 
@@ -20,7 +23,7 @@ lambdasStr: String(kv.lambdas || ''),
 改完应看到：
 
 ```
-node r-scripts/tools/test_gmr4_view.mjs    # 59/1 -> 60/0
+node r-scripts/tools/test_gmr4_view.mjs    # 实测 61/1 -> 62/0（新增两条 ranksStr 后 64/0）
 node r-scripts/tools/test_gmr4_spec.mjs    # 40/0
 for t in r-scripts/tools/test_*.mjs; do node $t >/dev/null 2>&1 || echo FAIL $t; done
 cd frontend && npm run build
@@ -29,6 +32,24 @@ cd frontend && npm run build
 全绿后提交。**提交信息请保留这条脉络**：用户报的「导入数据填入表单没反应」不是一个 bug，
 是两个叠在一起 —— ①预览返回 0 个 tab（于是 `apply` 被 `:disabled="!tabs.length"` 按住）
 ②补丁键名对不上表单字段名。只修 ①，用户仍然看不见参数。
+
+### 本次落地的实况（含变异验证，别只信"64 绿"）
+
+- 补的就是上面那两行；`patch.ranks/lambdas`（数组）保留，因为 `test_gmr4_spec` 靠它断言
+  「ranks 留空 = 不传」「lambdas 6 档」。
+- **ranksStr 原本没有任何能红的断言**（模板 ranks 留空 → 初值 `''`、期望值 `''`，永远分不出
+  "填对了"和"根本没填"）。新增两条：手填 `ranks=1,2,3` 的表 → 表单真的收到；
+  再导入一份 ranks 留空的表 → 旧值必须被清掉（不残留）。
+- 四个变异，每个都看到对应的红：
+  | 变异 | 结果 |
+  |---|---|
+  | 两键都缺 | 2 红（参数同步填入 / 导入填 ranksStr） |
+  | 只缺 lambdasStr | 1 红（参数同步填入） |
+  | 只缺 ranksStr | 1 红（导入填 ranksStr） |
+  | ranksStr 改成 `if (kv.ranks)` 才写 | 1 红（再导入留空表时 `["1,2,3"]` 残留） |
+- 恢复后 `test_gmr4_view` 64/0、`test_gmr4_spec` 40/0、18 个套件全绿、`npm run build` ✓。
+- 脚本改文件的坑又应验了一次：`edit` 报"成功"不代表内容如你所想，
+  上面的表格是靠**读回文件 + 真跑四个变异**得到的，不是靠打印。
 
 ## 已修完、已验证的部分（别重复劳动）
 
