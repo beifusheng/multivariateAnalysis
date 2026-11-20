@@ -334,11 +334,11 @@ export function gmr4TemplateSheets(id) {
     .concat(M.map((row, i) => [ids[i]].concat(row)));
   const zSheet = sp.expect.covariates
     ? { name: '协变量Z', aoa: [['Z', 'Z1']].concat(ids.map((sid, i) => [sid, round4(Z[i])])) }
-    : { name: '协变量Z', aoa: [['说明'], ['本设计不含协变量：留空即不做校正']] };
+    : null;   // 没有协变量就不发这张表：两行的"说明表"会被解析成 1 行数据
   return [
     { name: '预测变量X', aoa: withIds(X, 'X') },
     { name: '响应变量Y', aoa: withIds(Y, 'Y') },
-    zSheet,
+    ...(zSheet ? [zSheet] : []),
     { name: '模型参数', aoa: [['参数', '值'], ['ranks', String(sp.ranks || '')],
       ['lambdas', String(sp.lambdas || '')], ['kfold', String(sp.kfold)], ['seed', String(sp.seed)]] }
   ];

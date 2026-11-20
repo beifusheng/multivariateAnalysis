@@ -199,7 +199,7 @@
             </table>
           </div>
 
-          <ChartPanel :tabs="chartTabs" v-model:active="activeChart" :ready="!!analysisResult"
+          <ChartPanel ref="chartPanel" :tabs="chartTabs" v-model:active="activeChart" :ready="!!analysisResult"
             :empty-text="`当前结果不足以画这张图（例如秩只有 1 时没有双标图可看）`" />
         </ResultCard>
         </div>

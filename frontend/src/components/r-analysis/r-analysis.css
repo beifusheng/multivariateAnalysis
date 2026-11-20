@@ -709,3 +709,13 @@
   border: 1px dashed #dcdfe6;
   border-radius: 8px;
 }
+
+/* 页头文字必须左对齐（实机反馈：GMR⁴ 的 page-title/page-subtitle 看起来居中）。
+   仓库里查不到居中来源：全局样式没有 text-align:center，本文件里三条 center 分别属于
+   .stat-item / .headline-left / .chart-empty，都不作用于页头。所以这条是**显式兜底**，
+   不是根因修复 —— 若仍居中，请用开发者工具看该元素的实际规则来源（Computed -> 谁赢了）。 */
+.ra-shell .page-header,
+.ra-shell .page-header .page-title,
+.ra-shell .page-header .page-subtitle {
+  text-align: left;
+}
