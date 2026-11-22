@@ -116,7 +116,12 @@
             <p class="method-desc">PERMANOVA 扩展 - 中介分析</p>
             <div class="method-tags">
               <el-tag size="small" type="success" effect="dark">✅ 可用</el-tag>
+              <el-tag size="small" effect="plain">直接 / 间接效应</el-tag>
+              <el-tag size="small" effect="plain">25 套设计模板</el-tag>
             </div>
+          </div>
+          <div class="card-action">
+            <el-button type="primary" size="small" round>立即使用 →</el-button>
           </div>
         </el-card>
 
@@ -132,6 +137,8 @@
             <p class="method-desc">多响应降秩回归（Reduced-Rank Regression + 岭正则，交叉验证选秩）</p>
             <div class="method-tags">
               <el-tag size="small" type="success" effect="dark">✅ 可用</el-tag>
+              <el-tag size="small" effect="plain">对齐闭式 OLS / 岭解</el-tag>
+              <el-tag size="small" effect="plain">6 套设计模板</el-tag>
             </div>
           </div>
           <div class="card-action">
@@ -151,6 +158,8 @@
             <p class="method-desc">贝叶斯扩展冗余分析（直接/间接/总效应 + Borcard 方差分解）</p>
             <div class="method-tags">
               <el-tag size="small" type="success" effect="dark">✅ 可用</el-tag>
+              <el-tag size="small" effect="plain">对齐 vegan::rda</el-tag>
+              <el-tag size="small" effect="plain">6 套设计模板</el-tag>
             </div>
           </div>
           <div class="card-action">
@@ -173,6 +182,9 @@
               <el-tag size="small" effect="plain">对齐 vegan::adonis2</el-tag>
               <el-tag size="small" effect="plain">26 套设计模板</el-tag>
             </div>
+          </div>
+          <div class="card-action">
+            <el-button type="primary" size="small" round>立即使用 →</el-button>
           </div>
         </el-card>
       </div>

@@ -10,6 +10,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+// 要拿真模板数量，所以必须走跟其它套件同一个前端加载器（避开“手写一个数”）
+import { loadFrontendUtils } from './load_frontend_utils.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -75,6 +77,9 @@ const parsed = cards.map((b) => {
     // 判据要打在真正生效的那一层：卡片里的 HTML 注释提到这几个字，
     // 不代表标签还在 —— 先剥注释再测（本轮就这么误报过一次）。
     algoTag: /算法未验收/.test(b.replace(/<!--[\s\S]*?-->/g, '')),
+    // 能力标签（effect="plain"）：先剥注释再取，否则注释里的尖括号会把匹配带偏。
+    plainTags: [...b.replace(/<!--[\s\S]*?-->/g, '')
+      .matchAll(/effect="plain">\s*([^<]+?)\s*<\/el-tag>/g)].map((m) => m[1].trim()),
     block: b
   };
 });
@@ -185,6 +190,59 @@ for (const [c, script] of [[gmr, 'gmr4.R'], [era, 'bayesian_era_mediation.R']]) 
     check(`${c.name}：${script} ${stub ? '是占位实现 -> 卡片必须「开发中」' : '已无占位标记 -> 该重新验收了'}`,
       stub ? c.devTag : true, `stub=${stub}, devTag=${c.devTag}`);
   }
+}
+
+console.log('\n=== 3e) 卡片上的能力标签必须真有其事 ===');
+{
+  // 上一轮用户指出：五张卡片里只有两张带能力标签，其余三张光秃秃只有一个「可用」。
+  // 只把文案补齐不够——这些标签里含**可验的数字与锦点**（25/26/6 套模板、对齐 vegan::adonis2/rda），
+  // 它们会腐烂：GMR⁴ 的 rank1 模板就写着“80 样本”而 spec 其实是 40。所以标签必须能被对账。
+  const counts = await loadFrontendUtils(['medTemplates', 'nonrandomTemplates', 'gmr4SheetSpec', 'eraSheetSpec']);
+  const REAL_COUNT = {
+    'PERMANOVA-med': counts.medTemplates.MED_TEMPLATE_COUNT,
+    'Non-random PERMANOVA': counts.nonrandomTemplates.NR_TEMPLATE_COUNT,
+    'GMR⁴': counts.gmr4SheetSpec.GMR4_TEMPLATE_COUNT,
+    'Bayesian ERA': counts.eraSheetSpec.ERA_TEMPLATE_COUNT
+  };
+  // 卡片上的“对齐 X”必须能在对应验收脚本里找到 **X 本词**。
+  // 上一版只问“脚本里有没有 rda/adonis2”，于是卡片改成“对齐 vegan::cca”照样绿
+  // —— 那是在验脚本，不是在验卡片说的对不对。
+  const ANCHOR_EVIDENCE = {
+    'Non-random PERMANOVA': 'r-scripts/tools/verify_nonrandom_engine.R',
+    'Bayesian ERA': 'r-scripts/tools/verify_era_engine.R',
+    'GMR⁴': 'r-scripts/tools/verify_gmr4_engine.R'
+  };
+  const variants = (tok) => [tok, tok.replace(/^[a-zA-Z]+::/, ''), tok.replace(/^vegan::/, '')]
+    .filter((v, i, a) => v && a.indexOf(v) === i);
+  for (const c of parsed) {
+    check(`${c.name}：带两个能力标签（不许只剩「可用」一个光标签）`,
+      c.plainTags.length === 2, `[${c.plainTags.join(' | ')}]`);
+    // 结构也要一致：上一轮顺手发现 PERMANOVA-med 连「立即使用」按钮都没有，
+    // 另四张都有 —— 同一排卡片长得不一样，用户会以为它还没做完。
+    check(`${c.name}：可用卡片都带「立即使用」按钮（同一排卡片不许结构不齐）`,
+      !c.availTag || /立即使用/.test(c.block), c.availTag ? '标了可用却没有按钮' : 'n/a');
+    const tplTag = c.plainTags.find((x) => /(\d+)\s*套设计模板/.test(x));
+    if (tplTag) {
+      const n = Number(/(\d+)/.exec(tplTag)[1]);
+      const real = REAL_COUNT[c.name];
+      check(`${c.name}：「${n} 套设计模板」必须等于 spec 真实数量`,
+        real != null && n === real, `卡片写 ${n}，实际 ${real}`);
+    }
+    const anchorTag = c.plainTags.find((x) => /^对齐/.test(x));
+    if (anchorTag) {
+      const file = ANCHOR_EVIDENCE[c.name];
+      const src = file ? read(file) : '';
+      const toks = anchorTag.replace(/^对齐/, '').split(/[\/、,，\s]+/).filter((t) => t.length > 1);
+      const found = toks.filter((tk) => variants(tk).some((v) => src.includes(v)));
+      check(`${c.name}：「${anchorTag}」里说的东西必须真出现在 ${file || '（未登记）'} 里`,
+        !!file && toks.length > 0 && found.length === toks.length,
+        file ? `只能找到 ${found.length}/${toks.length} 个：${toks.join(' , ')}` : '没有登记的验收脚本');
+    }
+  }
+  // PERMANOVA 本身没有模板体系，所以它只能写定性描述，不许蹭“N 套设计模板”
+  const pm = parsed.find((x) => x.name === 'PERMANOVA');
+  check('PERMANOVA：没有设计模板体系就不许写“N 套设计模板”（免得数字无人可校）',
+    !!pm && !pm.plainTags.some((t) => /套设计模板/.test(t)), pm && pm.plainTags.join(' | '));
 }
 
 console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);
