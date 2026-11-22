@@ -825,7 +825,9 @@ export default {
         return lib;
       } catch (e) {
         throw new Error('Excel 组件加载失败：' + ((e && e.message) || e) +
-          '。若在用 npm run dev，多半是依赖缓存被改写 —— 刷新页面（Ctrl+F5）再点一次即可。');
+          '。按顺序试：① 刷新页面（Ctrl+F5）再点一次；② 仍然失败就重启 npm run dev —— ' +
+          '若 dev 服务内存里的依赖元数据与磁盘不一致（例如 node_modules/.vite 被删过），' +
+          '只有重启才会重建，光刷新没有用。');
       }
     },
 
@@ -837,7 +839,7 @@ export default {
         ({ saveAs } = await import('file-saver'));
       } catch (e) {
         throw new Error('保存组件加载失败：' + ((e && e.message) || e) +
-          '。若在用 npm run dev，刷新页面（Ctrl+F5）再点一次即可。');
+          '。先刷新页面（Ctrl+F5）；仍然失败就重启 npm run dev —— 依赖元数据与磁盘不一致时只有重启会重建。');
       }
       if (typeof saveAs !== 'function') throw new Error('file-saver 没有导出 saveAs');
       saveAs(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), filename);

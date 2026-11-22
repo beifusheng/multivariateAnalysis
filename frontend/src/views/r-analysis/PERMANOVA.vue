@@ -1104,8 +1104,22 @@ export default {
     },
 
     async xlsx() {
-      const m = await import('xlsx');
-      return m.utils ? m : m.default;
+      // 动态 import 失败要说得出**可操作**的一句话。实机现象是
+      // 「Failed to fetch dynamically imported module: .../.vite/deps/xlsx.js」：
+      // dev 模式下那份依赖缓存与服务的内存元数据不一致（被我 rm 掉过，也被跑测试的
+      // 进程改写过的历史）时，浏览器手里那个引用取不到文件。
+      // 注意顺序：光刷新不一定够 —— 元数据与磁盘不一致时只有重启 dev 才重建。
+      try {
+        const m = await import('xlsx');
+        const lib = m.utils ? m : m.default;
+        if (!lib || !lib.utils) throw new Error('xlsx 模块没有预期导出');
+        return lib;
+      } catch (e) {
+        throw new Error('Excel 组件加载失败：' + ((e && e.message) || e) +
+          '。按顺序试：① 刷新页面（Ctrl+F5）再点一次；② 仍然失败就重启 npm run dev —— ' +
+          '若 dev 服务内存里的依赖元数据与磁盘不一致（例如 node_modules/.vite 被删过），' +
+          '只有重启才会重建，光刷新没有用。');
+      }
     },
 
     async saveJson(filename, data) {
@@ -1116,7 +1130,7 @@ export default {
         ({ saveAs } = await import('file-saver'));
       } catch (e) {
         throw new Error('保存组件加载失败：' + ((e && e.message) || e) +
-          '。若在用 npm run dev，刷新页面（Ctrl+F5）再点一次即可。');
+          '。先刷新页面（Ctrl+F5）；仍然失败就重启 npm run dev —— 依赖元数据与磁盘不一致时只有重启会重建。');
       }
       if (typeof saveAs !== 'function') throw new Error('file-saver 没有导出 saveAs');
       saveAs(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), filename);

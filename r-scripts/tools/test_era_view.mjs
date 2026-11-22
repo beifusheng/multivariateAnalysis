@@ -403,6 +403,42 @@ console.log('\n=== 5. 图表构造器（E）===');
       vmFail._notices.length >= 2, JSON.stringify(vmFail._notices.map((n) => n.type)));
     check('xlsx() 的失败文案给出可操作的下一步（刷新 / Ctrl+F5），不是只抛原始错误',
       /Ctrl\+F5|刷新页面/.test(viewSource) && /npm run dev/.test(viewSource), '');
+    /* 实机反馈：只写"刷新页面即可"是不够的 —— dev 服务内存里的依赖元数据与磁盘不一致时
+       （node_modules/.vite 被删过）刷新永远没反应，唯一解法是重启服务。
+       判据必须打在**具体方法体**上：上一版我写的是"整个文件里出现过这句话"，
+       结果 saveJson() 里也有同一句，把 xlsx() 的文案删掉断言照样绿 —— 为错理由而绿。*/
+    // 找方法体时不用 '\n' 这种转义：这个文件是脚本生成的，上一版就是被转义层把
+    // '\n    },' 变成了真换行，当场语法坏掉。用字符码最稳。
+    const NL = String.fromCharCode(10);
+    const methodBody = (src, name) => {
+      const i = src.indexOf('    async ' + name + '(');
+      if (i < 0) return '';
+      const j = src.indexOf(NL + '    },', i);
+      return src.slice(i, j < 0 ? i + 900 : j);
+    };
+    const xlsxBody = methodBody(viewSource, 'xlsx');
+    const jsonBody = methodBody(viewSource, 'saveJson');
+    check('xlsx() 方法体内真的有 try/catch（不是靠外层兜）',
+      /try \{/.test(xlsxBody) && /catch \(e\)/.test(xlsxBody), xlsxBody.slice(0, 80));
+    check('xlsx() 的文案同时给出刷新与"重启 npm run dev"',
+      /刷新页面/.test(xlsxBody) && /重启 npm run dev/.test(xlsxBody), xlsxBody.slice(-180));
+    check('saveJson() 方法体内真的有 try/catch，且文案也给出重启这一步',
+      /try \{/.test(jsonBody) && /catch \(e\)/.test(jsonBody) && /重启 npm run dev/.test(jsonBody),
+      jsonBody.slice(0, 90));
+
+    // 同类处理必须五个视图一致：历史上 PERMANOVA 有 try/catch 而另三个没有，
+    // 于是"点了没反应"只在部分模块出现，用户会以为是新模块的 bug。
+    const views = ['Bayesian_ERA', 'GMR4', 'Nonrandom_PERMANOVA', 'PERMANOVA', 'PERMANOVA_Med'];
+    const badViews = [];
+    for (const v of views) {
+      const src = fs.readFileSync(path.join(FRONTEND, 'src/views/r-analysis', v + '.vue'), 'utf8');
+      const xb = methodBody(src, 'xlsx');
+      const jb = methodBody(src, 'saveJson');
+      if (!/Excel 组件加载失败/.test(xb) || !/重启 npm run dev/.test(xb)) badViews.push(v + ':xlsx');
+      if (!/重启 npm run dev/.test(jb)) badViews.push(v + ':saveJson');
+    }
+    check('五个视图的 xlsx()/saveJson() 失败处理一致（不许只补新模块，留下同类故障）',
+      badViews.length === 0, badViews.join(', ') || '一致');
   }
 }   // §5 的块尾：§6/§7/§8 都嵌在它的 else 里，这里才收口
 
