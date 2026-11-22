@@ -96,13 +96,13 @@ for (const r of liveRoutes) {
   if (hit) check(`卡片「${hit.name}」没有误标开发中`, !hit.devTag);
 }
 
-// 3c) 注释掉的路由（GMR⁴ / Bayesian ERA）说明它们确实还没上线，首页不得出现同名可用卡片
-// GMR⁴ 今天上线了，所以这条不能再写死 >=2：
-// 断言要盯着"还剩哪个没上线"，而不是"注释有几条"，否则上线一个就要来改一次测试。
-check('Bayesian ERA 仍留在 routerMap 注释里（还没上线）', /bayesian-era/.test(commentedRoutes.join('|')),
-  commentedRoutes.join(','));
-check('gmr4 不再以注释形式留在路由表里（已上线就不该两头都占着）',
-  !/gmr4/.test(commentedRoutes.join('|')), commentedRoutes.join(','));
+// 3c) 注释里的路由 = “还没上线”的清单。GMR⁴ 与 Bayesian ERA 先后上线后，
+// 断言要么逐模块点名（上线一个就要来改一次测试，而且改测试的人很容易干脆删掉了事），
+// 要么盯住真正的不变量。这里选后者：r-analysis 路由表里不该再有任何注释着的条目 ——
+// 注释着的条目会让下一个人以为还有模块没做，而它实际上只是没擦干净的旧状态。
+check('routerMap 里不再有任何被注释掉的 r-analysis 路由（上线了就把它那行删掉）',
+  commentedRoutes.filter((x) => /r-analysis/.test(x)).length === 0,
+  commentedRoutes.join(' | ') || '（干净）');
 
 /** 从 Home.vue 的 showComingSoon 映射里取某个模块的"缺什么"说明 */
 function homeTipOf(name) {

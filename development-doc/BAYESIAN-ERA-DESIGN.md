@@ -369,3 +369,57 @@ Y 侧：  y_q = Xc β_q + Mc ω_q + ε_q ,  ε_q ~ N(0, τ_q² I)
 
 §10 第 4 步：视图 `Bayesian_ERA.vue`（样式规范照 `test_gmr4_view.mjs` 的断言清单原样搬）
 + 路由注册 + 首页翻牌（`test_home_status.mjs` 会在视图文件出现的那一刻要求卡片转为可用）。
+
+## 14. §10 第 4 步已完成：视图、路由、首页翻牌（模块上线）
+
+新增 `frontend/src/utils/eraCharts.js`（4 张图）与 `frontend/src/views/r-analysis/Bayesian_ERA.vue`，
+`r-scripts/tools/test_era_view.mjs`（86 项，断言类别照 `test_gmr4_view.mjs` 原样搬），
+路由 `/r-analysis/bayesian-era` 取消注释并注册，首页卡片由 🚧 开发中 → ✅ 可用。
+`npm run build` 产出独立 chunk `Bayesian_ERA-*.js` ✓（说明路由切分真的生效，不只是编译通过）。
+
+### 四张图与"为什么没有第五张"
+
+| tab | 画什么 | 关键实现点 |
+| --- | --- | --- |
+| forest | 每格直接/间接/总三块区间 + 0 参考线 | y 用**数值轴 + 格子序号 ± 0.3 偏移**，category 轴不支持子位置；刻度 formatter 只给整数格子名，半格留空 |
+| density | 逐格间接效应后验密度（ridge） | 高斯核 + Silverman 带宽（`min(sd, iqr/1.34)`），只用 base 数学不引依赖 |
+| partition | 逐响应 X 独有 / X∩M / M 独有 / 残差堆叠柱 | 负分量在 tooltip 里说"这是共线导致，不是解释力"，不藏 |
+| diag | ESS × split-R̂ 散点 + 两条阈值线 | 越线的格子标红；说"这一格不该拿来下结论" |
+
+**trace 图暂时不做**：引擎的 `draws` 是在池化的抽样矩阵上等距降采样的，链结构已经丢了。
+画 trace 需要改契约（按链存抽样），而不是拿混合链的序列冒充四条链 ——
+后者会画出一张"看上去没问题"的假图，比没有更糟。R̂ 本来就是从链内对半分裂算的，
+此刻它是可信的替代证据。（待办：若要 trace，先在引擎里输出 `draws_by_chain`。）
+
+### 这一步的四个 bug（三个还是测试/工具自己的）
+
+1. **抽样矩阵朝向读反**：引擎里 `draws.ind` 已经 `t()` 过，是 **格子 × 抽样**；
+   我按 抽样 × 格子 读，于是想画 600 条曲线、每条只有 4 个点，全被"每行 ≥20 点"门槛拦下，
+   最后**静默返回 null**。方向错在数据结构上不会报错，只会产出看上去合理的空结果。
+   现在 builder 里有朝向校验：行数与 `cell_labels` 不符就不画。
+2. **我给这条守卫写的反例本身是假的**：拿转置矩阵当反例时，每行只剩 4 个点，
+   会被 20 点门槛"顺手"拦下 —— 守卫删掉它照样返回 null，断言什么也没验。
+   换成"行数与格子数不符（每行点数仍足够）"才是只有守卫能拦的情形。
+   **"为错理由而绿"这一类，本轮已经是第四次**（另外三次：坏尺子过了单向阈值、
+   quantile 自己报错顶掉了我们的守卫、两个变异同时生效互相遮掩）。
+3. **测试桩的覆盖顺序**：`makeVm` 里我先把 `notify` 桩挂上，再 `bind` 全部 methods，
+   真方法（调 ElMessage，SSR 里静默无事）把桩顶掉 → `_notices` 永远是空数组，
+   所有"必须开口"的断言都在比不存在的元素、然后 TypeError。
+   （GMR⁴ 那份 harness 早就踩过并写了注释，我重写时又踩一遍 —— 注释要读，不是装饰。）
+4. **monkey-patch 打在另一份模块实例上**：我改 `eraCharts.ERA_CHART_BUILDERS.forest` 想模拟
+   builder 抛异常，但视图是 vite 加载的、`loadFrontendUtils` 是 esbuild 加载的，
+   **两份实例**，改的是没人读的副本。改用"把 `effects.direct` 抹掉"从数据侧逼出异常。
+
+### STATUS 语义这次真的用上了
+
+`test_home_status.mjs` 现在的规则是：可用性 ⇔ 视图文件存在；标签/说明 ⇔ STATUS。
+本轮建 `Bayesian_ERA.vue` 的那一瞬间它就变红要求翻卡片，我把卡片、路由、
+`showComingSoon` 的说明表一起改了；顺便把"某个模块仍被注释在路由表里"这条
+逐模块点名的断言，换成通用规则"**路由表里不许再有任何注释掉的 r-analysis 路由**"
+—— 上线一个就要改一次测试的断言，最后往往是被删掉而不是被更新。
+
+### 全套现状
+
+R 侧 `verify_era_engine.R` 40/40；node 侧 21 个套件无 FAIL
+（新增 `test_era_spec` 126、`test_era_view` 86、`test_era_diagnostics` 15）；`npm run build` ✓。
+四个模块全部上线，Bayesian ERA 是最后一个。

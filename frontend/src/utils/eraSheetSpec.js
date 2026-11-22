@@ -297,6 +297,20 @@ export function eraTemplateTruth(id) {
   return { p, k, q, direct: flat(Bs), indirect: flat(ind), total: flat(Bs.map((row, j) => row.map((v, c) => v + ind[j][c]))) };
 }
 
+/**
+ * 下载文件名后缀用卡片上的中文名（与 GMR⁴ 同一处理由）：内部 id 界面上根本看不到，
+ * 六份模板都叫同一个名字的话，用户下三份就分不清谁是谁。
+ */
+export function eraTemplateFileTag(id) {
+  const tpl = ERA_TEMPLATE_MAP[id];
+  if (!tpl) return '';
+  const s = tpl.spec;
+  // 直接拿 label 的前半（“（” 之前）与 spec 里的维度：上一版这里用正则去抽四个数字，
+  // 而正则里写了个未转义的 `/` 直接把文件弄成语法错误 —— 能从数据里取的值就别去扫文字。
+  const name = String(tpl.label).split('（')[0].trim();
+  return `${name}_${s.n}n_${s.p}x${s.k}m_${s.q}y`;
+}
+
 const withIds = (ids, Mat, head) => [[head].concat(Mat[0].map((_, j) => `${head}${j + 1}`))]
   .concat(Mat.map((row, i) => [ids[i]].concat(row)));
 

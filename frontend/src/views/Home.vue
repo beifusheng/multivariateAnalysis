@@ -140,23 +140,22 @@
         </el-card>
 
         <!-- Bayesian ERA -->
-        <el-card 
-          class="method-card coming-soon-card" 
+        <el-card
+          class="method-card"
           shadow="hover"
-          @click="showComingSoon('Bayesian ERA')"
+          @click="navigateTo('/r-analysis/bayesian-era')"
         >
           <div class="method-card-content">
             <div class="method-icon">🎯</div>
             <h3 class="method-name">Bayesian ERA</h3>
-            <p class="method-desc">贝叶斯扩展冗余分析（含中介效应）</p>
+            <p class="method-desc">贝叶斯扩展冗余分析（直接/间接/总效应 + Borcard 方差分解）</p>
             <div class="method-tags">
-              <el-tag size="small" type="info" effect="dark">🚧 开发中</el-tag>
-              <!-- 「算法未验收」这张标签已经拿掉：r-scripts/bayesian_era_mediation.R
-                   现在是闭式共轭 Gibbs，过了 verify_era_engine.R 的 40 项（含 vegan::rda 锚点
-                   与后验对 OLS）。现在缺的只有界面与路由，继续挂着那张标签就是对外报假信息。 -->
+              <el-tag size="small" type="success" effect="dark">✅ 可用</el-tag>
             </div>
           </div>
-          <div class="ribbon">开发中</div>
+          <div class="card-action">
+            <el-button type="primary" size="small" round>立即使用 →</el-button>
+          </div>
         </el-card>
 
         <!-- Non-random PERMANOVA -->
@@ -273,9 +272,9 @@ export default {
     },
     
     showComingSoon(methodName) {
-      // 不只说“敬请期待”：把缺什么说清楚，否则用户会以为点了就能等到
+      // 不只说“敬请期待”：把缺什么说清楚，否则用户会以为点了就能等到。
+      // 四个模块现在都可用，所以表里不再留任何条目：留着就是“卡片可点了还有第二条路径”。
       const detail = {
-        'Bayesian ERA': '算法已验收（r-scripts/bayesian_era_mediation.R 闭式共轭 Gibbs，40 项校验含 vegan::rda 锚点与后验对 OLS），缺的是界面与路由，上线后这里就能点。'
       }[methodName] || '';
       this.$message({
         message: `${methodName} 功能开发中，敬请期待！${detail ? '\n' + detail : ''}`,
