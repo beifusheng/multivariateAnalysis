@@ -51,6 +51,12 @@ input_file <- args[1]; output_file <- args[2]; error_file <- args[3]
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
+# jsonlite 的 auto_unbox=TRUE 会把**长度 1 的向量**写成裸标量：q=1 时 r2$XM 变成 0.57，
+# 视图对它调 .reduce() 当场崩（本项目的老对头"退化形状"这次出现在 JSON 层，
+# 而且只在小模板上出现，大模板一切正常 —— 最阴的那种）。
+# 凡是"按格子 / 按响应"的数组一律 I() 钉成数组，长度 1 也不许降级。
+as_arr <- function(v) I(as.vector(v, mode = "numeric"))
+
 # ---- 数值内核：求逆一律 chol/backsolve，不用 solve() 裸解 ----
 # 病态设计矩阵上 solve() 会给出"看起来是个矩阵"的垃圾数；chol 失败当场报错，
 # 报错比垃圾数字好（本项目硬规定）。
@@ -269,12 +275,13 @@ tryCatch({
   # ---------------- 效应表（视图直接吃）----------------
   eff_block <- function(flat, ols) {
     iv <- hdi_matrix(flat, prob)
-    list(mean = colMeans(flat), sd = apply(flat, 2, stats::sd), median = apply(flat, 2, stats::median),
-         hdi_lo = iv["lo", ], hdi_hi = iv["hi", ],
-         prob_gt0 = colMeans(flat > 0),                 # 用后验概率说话，不造"贝叶斯 p 值"
-         rhat = as.numeric(split_rhat_matrix(as_chains(flat), cell_lab)),
-         ess  = as.numeric(ess_split_matrix(as_chains(flat), cell_lab)),
-         ols  = as.vector(ols))
+    list(mean = as_arr(colMeans(flat)), sd = as_arr(apply(flat, 2, stats::sd)),
+         median = as_arr(apply(flat, 2, stats::median)),
+         hdi_lo = as_arr(iv["lo", ]), hdi_hi = as_arr(iv["hi", ]),
+         prob_gt0 = as_arr(colMeans(flat > 0)),         # 用后验概率说话，不造"贝叶斯 p 值"
+         rhat = as_arr(as.numeric(split_rhat_matrix(as_chains(flat), cell_lab))),
+         ess  = as_arr(as.numeric(ess_split_matrix(as_chains(flat), cell_lab))),
+         ols  = as_arr(ols))
   }
   effects <- list(direct = eff_block(dir_flat, ols_dir),
                   indirect = eff_block(ind_flat, ols_ind),
@@ -282,7 +289,7 @@ tryCatch({
   # 总效应的频率派对照：Y~X 单侧回归（不含 M）。它与 dir+ind 的差别本身就是信息：
   # 差别大说明 M 参与了通路；这里只把它作为参照给出，不当判据。
   effects$total$ols_single_predictor_regression <-
-    as.vector(as_coef_mat(stats::lm.fit(Xc, Yc)$coefficients, p, q, "总效应 OLS 参照"))
+    as_arr(as_coef_mat(stats::lm.fit(Xc, Yc)$coefficients, p, q, "总效应 OLS 参照"))
 
   # ---------------- 方差分解（Borcard 三段式，逐响应 + 总体）----------------
   r2_of <- function(D) {
@@ -351,17 +358,22 @@ tryCatch({
     chains = chains, iterations = niter, thin = thin, kept_per_chain = Skeep,
     seed = seed, prior_lambda = prior_l, prob = prob,
     thresholds = list(rhat_max = RHAT_MAX, ess_min = ESS_MIN),
-    X_center = Xz$center, X_scale = Xz$scale, X_kept = Xz$keep,
-    M_center = Mz$center, M_scale = Mz$scale, M_kept = Mz$keep,
-    Y_center = Yz$center, Y_scale = Yz$scale, Y_kept = Yz$keep,
-    cell_labels = cell_lab,
+    X_center = as_arr(Xz$center), X_scale = as_arr(Xz$scale), X_kept = as_arr(Xz$keep),
+    M_center = as_arr(Mz$center), M_scale = as_arr(Mz$scale), M_kept = as_arr(Mz$keep),
+    Y_center = as_arr(Yz$center), Y_scale = as_arr(Yz$scale), Y_kept = as_arr(Yz$keep),
+    cell_labels = I(as.character(cell_lab)),
+
     effects = effects,
     direct_matrix = pm_dir, indirect_matrix = pm_ind, total_matrix = pm_dir + pm_ind,
-    variance_partition = part,
-    r2 = list(X = r2x, M = r2m, XM = r2xm),
+    variance_partition = list(
+      x_unique = as_arr(part$x_unique), m_unique = as_arr(part$m_unique),
+      shared = as_arr(part$shared), residual = as_arr(part$residual),
+      x_unique_total = part$x_unique_total, shared_total = part$shared_total,
+      m_unique_total = part$m_unique_total, residual_total = part$residual_total),
+    r2 = list(X = as_arr(r2x), M = as_arr(r2m), XM = as_arr(r2xm)),
     convergence = list(rhat_max = max(rhat_cells, na.rm = TRUE),
                        ess_min = min(ess_cells, na.rm = TRUE),
-                       rhat = rhat_cells, ess = ess_cells,
+                       rhat = as_arr(rhat_cells), ess = as_arr(ess_cells),
                        ok = !(length(bad_r) || length(bad_e))),
     identity_check = list(total_minus_parts = ident_res,
                           posterior_vs_ols_direct = dev_dir, posterior_vs_ols_indirect = dev_ind,
