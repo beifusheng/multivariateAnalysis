@@ -39,8 +39,18 @@ this_dir <- local({
   for (d in c("r-scripts", "./r-scripts", "../r-scripts")) {
     if (file.exists(file.path(d, "mcmc_diagnostics.R"))) return(normalizePath(d, mustWork = FALSE))
   }
-  stop("找不到 mcmc_diagnostics.R：Bayesian ERA 依赖它提供 R̂/ESS/区间的统一口径")
+  ""
 })
+# 这段解析发生在主 tryCatch **之前**：上一版这里直接 stop()，于是打包环境一旦找不到
+# 兄弟文件，进程带着 R 内部错误退出、error_file 根本没创建，前端只能显示"执行失败"。
+# 失败要失败得有名有姓：自己写 error 文件再以非零码退出。
+if (nchar(this_dir) == 0L) {
+  msg <- "[Bayesian ERA] 找不到 mcmc_diagnostics.R：Bayesian ERA 依赖它提供 R̂/ESS/区间的统一口径。请确认打包时 r-scripts 目录完整（该文件必须与本脚本同目录）。"
+  if (length(args) >= 3L) writeLines(msg, args[3])
+  cat(msg, "
+", file = stderr())
+  quit(status = 1)
+}
 source(file.path(this_dir, "mcmc_diagnostics.R"))
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -139,15 +149,35 @@ tryCatch({
     diagnostics <- c(diagnostics, sprintf(paste0("样本数只有 %d：区间宽度主要由先验撑着，",
                                                  "间接效应的方向都可能翻转，别把结论写成因果。"), n))
   }
-  # X 与 M 完全共线时直接与间接不可分离 —— 这是识别问题，不是收敛问题，要说清
-  rcond_side <- tryCatch({
-    D <- cbind(Xc, Mc)
-    min(svd(D, nu = 0L, nv = 0L)$d) / max(svd(D, nu = 0L, nv = 0L)$d)
-  }, error = function(e) NA_real_)
-  if (is.finite(rcond_side) && rcond_side < 1e-10) {
-    diagnostics <- c(diagnostics, paste0("X 与 M 几乎完全共线（最小奇异值比 < 1e-10）：",
-                                         "直接效应与间接效应在数学上不可分离，给出的区间会宽到没有意义。",
-                                         "这不是采样不够，是识别问题 —— 需要改变设计（比如增加 M 的测量时点）。"))
+  # 秩亏必须**当场拒绝**，不能只写进诊断。上一版这里只在 1e-10 以下加一条 diagnostics
+  # 然后继续跑 —— 用户拿一份 X2 = 2·X1 的数据（列成比例）得到的是
+  # 「需要TRUE/FALSE值的地方不可以用缺少值」，因为 lm.fit 给被挤掉的系数填了 NA，
+  # NA 流到后面的 `if (dev_dir > tol ...)` 才炸。一句没人看得懂的 R 内部错误，
+  # 比一句"这两列成比例，删掉它"坏得多。策略：完全秩亏=硬停（参数根本不可识别），
+  # 接近秩亏=开口但继续。三处比值各自算清楚，别笼统算一次 cbind(X,M) 就下结论。
+  rcond_of <- function(D) {
+    sv <- svd(D, nu = 0L, nv = 0L)$d
+    if (!length(sv) || max(sv) <= 0) return(0)
+    min(sv) / max(sv)
+  }
+  rc_x <- rcond_of(Xc); rc_m <- rcond_of(Mc); rc_side <- rcond_of(cbind(Xc, Mc))
+  if (rc_x < 1e-10) {
+    stop(sprintf(paste0("X 的列之间存在完全共线（最小奇异值比 %.3g）：有变量是别的变量的倍数，",
+                        "或者干脆是重复列。先删掉成比例的列 —— 不是采样不够，是这些系数",
+                        "在数学上无法分开（注意：标准化会先减均值，所以第二列 = 第一列 + 常数也算完全共线）。"), rc_x))
+  }
+  if (rc_m < 1e-10) {
+    stop(sprintf("M 的列之间存在完全共线（最小奇异值比 %.3g）：两个中介变量其实是一个。", rc_m))
+  }
+  if (rc_side < 1e-10) {
+    stop(sprintf(paste0("X 与 M 合起来秩亏（最小奇异值比 %.3g）：某个中介能被 X 完全解释，",
+                        "直接效应与间接效应不可分离。这不是采样能解决的 —— 需要改变设计",
+                        "（例如增加 M 的测量时点，或删掉那一列中介）。"), rc_side))
+  }
+  if (rc_side < 1e-6) {
+    diagnostics <- c(diagnostics, paste0("X 与 M 高度共线（最小奇异值比 ", sprintf("%.3g", rc_side),
+                                         "）：还没到不可识别，但直接与间接的区间会明显变宽，",
+                                         "别把它们当成两条独立结论。"))
   }
 
   # ---------------- 共轭 Gibbs：给定方差是正态，给定系数是逆伽马 ----------------
@@ -257,6 +287,9 @@ tryCatch({
   }
   ols_full <- as_coef_mat(stats::lm.fit(cbind(Xc, Mc), Yc)$coefficients, p + k, q, "Y 侧 OLS")
   ols_g    <- as_coef_mat(stats::lm.fit(Xc, Mc)$coefficients, p, k, "M 侧 OLS")
+  if (anyNA(ols_full) || anyNA(ols_g)) {
+    stop("内部校验失败：闭式 OLS 含 NA，说明设计矩阵秩亏但没被前面的检查拦住 —— 请报告这组输入。")
+  }
   ols_dir  <- ols_full[1:p, , drop = FALSE]
   ols_ind  <- ols_g %*% ols_full[(p + 1):(p + k), , drop = FALSE]
   pm_dir   <- matrix(colMeans(dir_flat), p, q)

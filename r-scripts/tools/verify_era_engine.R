@@ -297,12 +297,68 @@ if (b$code == 0L) {
      "E20 常量列被剔除、p 变小、而且要说出来（静默丢列等于偷偷改模型）",
      if (zc2$code != 0L) zc2$err else paste(unlist(zc2$r$diagnostics), collapse = " | "))
 
+  cat("\n\u2500\u2500 9b. \u79e9\u4e8f\uff1a\u4e0d\u53ef\u8bc6\u522b\u7684\u8f93\u5165\u5fc5\u987b\u5f53\u573a\u62d2\u7edd\uff08\u4e0d\u662f\u52a0\u4e00\u6761\u8bca\u65ad\u7136\u540e\u7ee7\u7eed\u8dd1\uff09\u2500\u2500\n")
+  # \u73b0\u6848\uff1an=6 \u7684\u624b\u6413\u6570\u636e\u91cc X2 = 2\u00b7X1\uff0clm.fit \u7ed9\u88ab\u6324\u6389\u7684\u7cfb\u6570\u586b NA\uff0cNA \u4e00\u8def\u6d41\u5230
+  # `if (dev_dir > tol || ...)` \u624d\u70b8\uff0c\u7528\u6237\u770b\u5230\u7684\u662f\u300c\u9700\u8981TRUE/FALSE\u503c\u7684\u5730\u65b9\u4e0d\u53ef\u4ee5\u7528\u7f3a\u5c11\u503c\u300d
+  # \u2014\u2014 \u4e00\u53e5\u6ca1\u4eba\u770b\u5f97\u61c2\u7684 R \u5185\u90e8\u9519\u8bef\u3002\u73b0\u5728\u6309\u4e0d\u53ef\u8bc6\u522b\u7684\u79cd\u7c7b\u5206\u522b\u62d2\u7edd\u3002
+  mk_rank <- function(X, M, Y, tag) run_era(list(X = X, M = M, Y = Y, chains = 2L,
+                                                 iterations = 600L, thin = 4L, seed = 7L), tag)
+  # 把「逐样本返回一行」的函数拼成 n × k 矩阵。
+  # 别用 vapply(FUN.VALUE = numeric(1))：k=2 时它直接报“values must be length 1”
+  # （本轮就是这么撞的）；也别写一行 sapply 套 matrix 的巧写法，看不出来它在转置谁。
+  colseq <- function(n, f) {
+    rows <- lapply(seq_len(n), f)
+    k <- length(rows[[1]])
+    matrix(as.vector(unlist(rows)), nrow = n, ncol = k, byrow = TRUE)
+  }
+
+  z1 <- mk_rank(colseq(40, function(i) c(i %% 7, 2 * (i %% 7))),
+                matrix(sin(seq_len(40)), 40, 1), matrix(cos(seq_len(40)), 40, 2), "rk_x")
+  ok(z1$code != 0L && grepl("X \u7684\u5217\u4e4b\u95f4\u5b58\u5728\u5b8c\u5168\u5171\u7ebf", z1$err, fixed = TRUE),
+     "E21 X \u4e24\u5217\u6210\u6bd4\u4f8b -> \u62d2\u7edd\u5e76\u70b9\u540d X", substr(z1$err, 1, 150))
+  z1b <- mk_rank(colseq(40, function(i) c(i, i + 0.37)),
+                 matrix(sin(seq_len(40)), 40, 1), matrix(cos(seq_len(40)), 40, 2), "rk_x2")
+  ok(z1b$code != 0L && grepl("\u5b8c\u5168\u5171\u7ebf", z1b$err, fixed = TRUE),
+     "E22 X \u4e24\u5217\u53ea\u5dee\u4e00\u4e2a\u5e38\u6570 -> \u540c\u6837\u62d2\u7edd\uff08\u6807\u51c6\u5316\u51cf\u5747\u503c\u540e\u5c31\u662f\u540c\u4e00\u5217\uff0c\u6700\u5bb9\u6613\u6f0f\uff09",
+     substr(z1b$err, 1, 150))
+  base_x <- matrix(stats::rnorm(40 * 3), 40, 3)
+  z2 <- mk_rank(base_x, cbind(base_x[, 1, drop = FALSE] * 2 + 5, sin(seq_len(40))),
+                matrix(stats::rnorm(40 * 2), 40, 2), "rk_mx")
+  ok(z2$code != 0L && grepl("X \u4e0e M \u5408\u8d77\u6765\u79e9\u4e8f", z2$err, fixed = TRUE),
+     "E23 \u4e2d\u4ecb\u80fd\u88ab X \u5b8c\u5168\u89e3\u91ca -> \u62d2\u7edd\u5e76\u8bf4\u6e05\u76f4\u63a5/\u95f4\u63a5\u4e0d\u53ef\u5206\u79bb\uff08\u8bc6\u522b\u95ee\u9898\uff0c\u4e0d\u662f\u91c7\u6837\u95ee\u9898\uff09",
+     substr(z2$err, 1, 150))
+  z3 <- mk_rank(matrix(stats::rnorm(40 * 2), 40, 2),
+                cbind(matrix(sin(seq_len(40)), 40, 1), matrix(sin(seq_len(40)), 40, 1)),
+                matrix(stats::rnorm(40 * 2), 40, 2), "rk_m2")
+  ok(z3$code != 0L && grepl("M \u7684\u5217\u4e4b\u95f4\u5b58\u5728\u5b8c\u5168\u5171\u7ebf", z3$err, fixed = TRUE),
+     "E24 \u4e24\u4e2a\u4e2d\u4ecb\u5176\u5b9e\u540c\u4e00\u4e2a -> \u62d2\u7edd\u5e76\u70b9\u540d M", substr(z3$err, 1, 150))
+
+  cat("\n\u2500\u2500 9c. \u751f\u4ea7\u8c03\u7528\u5f62\u6001\uff1a\u7edd\u5bf9\u811a\u672c\u8def\u5f84 + \u5916\u90e8 cwd \u2500\u2500\n")
+  # Electron \u90a3\u4fa7 spawn \u65f6\u4e0d\u8bbe cwd\uff0c\u4f20\u7684\u662f\u7edd\u5bf9\u811a\u672c\u8def\u5f84\uff1b\u672c\u4f1a\u8bdd\u6240\u6709\u6d4b\u8bd5\u90fd\u7528\u4ed3\u5e93\u5185
+  # \u76f8\u5bf9\u8def\u5f84\uff0c\u8fd9\u6761\u8def\u5f84\u4e00\u76f4\u6ca1\u88ab\u8d70\u8fc7 \u2014\u2014 \u4e00\u8d70\u5c31\u649e\u51fa\u4e86 E21 \u90a3\u4e2a NA \u5d29\u6e83\u3002
+  old_wd <- getwd()
+  eng_abs <- normalizePath(engine, mustWork = TRUE)
+  setwd(TMP)
+  ip <- file.path(TMP, "prod.json"); op <- paste0(ip, ".out"); ep <- paste0(ip, ".err")
+  writeLines(jsonlite::toJSON(list(X = d0$X, M = d0$M, Y = d0$Y, chains = 2L,
+                                   iterations = 1500L, thin = 5L, seed = 9L),
+                              auto_unbox = TRUE, digits = NA), ip)
+  st <- system2(RSCRIPT, c(shQuote(eng_abs), shQuote(ip), shQuote(op), shQuote(ep)),
+                stdout = FALSE, stderr = FALSE)
+  setwd(old_wd)
+  ok(st == 0L && file.size(op) > 1000,
+     "E25 \u7edd\u5bf9\u8def\u5f84 + cwd \u5728 tempdir\uff1a\u4ecd\u80fd source \u5230 mcmc_diagnostics.R \u5e76\u51fa\u7ed3\u679c",
+     if (st != 0L) {
+       if (file.exists(ep)) paste(readLines(ep, warn = FALSE), collapse = " ")
+       else paste0("exit=", st, " 但没写出 error 文件 —— 说明崩在 tryCatch 之前，前端只能显示「执行失败」")
+     } else paste0("size=", file.size(op)))
+
   cat("\n\u2500\u2500 10. 结论话术要跟数据一致，不能只会报数 \u2500\u2500\n")
   dz0 <- sim_xy(200, G0, B0, matrix(0, 1, 2), seed = 21)
   r0 <- run_era(list(X = dz0$X, M = dz0$M, Y = dz0$Y, chains = 4L, iterations = 4000L,
                      thin = 5L, seed = 3L), "nome")
   ok(r0$code == 0L && grepl("\u4e0d\u652f\u6301\u4e2d\u4ecb", r0$r$interpretation, fixed = TRUE),
-     "E21 真没有中介（W=0）-> 解读必须说“不支持中介”，而不是沉默地给一堆区间",
+     "E26 真没有中介（W=0）-> 解读必须说“不支持中介”，而不是沉默地给一堆区间",
      if (r0$code != 0L) r0$err else substr(r0$r$interpretation, 1, 160))
 
   Bs2 <- matrix(c(0.9, 0.0, -0.9, 0.0), 2, 2)
@@ -313,13 +369,13 @@ if (b$code == 0L) {
   sgn_ok <- rs$code == 0L &&
     any(sign(rs$r$effects$direct$mean) != sign(rs$r$effects$indirect$mean) &
         abs(rs$r$effects$direct$mean) > 0.15 & abs(rs$r$effects$indirect$mean) > 0.15)
-  ok(sgn_ok, "E22 栽了符号相反的直接/间接（遮掩效应）-> 能报出方向不一致",
+  ok(sgn_ok, "E27 栽了符号相反的直接/间接（遮掩效应）-> 能报出方向不一致",
      if (rs$code != 0L) rs$err else
        paste(sprintf("%.2f/%.2f", rs$r$effects$direct$mean, rs$r$effects$indirect$mean),
              collapse = " "))
   ok(is.finite(rs$r$waic$waic) && rs$r$waic$p_waic >= 0 &&
        grepl("Y \u4fa7", rs$r$waic$scope, fixed = TRUE),
-     "E23 WAIC 可算且口径写明只算 Y 侧（旧脚本的 BAIC 无定义，已换掉）",
+     "E28 WAIC 可算且口径写明只算 Y 侧（旧脚本的 BAIC 无定义，已换掉）",
      if (rs$code != 0L) "没跑成" else rs$r$waic$scope)
 
   set.seed(4)
@@ -333,7 +389,7 @@ if (b$code == 0L) {
   el <- round(proc.time()[[3]] - t_h, 1)
   kb <- round(file.info(file.path(TMP, "highdim.json.out"))$size / 1024)
   ok(rh$code == 0L && rh$r$convergence$rhat_max <= 1.05,
-     "E24 高维 p=3,k=3,q=12 跑通且默认 4000 迭代下 R̂ 达标",
+     "E29 高维 p=3,k=3,q=12 跑通且默认 4000 迭代下 R̂ 达标",
      if (rh$code != 0L) rh$err else sprintf("R̂max %.4f / ESSmin %.0f", rh$r$convergence$rhat_max,
                                             rh$r$convergence$ess_min))
   cat(sprintf("     高维实测：用时 %.1fs，R̂max %.4f，ESSmin %.0f，输出 %d KB —— 默认迭代数就是照这个定的\n",

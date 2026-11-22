@@ -23,7 +23,7 @@ const RSCRIPT = process.env.RSCRIPT || path.join(ROOT, 'r-portable/bin/Rscript.e
 const VERIFY = path.join('r-scripts', 'tools', 'verify_era_engine.R');
 // 尺子自检 16 项（T1–T16）+ 引擎验收 24 项（E1–E24）。
 // 故意写死：R 侧加/删测试时这里必须跟着改，否则“悄悄少跑了一段”没人发现。
-const EXPECT_TESTS = 40;
+const EXPECT_TESTS = 45;
 
 let pass = 0, fail = 0;
 const fails = [];
