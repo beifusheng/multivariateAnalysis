@@ -43,14 +43,19 @@ const viewByPath = {};
 
 // ---------- 2. 引擎脚本：存在 ≠ 验收过 ----------
 const engineDir = 'r-scripts';
+const harnessFiles = fs.readdirSync(path.join(ROOT, 'r-scripts/tools'))
+  .filter((f) => /^(verify|test)_[a-z0-9_]+\.(R|mjs)$/.test(f));
 const validatedEngines = new Set(
-  fs.readdirSync(path.join(ROOT, 'r-scripts/tools'))
-    .filter((f) => /^verify_[a-z0-9_]+_(engine|templates)\.(R|mjs)$/.test(f))
-    .map((f) => {
-      const src = read(`r-scripts/tools/${f}`);
-      return (src.match(/r-scripts\/([a-z0-9_]+\.R)/g) || []).map((x) => x.split('/')[1])[0];
-    })
-    .filter(Boolean)
+  harnessFiles.flatMap((f) => {
+    const src = read(`r-scripts/tools/${f}`);
+    // 只认字面 `r-scripts/x.R` 不够：R 里常用 file.path("r-scripts", "x.R")。
+    // 上一版就因为 verify_era_engine.R 用了 file.path 写法，明明 40 项验收跑过了，
+    // 首页这边却当它"没人验收过"——工具看不见自己，这类错最难发现。
+    const lit = (src.match(/r-scripts\/([a-z0-9_]+\.R)/g) || []).map((x) => x.split('/')[1]);
+    const joined = (src.match(/file\.path\(\s*"r-scripts"\s*,\s*"([a-z0-9_]+\.R)"/g) || [])
+      .map((x) => (x.match(/"([a-z0-9_]+\.R)"/) || [])[1]);
+    return [...lit, ...joined].filter(Boolean);
+  })
 );
 
 // ---------- 3. Home.vue 的卡片 ----------
@@ -67,6 +72,9 @@ const parsed = cards.map((b) => {
     comingSoon: /showComingSoon\(/.test(b),
     availTag: /✅ 可用/.test(b),
     devTag: /🚧 开发中/.test(b),
+    // 判据要打在真正生效的那一层：卡片里的 HTML 注释提到这几个字，
+    // 不代表标签还在 —— 先剥注释再测（本轮就这么误报过一次）。
+    algoTag: /算法未验收/.test(b.replace(/<!--[\s\S]*?-->/g, '')),
     block: b
   };
 });
@@ -125,20 +133,23 @@ for (const [c, script] of [[gmr, 'gmr4.R'], [era, 'bayesian_era_mediation.R']]) 
   // 它是否只是占位、以及有没有界面。GMR⁴ 上线时这条会把红打得像回归被破坏。
   const engSrc = exists ? read(path.join(engineDir, script)) : '';
   const st = (/#\s*STATUS:\s*(implemented|placeholder)/i.exec(engSrc) || [])[1];
-  check(`${c.name}：STATUS=${st || '（缺失）'} 与卡片标签一致（placeholder 必须开发中，implemented 必须可用）`,
-    st === 'placeholder' ? c.devTag : st === 'implemented' ? !c.devTag : exists ? c.devTag : true,
-    `devTag=${c.devTag}, STATUS=${st}`);
-  // 引擎是否已验收，与"能不能上线"是两回事。GMR4 今天把这一点顶出来了：
-  // 引擎重写并通过 16 项验收，但 frontend/src/views/r-analysis/GMR4.vue 根本不存在，
-  // 所以卡片必须仍然「开发中」——只是理由要从"算法未验收"换成"没有界面"。
+  // STATUS 说的是**引擎**，卡片能不能点说的是**界面**。上一版把两者绑成一条断言
+  // （implemented 就必须可用），于是“引擎刚验收完、界面还没写”这个中间状态无处表达：
+  // 要么骗用户说界面可用（点进去白屏），要么逼着把 STATUS 退回 placeholder
+  // （把已经跑通的验收说成没做）。现在拆开：可用性 ⇔ 视图存在；标签/说明 ⇔ STATUS。
+  // 视图文件名跟 routerMap 里注释的那条保持一致（Bayesian_ERA.vue，不是 BayesianERA.vue）：
+  // 上一版这里写的是另一个名字，真建了视图它还会报“视图缺失”。
   const viewFile = path.join(ROOT, 'frontend/src/views/r-analysis',
-    script === 'gmr4.R' ? 'GMR4.vue' : 'BayesianERA.vue');
+    script === 'gmr4.R' ? 'GMR4.vue' : 'Bayesian_ERA.vue');
   const hasView = fs.existsSync(viewFile);
+  check(`${c.name}：卡片可用性只跟界面存在一致（hasView=${hasView}）`,
+    hasView ? !c.devTag : c.devTag, `devTag=${c.devTag}, hasView=${hasView}`);
+  check(`${c.name}：「算法未验收」标签必须与引擎状态一致（STATUS=${st}）`,
+    st === 'implemented' ? !c.algoTag : c.algoTag,
+    `algoTag=${c.algoTag}, STATUS=${st} —— 引擎已过验收还挂着这个标签就是对外报假信息`);
   if (validatedEngines.has(script)) {
-    check(`${c.name}：引擎已验收但视图缺失 -> 卡片必须仍标开发中（否则点进去白屏）`,
-      !hasView ? c.devTag : true, `hasView=${hasView}, devTag=${c.devTag}`);
     // 缺什么的说明写在 Home.vue 的 showComingSoon 里，不是卡片字段：
-    // 那里若还留着"简化占位/未验收"，就是过时说明（用户会以为引擎也没做）。
+    // 那里若还留着“简化/占位/未验收”，就是过时说明（用户会以为引擎也没做）。
     const tip = homeTipOf(c.name);
     // 卡片已经可用时 showComingSoon 里那条说明就是死代码，文案断言只对仍在开发中的卡片生效
     if (c.devTag) {
@@ -152,7 +163,12 @@ for (const [c, script] of [[gmr, 'gmr4.R'], [era, 'bayesian_era_mediation.R']]) 
         "卡片可点了还留着“开发中说明”，下一个人会以为还有两条实现路径");
     }
   } else {
-    check(`${c.name}：${script} 未被任何验收 harness 引用 -> 才能以"未验收"为由标开发中`, true);
+    // 这条曾经是 check(..., true) —— 一张恒真绿卡，摆在那儿什么也不拦。
+    // 现在真去扫 harness：确实没人引用，才允许以"未验收"为由标开发中。
+    const refs = harnessFiles.filter((f) => read(`r-scripts/tools/${f}`).includes(script));
+    check(`${c.name}：${script} 未被任何验收 harness 引用 -> 才能以"未验收"为由标开发中`,
+      refs.length === 0 && c.devTag,
+      refs.length ? `其实被引用于：${refs.join(', ')}（那就不能算未验收）` : `devTag=${c.devTag}`);
   }
   // 脚本若自称简化实现，卡片就不许标“可用”；反之若已去掉占位注释，就该重新跑验收
   if (exists) {

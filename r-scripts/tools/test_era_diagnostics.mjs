@@ -21,8 +21,9 @@ import { execFileSync } from 'node:child_process';
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const RSCRIPT = process.env.RSCRIPT || path.join(ROOT, 'r-portable/bin/Rscript.exe');
 const VERIFY = path.join('r-scripts', 'tools', 'verify_era_engine.R');
-// 尺子自检的项数。R 侧加测试时这里同步上调（故意写死：悄悄减少要当场红）
-const EXPECT_TESTS = 16;
+// 尺子自检 16 项（T1–T16）+ 引擎验收 24 项（E1–E24）。
+// 故意写死：R 侧加/删测试时这里必须跟着改，否则“悄悄少跑了一段”没人发现。
+const EXPECT_TESTS = 40;
 
 let pass = 0, fail = 0;
 const fails = [];
@@ -61,6 +62,18 @@ console.log('\n=== 尺子（mcmc_diagnostics.R）的自动运行入口 ===');
   check('含"报警能定位到具体那一列"的断言', /\u53ea\u6709\u7b2c 3 \u5217\u810f/.test(out), '');
   check('含"报错文案必须出自我们"的断言（NA 守卫）',
     /\u77e9\u9635\u542b NA/.test(out) && /\u5411\u91cf\u7248\u540c\u7406/.test(out), '');
+  // 引擎那 24 项不能因为一个 if 跳过就“也算全绿”：三句必须真的出现在输出里
+  check('引擎验收段真的跑了（契约 / 恒等式 / 外部锚点 / 退化形状）',
+    /\u5f15\u64ce\uff1a\u6b63\u5e38\u8def\u5f84\u4e0e\u8f93\u51fa\u5951\u7ea6/.test(out) &&
+      /E6 \u6052\u7b49\u5f0f/.test(out) &&
+      /vegan::rda \u7ea6\u675f\u60ef\u91cf\u6bd4\u4e00\u81f4/.test(out) &&
+      /E15 p=k=q=1 \u9000\u5316\u5f62\u72b6/.test(out),
+    'R 侧输出里没有引擎段——多半是 b$code != 0 把整段 if 跳过了');
+  check('报错拦截段真的跑了（NA / 样本数 / 行数 / 缺 M / 常量列）',
+    /E16 \u542b NA/.test(out) && /E19 \u6ca1\u6709\u4e2d\u4ecb\u8868/.test(out) &&
+      /E20 \u5e38\u91cf\u5217/.test(out), '');
+  check('高维实测行在（默认迭代数必须有实测依据，不许口头保证）',
+    /\u9ad8\u7ef4\u5b9e\u6d4b\uff1a\u7528\u65f6/.test(out), '');
 
   /* 引擎进度跟尺子分开报：上一版我把两件事塞进一条断言，结果 Rscript 语法报错时
      这条也跟着红 —— 一个报两件事的断言只会让人花时间去猜到底是哪件坏了。*/

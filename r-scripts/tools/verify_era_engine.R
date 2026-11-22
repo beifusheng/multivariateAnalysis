@@ -29,6 +29,10 @@ if (!file.exists(file.path(root, "r-scripts", "mcmc_diagnostics.R"))) {
 setwd(root)
 source(file.path("r-scripts", "mcmc_diagnostics.R"))
 
+RSCRIPT <- file.path(R.home("bin"), "Rscript.exe")
+if (!file.exists(RSCRIPT)) RSCRIPT <- "Rscript"     # 系统 R 也能跑，别把自己绑死在便携版
+TMP <- file.path(tempdir(), "era_verify"); dir.create(TMP, showWarnings = FALSE, recursive = TRUE)
+
 pass <- 0L; fails <- character(0)
 ok <- function(cond, msg, detail = "") {
   if (isTRUE(cond)) { pass <<- pass + 1L; cat(sprintf("  \u2713 %s\n", msg)) }
@@ -138,10 +142,211 @@ ok(grepl("后验不该出现缺失", m15b, fixed = TRUE),
    "T16 向量版同理：报错要说是后验缺数，而不是 R 的内部提示", substr(m15b, 1, 160))
 
 engine <- file.path("r-scripts", "bayesian_era_mediation.R")
-head1 <- if (file.exists(engine)) readLines(engine, n = 1, warn = FALSE) else ""
-cat(sprintf("\n\u2500\u2500 引擎状态：%s\n",
-            ifelse(grepl("STATUS: implemented", head1, fixed = TRUE), "implemented（§2 起待补）",
-                   "仍是 placeholder —— 本脚本目前只验收了尺子")))
+
+if (!file.exists(engine)) {
+  cat("\n引擎文件还不存在 —— 本次只验收尺子（§1）\n")
+} else {
+
+# 标准化尺度下的真值换算：spike 里那个“覆盖率 37.5%”的假事故就是拿原始尺度真值
+# 去比标准化尺度后验造出来的。这里故意用**独立的 sweep 实现**（不与引擎共码）：
+# 对了是两边都对，错的时候不会一起错。
+truth_std <- function(G, B, W, X, M, Y) {
+  sX <- apply(X, 2, sd); sM <- apply(M, 2, sd); sY <- apply(Y, 2, sd)
+  list(dir = as.vector(sweep(sweep(B, 1, sX, '*'), 2, sY, '/')),
+       ind  = as.vector(sweep(sweep(G, 1, sX, '*'), 2, sM, '/') %*%
+                        sweep(sweep(W, 1, sM, '*'), 2, sY, '/')),
+       tot  = NULL)
+}
+sim_xy <- function(n, G, B, W, sdM = 0.8, sdE = 0.7, seed = 11) {
+  set.seed(seed)
+  # G 是 p x k（行=预测变量），B 是 p x q，W 是 k x q。
+  # 上一版把 p 当成 ncol(G)（那就是 k），X %*% G 当场“非整合参数”——
+  # 夹具自己把维度读反，跟引擎无关，所以这类错也要当 bug 修而不是“换个写法绕过去”。
+  p <- nrow(G); k <- ncol(G); q <- ncol(B)
+  stopifnot(nrow(B) == p, nrow(W) == k, ncol(W) == q)
+  X <- matrix(stats::rnorm(n * p), n, p)
+  M <- X %*% G + matrix(stats::rnorm(n * k) * sdM, n, k)
+  Y <- X %*% B + M %*% W + matrix(stats::rnorm(n * q) * sdE, n, q)
+  list(X = X, M = M, Y = Y)
+}
+run_era <- function(payload, tag) {
+  i <- file.path(TMP, paste0(tag, ".json")); o <- paste0(i, ".out"); e <- paste0(i, ".err")
+  # digits = NA：默认只写 4 位有效数字，夹具先把数据舍入再拿去比全精度闭式解，
+  # 恒等式检查看到的就是自己的舍入（gmr4 验收脚本实测过这个坑）
+  writeLines(jsonlite::toJSON(payload, auto_unbox = TRUE, digits = NA), i)
+  st <- system2(RSCRIPT, c(shQuote(engine), shQuote(i), shQuote(o), shQuote(e)),
+                stdout = FALSE, stderr = FALSE)
+  if (st != 0L) {
+    return(list(code = st, err = if (file.exists(e))
+      paste(readLines(e, warn = FALSE), collapse = " ") else ""))
+  }
+  list(code = 0L, r = jsonlite::fromJSON(readLines(o, warn = FALSE)), file = o)
+}
+
+G0 <- matrix(c(0.9, -0.5), 2, 1); W0 <- matrix(c(0.8, -0.6), 1, 2)
+B0 <- matrix(c(0.4, -0.2, 0.0, 0.35), 2, 2)
+d0 <- sim_xy(200, G0, B0, W0)
+
+cat("\n\u2500\u2500 5. 引擎：正常路径与输出契约 \u2500\u2500\n")
+b <- run_era(list(X = d0$X, M = d0$M, Y = d0$Y, chains = 4L, iterations = 4000L,
+                  thin = 5L, seed = 12345L), "base")
+ok(b$code == 0L, "E1 真跑通（exit=0）", b$err)
+
+if (b$code == 0L) {
+  r <- b$r
+  need <- c("effects", "variance_partition", "convergence", "identity_check",
+            "waic", "draws", "diagnostics", "interpretation", "cell_labels",
+            "X_scale", "M_scale", "Y_scale", "thresholds")
+  ok(all(need %in% names(r)), "E2 契约字段齐全（视图只读这些）",
+     paste(setdiff(need, names(r)), collapse = ","))
+  efields <- c("mean", "sd", "median", "hdi_lo", "hdi_hi", "prob_gt0", "rhat", "ess", "ols")
+  ok(all(unlist(lapply(r$effects, function(e) all(efields %in% names(e))))),
+     "E3 直接/间接/总三块的字段一致且齐全",
+     paste(setdiff(efields, names(r$effects$indirect)), collapse = ","))
+  ok(length(r$effects$indirect$mean) == r$p * r$q && length(r$cell_labels) == r$p * r$q,
+     "E4 格子数与标签数都 = p*q",
+     sprintf("mean %d / labels %d / p*q %d", length(r$effects$indirect$mean),
+             length(r$cell_labels), r$p * r$q))
+  # 标签顺位必须是“预测快 / 响应慢”：spike 里选错顺序会得到“覆盖 8/12”这种假发现
+  ok(identical(r$cell_labels[1], "X1\u2192Y1") && identical(r$cell_labels[2], "X2\u2192Y1"),
+     "E5 标签顺序与展平口径一致（X 快 / Y 慢）",
+     paste(head(r$cell_labels, 4), collapse = " | "))
+
+  cat("\n\u2500\u2500 6. 引擎：三条硬校验 \u2500\u2500\n")
+  ok(r$identity_check$total_minus_parts < 1e-8, "E6 恒等式 tot = dir + ind（逐 draw）",
+     sprintf("残差 %.3g", r$identity_check$total_minus_parts))
+  ok(isTRUE(r$convergence$ok) && r$convergence$rhat_max <= r$thresholds$rhat_max &&
+       r$convergence$ess_min >= r$thresholds$ess_min,
+     "E7 收敛达标（R̂ 与 ESS 都在阈内）",
+     sprintf("R̂max %.4f / ESSmin %.0f", r$convergence$rhat_max, r$convergence$ess_min))
+  ok(r$identity_check$posterior_vs_ols_direct <= r$identity_check$tolerance &&
+       r$identity_check$posterior_vs_ols_indirect <= r$identity_check$tolerance,
+     "E8 后验均值与同数据 OLS 对齐",
+     sprintf("direct %.4f / indirect %.4f，容差 %.4f",
+             r$identity_check$posterior_vs_ols_direct,
+             r$identity_check$posterior_vs_ols_indirect, r$identity_check$tolerance))
+
+  ts <- truth_std(G0, B0, W0, d0$X, d0$M, d0$Y)
+  hit <- sum(r$effects$indirect$hdi_lo <= ts$ind & ts$ind <= r$effects$indirect$hdi_hi)
+  ok(hit == length(ts$ind), "E9 间接效应区间覆盖**标准化尺度**真值（逐格）",
+     sprintf("%d/%d；真值 %s vs 区间 %s", hit, length(ts$ind),
+             paste(round(ts$ind, 3), collapse = ","),
+             paste(sprintf("[%.2f,%.2f]", r$effects$indirect$hdi_lo,
+                           r$effects$indirect$hdi_hi), collapse = " ")))
+  ok(max(abs(r$effects$indirect$mean - ts$ind)) < 0.15,
+     "E10 后验均值与标准化真值量级对得上（不只靠区间活着）",
+     sprintf("最大偏差 %.4f", max(abs(r$effects$indirect$mean - ts$ind))))
+
+  cat("\n\u2500\u2500 7. 方差分解：逐响应 + 外部锚点 \u2500\u2500\n")
+  vp <- r$variance_partition
+  ok(max(abs(vp$x_unique + vp$m_unique + vp$shared + vp$residual - 1)) < 1e-6,
+     "E11 四块之和 = 1（逐响应）",
+     sprintf("最大偏差 %.3g", max(abs(vp$x_unique + vp$m_unique + vp$shared + vp$residual - 1))))
+  # 独立闭式路径（qr.residual，不走引擎里的 lm.fit）重算逐响应 R²(XM)：
+  # 防的是“r2_of 自己方向错”这类只能在外部发现的错
+  zc <- function(M) scale(M, center = TRUE, scale = apply(M, 2, sd))
+  Yz <- zc(d0$Y); Dz <- cbind(zc(d0$X), zc(d0$M))
+  ind_r2 <- 1 - apply(qr.resid(qr(Dz), Yz)^2, 2, sum) / colSums(Yz^2)
+  ok(max(abs(ind_r2 - r$r2$XM)) < 1e-8, "E12 逐响应 R²(XM) = 独立闭式 qr 算法",
+     paste(sprintf("%.6f", c(ind_r2, r$r2$XM)), collapse = " / "))
+  suppressMessages(library(vegan))
+  rd <- vegan::rda(Yz ~ ., data = as.data.frame(Dz))
+  ok(abs(mean(r$r2$XM) - rd$CCA$tot.chi / rd$tot.chi) < 1e-6,
+     "E13 多元整体 R²(XM) 与 vegan::rda 约束惯量比一致（真外部锚点）",
+     sprintf("%.8f vs %.8f", mean(r$r2$XM), rd$CCA$tot.chi / rd$tot.chi))
+
+  cat("\n\u2500\u2500 8. 可复现与退化形状 \u2500\u2500\n")
+  b2 <- run_era(list(X = d0$X, M = d0$M, Y = d0$Y, chains = 4L, iterations = 4000L,
+                     thin = 5L, seed = 12345L), "rep")
+  # 注意：tools::md5sum() 返回的是**带文件名**的向量，两个输出文件名字不同，
+  # 直接 identical() 永远假 —— 上一版 E14 就是这个自己判错了，引擎其实完全确定
+  # （单独复跑两次逐字段对比：零差异）。比的是摘要值，不是带名字的向量。
+  ok(b2$code == 0L && identical(unname(tools::md5sum(b$file)), unname(tools::md5sum(b2$file))),
+     "E14 同 seed 两次输出文件逐字节相同",
+     if (b2$code != 0L) b2$err else
+       paste(unname(tools::md5sum(b$file)), unname(tools::md5sum(b2$file)), sep = " vs "))
+
+  # p=k=q=1：R 在这里会把单维度下标结果掉成向量，%*% 就变成内积而不是矩阵乘
+  G1 <- matrix(0.8, 1, 1); B1 <- matrix(0.3, 1, 1); W1 <- matrix(-0.7, 1, 1)
+  d1 <- sim_xy(120, G1, B1, W1, seed = 5)
+  s11 <- run_era(list(X = d1$X, M = d1$M, Y = d1$Y, chains = 2L, iterations = 2000L,
+                      thin = 3L, seed = 7L), "k1q1")
+  ok(s11$code == 0L && s11$r$p == 1L && s11$r$k == 1L && s11$r$q == 1L &&
+       s11$r$identity_check$total_minus_parts < 1e-8,
+     "E15 p=k=q=1 退化形状不崩且恒等式仍成立",
+     if (s11$code != 0L) s11$err else sprintf("tot-diff %.3g", s11$r$identity_check$total_minus_parts))
+
+  cat("\n\u2500\u2500 9. 必须拦住的情形（报错而不是一堆好看的区间）\u2500\u2500\n")
+  bad <- function(payload, pat, msg) {
+    z <- run_era(payload, paste0("bad_", abs(sum(utf8ToInt(substr(msg, 1, 8))))))
+    ok(z$code != 0L && grepl(pat, z$err, fixed = TRUE), msg,
+       if (z$code == 0L) "居然大获成功，把错误当成结果交了" else substr(z$err, 1, 180))
+  }
+  Xn <- d0$X; Xn[3, 2] <- NA
+  bad(list(X = Xn, M = d0$M, Y = d0$Y), "\u7f3a\u5931\u503c", "E16 含 NA 报错且说清有多少个")
+  bad(list(X = d0$X[1:4, ], M = d0$M[1:4, ], Y = d0$Y[1:4, ]), "\u6837\u672c\u6570",
+      "E17 样本数不够估系数直接拒（能给数不等于能给结论）")
+  bad(list(X = d0$X, M = d0$M, Y = d0$Y[1:20, ]), "\u6837\u672c\u6570\u4e0d\u4e00\u81f4",
+      "E18 三表行数不同必须报错（按行配对的分析静默错位最阴）")
+  bad(list(X = d0$X, Y = d0$Y), "M \u7f3a\u5931", "E19 没有中介表时报错，不许退化成普通回归交差")
+  Xc2 <- d0$X; Xc2[, 1] <- 2
+  zc2 <- run_era(list(X = Xc2, M = d0$M, Y = d0$Y, chains = 2L, iterations = 2000L,
+                      thin = 4L, seed = 9L), "const")
+  ok(zc2$code == 0L && zc2$r$p == 1L &&
+       any(grepl("\u5e38\u91cf\u5217", unlist(zc2$r$diagnostics), fixed = TRUE)),
+     "E20 常量列被剔除、p 变小、而且要说出来（静默丢列等于偷偷改模型）",
+     if (zc2$code != 0L) zc2$err else paste(unlist(zc2$r$diagnostics), collapse = " | "))
+
+  cat("\n\u2500\u2500 10. 结论话术要跟数据一致，不能只会报数 \u2500\u2500\n")
+  dz0 <- sim_xy(200, G0, B0, matrix(0, 1, 2), seed = 21)
+  r0 <- run_era(list(X = dz0$X, M = dz0$M, Y = dz0$Y, chains = 4L, iterations = 4000L,
+                     thin = 5L, seed = 3L), "nome")
+  ok(r0$code == 0L && grepl("\u4e0d\u652f\u6301\u4e2d\u4ecb", r0$r$interpretation, fixed = TRUE),
+     "E21 真没有中介（W=0）-> 解读必须说“不支持中介”，而不是沉默地给一堆区间",
+     if (r0$code != 0L) r0$err else substr(r0$r$interpretation, 1, 160))
+
+  Bs2 <- matrix(c(0.9, 0.0, -0.9, 0.0), 2, 2)
+  Ws2 <- matrix(c(-0.9, 0.9), 1, 2)
+  ds <- sim_xy(240, G0, Bs2, Ws2, seed = 33)
+  rs <- run_era(list(X = ds$X, M = ds$M, Y = ds$Y, chains = 4L, iterations = 4000L,
+                     thin = 5L, seed = 4L), "supp")
+  sgn_ok <- rs$code == 0L &&
+    any(sign(rs$r$effects$direct$mean) != sign(rs$r$effects$indirect$mean) &
+        abs(rs$r$effects$direct$mean) > 0.15 & abs(rs$r$effects$indirect$mean) > 0.15)
+  ok(sgn_ok, "E22 栽了符号相反的直接/间接（遮掩效应）-> 能报出方向不一致",
+     if (rs$code != 0L) rs$err else
+       paste(sprintf("%.2f/%.2f", rs$r$effects$direct$mean, rs$r$effects$indirect$mean),
+             collapse = " "))
+  ok(is.finite(rs$r$waic$waic) && rs$r$waic$p_waic >= 0 &&
+       grepl("Y \u4fa7", rs$r$waic$scope, fixed = TRUE),
+     "E23 WAIC 可算且口径写明只算 Y 侧（旧脚本的 BAIC 无定义，已换掉）",
+     if (rs$code != 0L) "没跑成" else rs$r$waic$scope)
+
+  set.seed(4)
+  Gh <- matrix(c(0.9, -0.5, 0.3, 0.4, 0.0, -0.6, 0.2, 0.5, -0.3), 3, 3, byrow = TRUE)
+  Wq <- matrix(stats::rnorm(3 * 12, sd = 0.6), 3, 12)
+  Bh <- matrix(stats::rnorm(3 * 12, sd = 0.3), 3, 12)
+  dh <- sim_xy(160, Gh, Bh, Wq, sdM = 0.9, sdE = 1.0, seed = 77)
+  t_h <- proc.time()[[3]]
+  rh <- run_era(list(X = dh$X, M = dh$M, Y = dh$Y, chains = 4L, iterations = 4000L,
+                     thin = 5L, seed = 8L), "highdim")
+  el <- round(proc.time()[[3]] - t_h, 1)
+  kb <- round(file.info(file.path(TMP, "highdim.json.out"))$size / 1024)
+  ok(rh$code == 0L && rh$r$convergence$rhat_max <= 1.05,
+     "E24 高维 p=3,k=3,q=12 跑通且默认 4000 迭代下 R̂ 达标",
+     if (rh$code != 0L) rh$err else sprintf("R̂max %.4f / ESSmin %.0f", rh$r$convergence$rhat_max,
+                                            rh$r$convergence$ess_min))
+  cat(sprintf("     高维实测：用时 %.1fs，R̂max %.4f，ESSmin %.0f，输出 %d KB —— 默认迭代数就是照这个定的\n",
+              el, if (rh$code == 0L) rh$r$convergence$rhat_max else NA,
+              if (rh$code == 0L) rh$r$convergence$ess_min else NA, kb))
+}
+
+head1 <- readLines(engine, n = 1, warn = FALSE)
+cat(sprintf("\n\u5f15\u64ce\u72b6\u6001\uff1a%s\n",
+            ifelse(grepl("STATUS: implemented", head1, fixed = TRUE),
+                   "implemented（恒等式/锚点/报错段已跑）",
+                   "placeholder —— 首页卡片继续标开发中")))
+}
 
 cat("\n\u2500\u2500\u2500 Bayesian ERA 验收汇总 \u2500\u2500\u2500\n")
 if (length(fails)) {

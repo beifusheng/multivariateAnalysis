@@ -250,3 +250,58 @@ Y 侧：  y_q = Xc β_q + Mc ω_q + ε_q ,  ε_q ~ N(0, τ_q² I)
 §10 第 2 步：引擎本体 `bayesian_era_mediation.R`（共轭 Gibbs，无 rstan/jags），
 验收脚本补恒等式 / `vegan::rda` 锚点 / 后验 vs 同尺度 OLS / 同 seed 复现 / 契约字段，
 并把第一行 `STATUS: placeholder` 改成 `implemented`（首页卡片"开发中"由它驱动）。
+
+## 12. §10 第 2 步已完成：引擎本体（STATUS 已翻 implemented）
+
+`r-scripts/bayesian_era_mediation.R` 重写为**闭式共轭 Gibbs**（无 rstan/jags/coda），
+`verify_era_engine.R` 从 16 项长到 **40 项**（T1–T16 尺子 + E1–E24 引擎），node 侧
+`test_era_diagnostics.mjs` 钉住"项数不许悄悄变少 + 引擎段/报错段/高维实测行必须真出现"。
+
+实测数字（就是它们把默认值定下来的）：
+- 恒等式 `tot = dir + ind` 逐 draw 成立；后验 vs 同数据 OLS 在容差内；
+- 逐响应 `R²(XM)` 与独立 `qr.resid` 闭式一致；多元整体与 `vegan::rda` 约束惯量比一致；
+- 间接效应的分位数区间逐格覆盖**标准化尺度**真值；
+- 同 seed 两次 `.out` 逐字节相同；
+- 高维 p=3,k=3,q=12：4 链 × 4000 迭代 × thin 5 → R̂max 1.0023、ESSmin 3145、
+  用时 69–71s、输出 1274 KB。`iterations=4000` 就是照着这个定的。
+
+### 这一步抓出来的五个 bug（没有一个是"用户报的"，全是验收逼出来的）
+
+1. **`lm.fit()$coefficients` 在单响应时返回向量而不是 m×1 矩阵** →
+   `ols_full[1:p, , drop=FALSE]` 报"量度数目不正确"，p=k=q=1 与任何 q=1 的数据当场崩。
+   现在统一走 `as_coef_mat()`：不管回来向量还是矩阵都按 (系数 × 响应) 钉形状，
+   长度对不上就报错，不再靠运气。`r2_of()` 里同类问题（单响应 residuals 是向量，
+   `colSums` 会崩）一起修掉。
+2. **E14 判据自己写错**：`tools::md5sum()` 返回**带文件名**的向量，两个输出文件名字不同，
+   `identical()` 必然 false —— 引擎其实完全确定（独立复跑逐字段对比：零差异）。
+   改成比摘要值。**"该红的红、不该红的也红"同样是缺陷信号**，别急着去改引擎。
+3. **卡片标签断言被 HTML 注释骗了**：我在 Home.vue 的注释里写了"算法未验收"五个字，
+   解析器直接当标签还在。修法是解析前剥掉 `<!-- -->`，而不是改注释措辞 ——
+   判据必须打在真正生效的那一层（这条本轮已经第三次撞上了）。
+4. **"哪些引擎已被验收"的抽取只认字面路径**：`verify_era_engine.R` 用
+   `file.path("r-scripts", "bayesian_era_mediation.R")`，于是 40 项验收跑完，
+   首页那边仍当它"没人验收过"。工具看不见自己，比缺工具更危险。
+5. **一条恒真绿卡**：`check(..., true)` 挂在"未被任何 harness 引用"的分支上，什么也不拦。
+   现在真去扫 harness 文件内容，被引用过就不许再以"未验收"为由标开发中。
+
+### 顺带纠正了一个建模错误（STATUS 语义）
+
+`test_home_status.mjs` 原来规定 `STATUS=implemented ⇒ 卡片必须可用`。可"引擎验收完"与
+"界面存在"是两件事，绑在一起后中间状态无处表达：要么骗用户点进白屏，要么逼着把 STATUS
+退回 placeholder（把已通过的验收说成没做）。现在拆开：
+
+| 判据 | 依据 |
+| --- | --- |
+| 卡片可用性（🚧 开发中 / ✅ 可用） | **视图文件是否存在**（`Bayesian_ERA.vue`）|
+| 「算法未验收」标签、showComingSoon 的理由文案 | 引擎 `STATUS` 行 |
+
+变异验证过它不是空规则：往 `Bayesian_ERA.vue` 放一个空桩文件，"可用性只跟界面存在一致"
+立刻红（逼着下一个会话同步翻卡片）；把标签加回 Home.vue，标签一致性那条也红。
+
+因此今天的真实状态是：**引擎 implemented、视图不存在 → 卡片仍标开发中**，
+理由文案已改成"算法已验收（40 项，含 vegan::rda 锚点），缺的是界面与路由"。
+
+### 下一步
+
+§10 第 3 步：L3 声明 `eraSheetSpec.js` + 六个模板（expect 用真跑填）+ `test_era_spec.mjs`，
+然后才是视图 `Bayesian_ERA.vue`、路由注册、首页翻牌、`test_era_view.mjs`。

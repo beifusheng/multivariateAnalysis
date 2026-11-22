@@ -151,7 +151,9 @@
             <p class="method-desc">贝叶斯扩展冗余分析（含中介效应）</p>
             <div class="method-tags">
               <el-tag size="small" type="info" effect="dark">🚧 开发中</el-tag>
-              <el-tag size="small" type="warning" effect="plain">算法未验收</el-tag>
+              <!-- 「算法未验收」这张标签已经拿掉：r-scripts/bayesian_era_mediation.R
+                   现在是闭式共轭 Gibbs，过了 verify_era_engine.R 的 40 项（含 vegan::rda 锚点
+                   与后验对 OLS）。现在缺的只有界面与路由，继续挂着那张标签就是对外报假信息。 -->
             </div>
           </div>
           <div class="ribbon">开发中</div>
@@ -273,7 +275,7 @@ export default {
     showComingSoon(methodName) {
       // 不只说“敬请期待”：把缺什么说清楚，否则用户会以为点了就能等到
       const detail = {
-        'Bayesian ERA': 'r-scripts/bayesian_era_mediation.R 同样是占位实现，未跑过后验采样收敛校验，也没有界面和路由。'
+        'Bayesian ERA': '算法已验收（r-scripts/bayesian_era_mediation.R 闭式共轭 Gibbs，40 项校验含 vegan::rda 锚点与后验对 OLS），缺的是界面与路由，上线后这里就能点。'
       }[methodName] || '';
       this.$message({
         message: `${methodName} 功能开发中，敬请期待！${detail ? '\n' + detail : ''}`,
