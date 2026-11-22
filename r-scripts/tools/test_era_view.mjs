@@ -44,6 +44,12 @@ const { createServer } = await import(pathToFileURL(path.join(FRONTEND, 'node_mo
 // 看上去像新视图写坏了，其实是预览服务没配好。照 test_gmr4_view.mjs 的选项原样来。
 const server = await createServer({
   root: FRONTEND, configFile: path.join(FRONTEND, 'vite.config.js'),
+  // cacheDir 必须显式指定：默认落在 root 的 node_modules/.vite，而那**正是开发者
+  // 正在跑的 dev 服务所用的一份依赖缓存**。跑一次测试就把它改写一遍，浏览器里
+  // 已加载的页面再去动态 import('xlsx') 就会「Failed to fetch dynamically imported
+  // module」—— 实机现象是导出模板点了没反应 / 导出结果报这个 fetch 错误。
+  // 放 node_modules 里：既隔离，又天然不进版本控制。
+  cacheDir: path.join(FRONTEND, 'node_modules', '.vite-test-cache'),
   server: { middlewareMode: true }, appType: 'custom', logLevel: 'error'
 });
 console.log('\n=== 0. SFC 能被加载（import 路径与 computed 拼写当场验）===');
@@ -381,6 +387,22 @@ console.log('\n=== 5. 图表构造器（E）===');
         !/_$/.test(vm4.templateFileName()), vm4.templateFileName());
     check('视图不自己拼导出内容：sheets 全部来自 spec（单一数据源）',
       /eraPlanExport\(/.test(viewSource) && !/name: '结论'/.test(viewSource));
+
+    // 实机事故：export 报「Failed to fetch dynamically imported module .../.vite/deps/xlsx.js」，
+    // 而**下载模板按钮点了完全没反应** —— 因为 downloadTemplate 没有 try/catch，
+    // import('xlsx') 的 rejection 没人接。这里从数据侧逼出失败，验它现在会开口。
+    const vmFail = makeVm();
+    vmFail.analysisResult = r; vmFail.lastPayload = payload; vmFail.selectedTplId = 'partmed';
+    vmFail.xlsx = async () => { throw new Error('Excel 组件加载失败：模拟依赖缓存失效'); };
+    await vmFail.downloadTemplate();
+    check('依赖加载失败时，下载模板必须开口（而不是"点了没反应"）',
+      vmFail._notices.some((n) => n.type === 'error' && /Excel 组件加载失败/.test(n.message)),
+      JSON.stringify(vmFail._notices));
+    await vmFail.downloadInput();
+    check('下载输入走的是 file-saver，同样不许静默失败',
+      vmFail._notices.length >= 2, JSON.stringify(vmFail._notices.map((n) => n.type)));
+    check('xlsx() 的失败文案给出可操作的下一步（刷新 / Ctrl+F5），不是只抛原始错误',
+      /Ctrl\+F5|刷新页面/.test(viewSource) && /npm run dev/.test(viewSource), '');
   }
 }   // §5 的块尾：§6/§7/§8 都嵌在它的 else 里，这里才收口
 
@@ -485,6 +507,18 @@ console.log('\n=== 10. 外壳与全局样式（照 GMR⁴ 清单原样搬）==='
       !/showComingSoon\('Bayesian ERA'\)/.test(home));
   const rt = fs.readFileSync(path.join(FRONTEND, 'src/router/index.js'), 'utf8');
   check('scrollBehavior 仍在（刚进去就停在半页是实机反馈过的）', /scrollBehavior/.test(rt) && /top: 0/.test(rt));
+
+  // 这条防的是**我自己的工作流**：默认 cacheDir 落在 frontend/node_modules/.vite，
+  // 而开发者正在跑的 npm run dev 用的就是同一份。跑一次测试就把它改写一遍，
+  // 用户浏览器里已加载页面的动态 import 立刻取不到 —— 这次导出报错就是这么来的。
+  const toolsDir = path.join(ROOT, 'r-scripts/tools');
+  const viteSuites = fs.readdirSync(toolsDir)
+    .filter((f) => /^test_.*\.mjs$/.test(f))
+    .filter((f) => fs.readFileSync(path.join(toolsDir, f), 'utf8').includes('createServer({'));
+  const noCache = viteSuites.filter((f) => !fs.readFileSync(path.join(toolsDir, f), 'utf8').includes('cacheDir'));
+  check(`${viteSuites.length} 个会起 vite 服务的套件全都显式设了 cacheDir（不污染 dev 缓存）`,
+    viteSuites.length >= 8 && noCache.length === 0,
+    `套件数 ${viteSuites.length}；没设的：${noCache.join(', ') || '无'}`);
 }
 
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);

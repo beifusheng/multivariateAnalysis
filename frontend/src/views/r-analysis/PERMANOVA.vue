@@ -1109,7 +1109,16 @@ export default {
     },
 
     async saveJson(filename, data) {
-      const { saveAs } = await import('file-saver');
+      // file-saver 也是动态 import，失败原因与 xlsx 同一个（dev 依赖缓存被改写）。
+      // 在这里统一变成人话，四个调用点（下载输入 / 导出 JSON）就不用各写一遍。
+      let saveAs;
+      try {
+        ({ saveAs } = await import('file-saver'));
+      } catch (e) {
+        throw new Error('保存组件加载失败：' + ((e && e.message) || e) +
+          '。若在用 npm run dev，刷新页面（Ctrl+F5）再点一次即可。');
+      }
+      if (typeof saveAs !== 'function') throw new Error('file-saver 没有导出 saveAs');
       saveAs(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), filename);
     },
 

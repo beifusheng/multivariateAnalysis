@@ -47,7 +47,11 @@ const result = JSON.parse(fs.readFileSync(outp, 'utf8'));
 check('真跑 R 拿到结果', result.success === true, result.error || '');
 
 const { createServer } = await import(pathToFileURL(path.join(FRONTEND, 'node_modules/vite/dist/node/index.js')).href);
-const server = await createServer({ root: FRONTEND, configFile: path.join(FRONTEND, 'vite.config.js'), server: { middlewareMode: true }, appType: 'custom', logLevel: 'error' });
+const server = await createServer({ root: FRONTEND, configFile: path.join(FRONTEND, 'vite.config.js'),
+  // cacheDir 必须显式指定，默认值 node_modules/.vite 与开发者正在跑的 dev 服务是同一份缓存；
+  // 跑测试会把它改写掉，浏览器里旧页面再动态 import('xlsx') 就 fetch 失败（导出报错的根因）。
+  cacheDir: path.join(FRONTEND, 'node_modules', '.vite-test-cache'),
+  server: { middlewareMode: true }, appType: 'custom', logLevel: 'error' });
 // 依赖统一走 Vite 的 SSR 管线：CJS 版 vue 与 ESM 版是两份实例，混用会直接报错
 const depsFile = path.join(FRONTEND, '.med-ssr-deps.js');
 fs.writeFileSync(depsFile, [

@@ -653,13 +653,23 @@ export default {
 
     /* ---------------- 输入 / 模板 / 导入 / 导出 ---------------- */
     async downloadInput() {
-      await this.saveJson(`GMR4_输入_${this.stamp()}.json`, this.buildPayload());
+      try {
+        await this.saveJson(`GMR4_输入_${this.stamp()}.json`, this.buildPayload());
+      } catch (e) {
+        this.notify('error', ((e && e.message) || String(e)));
+      }
     },
     async downloadTemplate() {
-      const XLSX = await this.xlsx();
-      // 选了设计就下那一份，没选则下默认第一个：模板与表单同源，不存在"下的和用的不一样"
-      await writeWorkbook(XLSX, gmr4TemplateSheets(this.selectedTplId), this.templateFileName());
-      this.notify('success', '模板已下载：预测变量X / 响应变量Y' + (this.selectedTplId ? '（当前设计）' : '') + ' / 模型参数');
+      // 必须接住异常：上一版没有 try/catch，import('xlsx') 一失败就是未捕获 rejection，
+      // 用户看到的只有"点了没反应"（PERMANOVA 那份一直有 try/catch，这两个模块是漏的）。
+      try {
+        const XLSX = await this.xlsx();
+        // 选了设计就下那一份，没选则下默认第一个：模板与表单同源，不存在"下的和用的不一样"
+        await writeWorkbook(XLSX, gmr4TemplateSheets(this.selectedTplId), this.templateFileName());
+        this.notify('success', '模板已下载：预测变量X / 响应变量Y' + (this.selectedTplId ? '（当前设计）' : '') + ' / 模型参数');
+      } catch (e) {
+        this.notify('error', ((e && e.message) || String(e)));
+      }
     },
     templateFileName() {
       // 文件名必须能认出是哪份设计：六份模板都叫「GMR4 数据模板_时间戳.xlsx」的话，
@@ -731,11 +741,31 @@ export default {
       };
     },
     async xlsx() {
-      const m = await import('xlsx');
-      return m.utils ? m : m.default;
+      // 动态 import 失败要变成**可操作的一句人话**。实机现象就是
+      // 「Failed to fetch dynamically imported module: .../.vite/deps/xlsx.js」：
+      // dev 模式下那份依赖缓存被别的进程改写（我跑测试套件就会）时，浏览器手里
+      // 那个旧引用取不到文件。以前这里不接异常，用户只看到"点了没反应"。
+      try {
+        const m = await import('xlsx');
+        const lib = m.utils ? m : m.default;
+        if (!lib || !lib.utils) throw new Error('xlsx 模块没有预期导出');
+        return lib;
+      } catch (e) {
+        throw new Error('Excel 组件加载失败：' + ((e && e.message) || e) +
+          '。若在用 npm run dev，多半是依赖缓存被改写 —— 刷新页面（Ctrl+F5）再点一次即可。');
+      }
     },
     async saveJson(filename, data) {
-      const { saveAs } = await import('file-saver');
+      // file-saver 也是动态 import，失败原因与 xlsx 同一个（dev 依赖缓存被改写）。
+      // 在这里统一变成人话，四个调用点（下载输入 / 导出 JSON）就不用各写一遍。
+      let saveAs;
+      try {
+        ({ saveAs } = await import('file-saver'));
+      } catch (e) {
+        throw new Error('保存组件加载失败：' + ((e && e.message) || e) +
+          '。若在用 npm run dev，刷新页面（Ctrl+F5）再点一次即可。');
+      }
+      if (typeof saveAs !== 'function') throw new Error('file-saver 没有导出 saveAs');
       saveAs(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), filename);
     },
     async exportPng(filename) {

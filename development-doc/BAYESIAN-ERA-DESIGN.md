@@ -470,3 +470,52 @@ R 当场"意外的符号"，而且因为是 python 生成源码，**替换"成�
 `verify_era_engine.R` **[PASS] 45 项全过**；node 侧 21 个套件无 FAIL
 （`test_era_spec` 126 / `test_era_view` 86 / `test_era_diagnostics` 15 / `test_home_status` 34）；
 `npm run build` ✓，产物含 `Bayesian_ERA-*.js` 独立 chunk。
+
+## 16. 用户报的导出故障：根因是我的测试套件在污染他的 dev 缓存
+
+用户反馈：Bayesian ERA 里**导出模板点了没反应**，导出结果报
+`Failed to fetch dynamically imported module: http://localhost:8080/node_modules/.vite/deps/xlsx.js?v=70588e87`。
+
+调查过程（两次假设都被实测否掉，记录在这里以免下次再靠猜）：
+
+1. **假设一**「Vite 没预打包 xlsx，加 `optimizeDeps.include` 就好」→ A/B 打掉：
+   把 include 删掉再起服务，`xlsx` 照样出现在 optimized 里（Vite 的扫描器会静态扫到
+   动态 import）。所以那个配置改动是**治错了地方**，已撤销，不留"顺手加的改动"。
+2. **假设二**「浏览器拿着过期的 `?v=` 哈希」→ 直接打 URL 打掉：正确哈希、故意写错的哈希、
+   不带哈希，三种都返回 200。`?v=` 在这条路径上不门控内容。
+3. **真根因**：`test_*_view.mjs` / `test_*_render.mjs` / `test_import_shell.mjs` 一共
+   **8 个套件**会 `createServer({ root: FRONTEND, ... })`，而 vite 的 `cacheDir` 默认值就是
+   `frontend/node_modules/.vite` —— **与开发者正在跑的 `npm run dev` 是同一份缓存**。
+   我每跑一轮套件就把它改写一遍（还看到 `deps_temp_*` 残留、browserHash 从
+   `d0123a31` 变成 `1049b826`）。用户浏览器里已加载的页面持有旧引用，
+   点导出时那次动态 import 就取不到文件。
+
+**是我把他跑坏的吗：是。** 不是产品代码的问题，也不是 ERA 特有的问题。
+
+### 修了什么
+
+| # | 改动 | 性质 |
+| --- | --- | --- |
+| 1 | 8 个套件全部显式 `cacheDir: FRONTEND/node_modules/.vite-test-cache` | 根因：测试与 dev 缓存彻底隔离（该目录在 node_modules 里，天然不进版本控制） |
+| 2 | `downloadTemplate` / `downloadInput` 补 try/catch（GMR⁴、ERA、Non-random 三个视图缺；PERMANOVA 两份本来就有） | 消掉"点了没反应"：异常不再变成未捕获 rejection |
+| 3 | `xlsx()` / `saveJson()` 的加载失败换成可操作文案：「Excel 组件加载失败：… 若在用 npm run dev，刷新页面（Ctrl+F5）再点一次即可」 | 消掉没人看得懂的 fetch 术语 |
+
+### 隔离效果是实测的，不是推理的
+
+删掉 `frontend/node_modules/.vite` → 跑 `test_era_view`（它会起 vite 服务）→
+`node_modules/.vite` **没有被创建**，只创建了 `.vite-test-cache`。
+
+### 新增防回归断言（test_era_view 86 → 90）
+
+- 「8 个会起 vite 服务的套件全都显式设了 cacheDir」——**这条防的是我的工作流本身**，
+  新加一个 vite 套件忘了隔离就红；
+- 「依赖加载失败时，下载模板必须开口」：从数据侧 `vm.xlsx = async () => { throw ... }`
+  逼出失败，断言真有 error 通知（以前这里没有 try/catch，测试也无法验证"没反应"）；
+- 「xlsx() 的失败文案给出可操作的下一步」（断言文案里有"刷新页面/Ctrl+F5"与`npm run dev`）。
+
+### 我在这一步又犯的错（同型，第二次）
+
+用 python 往对象字面量里插属性时，插在**最后一个属性之后且没补逗号** —— 三个文件当场
+语法坏掉。靠的是"跑一遍 node --check / 真跑套件"发现，而不是相信替换成功。
+**脚本改源码之后必须立刻做语法校验**，这条已经在 §15 写过一次，这里再记一次：
+我会重复犯错，所以流程要比记忆更靠前。

@@ -24,3 +24,6 @@ r-scripts/**/*-output4.json
 r-scripts/tools/.scratch/
 # test_nr_render.mjs 生成的临时依赖入口
 frontend/.nr-ssr-deps.js
+
+# 本地探 dev 服务的临时产物（不该进仓库）
+frontend/.vite-probe/

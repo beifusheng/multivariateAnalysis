@@ -42,6 +42,9 @@ const { createServer } = await import(pathToFileURL(path.join(FRONTEND, 'node_mo
 const server = await createServer({
   root: FRONTEND,
   configFile: path.join(FRONTEND, 'vite.config.js'),
+  // cacheDir 必须显式指定，默认值 node_modules/.vite 与开发者正在跑的 dev 服务是同一份缓存；
+  // 跑测试会把它改写掉，浏览器里旧页面再动态 import('xlsx') 就 fetch 失败（导出报错的根因）。
+  cacheDir: path.join(FRONTEND, 'node_modules', '.vite-test-cache'),
   server: { middlewareMode: true },
   appType: 'custom',
   logLevel: 'error'

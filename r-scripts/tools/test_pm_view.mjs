@@ -70,6 +70,12 @@ const tick = () => new Promise((r) => setTimeout(r, 60));
 const { createServer } = await import(pathToFileURL(path.join(FRONTEND, 'node_modules/vite/dist/node/index.js')).href);
 const server = await createServer({
   root: FRONTEND, configFile: path.join(FRONTEND, 'vite.config.js'),
+  // cacheDir 必须显式指定：默认落在 root 的 node_modules/.vite，而那**正是开发者
+  // 正在跑的 dev 服务所用的一份依赖缓存**。跑一次测试就把它改写一遍，浏览器里
+  // 已加载的页面再去动态 import('xlsx') 就会「Failed to fetch dynamically imported
+  // module」—— 实机现象是导出模板点了没反应 / 导出结果报这个 fetch 错误。
+  // 放 node_modules 里：既隔离，又天然不进版本控制。
+  cacheDir: path.join(FRONTEND, 'node_modules', '.vite-test-cache'),
   server: { middlewareMode: true }, appType: 'custom', logLevel: 'error'
 });
 let comp;
