@@ -214,6 +214,19 @@ console.log('\n=== 3e) 卡片上的能力标签必须真有其事 ===');
   };
   const variants = (tok) => [tok, tok.replace(/^[a-zA-Z]+::/, ''), tok.replace(/^vegan::/, '')]
     .filter((v, i, a) => v && a.indexOf(v) === i);
+
+  // 事后检验（pairwise PERMANOVA）以前在前台用 Math.random() 造 p 并标成「校正 p 值」。
+  // 它不是任何一张卡片的“主引擎”，所以单独挂一条：声明可交付就得有机器可查的尺子。
+  const phEngine = read('r-scripts/permanova_posthoc.R');
+  const phRuler = read('r-scripts/tools/verify_posthoc_engine.R');
+  check('permanova_posthoc.R 头部有 STATUS: implemented',
+    /STATUS: implemented/.test(phEngine.split('\n').slice(0, 4).join('\n')),
+    phEngine.split('\n').slice(0, 3).join(' | ').slice(0, 90));
+  check('事后检验的尺子存在、用 shQuote 调引擎、且有 vegan::adonis2 锚点',
+    /shQuote\(engine\)/.test(phRuler) && /adonis2/.test(phRuler) &&
+      /p\.adjust\([^)]*"BH"/.test(phRuler), '');
+  check('尺子自己写明“前置条件不成立时必须红”（防空表通过）',
+    /前置条件失败，未验证/.test(phRuler), '');
   for (const c of parsed) {
     check(`${c.name}：带两个能力标签（不许只剩「可用」一个光标签）`,
       c.plainTags.length === 2, `[${c.plainTags.join(' | ')}]`);

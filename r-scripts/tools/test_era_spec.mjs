@@ -34,7 +34,7 @@ const require_ = createRequire(import.meta.url);
 const JUDGED = ['indirect_excl_zero_min', 'indirect_excl_zero_max', 'direct_excl_zero_min',
   'direct_contains_zero_min', 'sign_inconsistent_min', 'total_contains_zero_min',
   'r2_xm_min', 'convergence_ok', 'must_warn', 'must_refuse', 'shrinkage', 'prob_effect',
-  'cancelled_min'];
+  'cancelled_min', 'shared_negative_min'];
 
 let pass = 0, fail = 0;
 const fails = [];
@@ -76,9 +76,9 @@ console.log('\n=== 1. 声明本身（视图的外壳靠这些字段循环）==='
 console.log('\n=== 2. 模板目录与设计事实（不跑 R 也能验的那部分）===');
 const ids = Object.keys(spec.ERA_TEMPLATE_MAP);
 {
-  t('十一个模板，顺序与分组写死（加/删模板必须同时动对账器）',
-    ids.length === 11 && ids.length === spec.ERA_TEMPLATE_COUNT &&
-      ids.join(',') === 'fullmed,partmed,strongprior,prob80,nome,inconsistent,collinear,cancelmed,highdim,nonconv,smallN', ids.join(','));
+  t('十二个模板，顺序与分组写死（加/删模板必须同时动对账器）',
+    ids.length === 12 && ids.length === spec.ERA_TEMPLATE_COUNT &&
+      ids.join(',') === 'fullmed,partmed,strongprior,prob80,nome,inconsistent,collinear,sharedneg,cancelmed,highdim,nonconv,smallN', ids.join(','));
   // label 上的数字必须与 spec 一致：rank1 曾写"80 样本"而 spec 是 40，用户照文案准备数据就踩空
   const badLabel = ids.filter((id) => {
     const sp = spec.ERA_TEMPLATE_MAP[id].spec;
@@ -291,6 +291,16 @@ console.log('\n=== 3. 六个模板逐个端到端：真 xlsx → 解析 → 填�
       } else if (kk === 'convergence_ok') {
         t(`${tag} expect 收敛达标（R̂max ${r.convergence.rhat_max.toFixed(4)} / ESSmin ${Math.round(r.convergence.ess_min)}）`,
           r.convergence.ok === vv, JSON.stringify(r.convergence).slice(0, 160));
+      } else if (kk === 'shared_negative_min') {
+        const sh = r.variance_partition.shared || [];
+        const negs = sh.filter((v) => v < -1e-6);
+        t(`${tag} expect 至少 ${vv} 个响应的 shared 为负（实际 ${negs.length}：${sh.map((v) => v.toFixed(3)).join(' ')}）`,
+          negs.length >= vv, String(negs.length));
+        // 负值不等于分解坏了：四个分量相加必须仍为 1
+        const worst = Math.max(...Array.from({ length: r.q }, (_, c) =>
+          Math.abs(['x_unique', 'shared', 'm_unique', 'residual']
+            .reduce((acc, key) => acc + (r.variance_partition[key] || [])[c], 0) - 1)));
+        t(`${tag} shared 为负时四个分量之和仍必须为 1（最坏偏差 ${worst.toExponential(1)}）`, worst < 1e-6, '');
       } else if (kk === 'cancelled_min') {
         const bm = r.indirect_by_mediator;
         t(`${tag} expect 至少 ${vv} 个格子被识别为两条通路相互抵消（实际 ${bm.cancelled_count}：${bm.cancelled_cells.join('/') || '无'}）`,

@@ -601,7 +601,20 @@ console.log('\n=== 10. 外壳与全局样式（照 GMR⁴ 清单原样搬）==='
   {
     const vs = fs.readFileSync(path.join(FRONTEND, 'src/views/r-analysis/Bayesian_ERA.vue'), 'utf8');
     const tplArea = vs.slice(vs.indexOf('<template>'), vs.indexOf('</template>'));
-    check('界面文案不写死模板数量（数量只能从 spec 常量来）',
+      // 负分量的**解释**也要能验：上一版界面与图都说"共线很强时会负"，
+    // 而实测刚好相反 —— 共线时 shared ≈ R²(X) ≥ 0 恒正，负值出现在 X 与 M 独立那一侧。
+    // 说法错了比没有说法更糟：用户会去找根本不存在的共线问题。
+    const chartSrc = fs.readFileSync(path.join(FRONTEND, 'src/utils/eraCharts.js'), 'utf8');
+    check('方差分解的解释不再把负值归因于共线（那是错的归因）',
+      !/共线很强时 B 的偏 R² 可以为负/.test(viewSource) &&
+        !/共线很强时可以为负/.test(chartSrc), '');
+    check('负值解释给出正确机制（真值为 0 + 过拟合；或调整后 R² 的罚项）',
+      /过拟合/.test(viewSource) && /罚项/.test(viewSource) && /口径/.test(viewSource), '');
+    check('shared 为负有对应模板可复现（不是嘴上说说）',
+      /shared负|shared 为负/.test(viewSource) || /shared 为负/.test(
+        fs.readFileSync(path.join(FRONTEND, 'src/utils/eraSheetSpec.js'), 'utf8')), '没找到 shared 为负 模板');
+
+  check('界面文案不写死模板数量（数量只能从 spec 常量来）',
       !/[（(]?\d+\s*[份个]\s*(设计|模板)/.test(tplArea) && !/[一二三四五六七八九十]\s*[份个]\s*(设计|模板)/.test(tplArea) &&
         /eraCount/.test(vs), /eraCount/.test(vs) ? '动态计数在' : '没找到动态计数');
   }

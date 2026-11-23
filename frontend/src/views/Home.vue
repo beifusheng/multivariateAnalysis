@@ -159,7 +159,7 @@
             <div class="method-tags">
               <el-tag size="small" type="success" effect="dark">✅ 可用</el-tag>
               <el-tag size="small" effect="plain">对齐 vegan::rda</el-tag>
-              <el-tag size="small" effect="plain">11 套设计模板</el-tag>
+              <el-tag size="small" effect="plain">12 套设计模板</el-tag>
             </div>
           </div>
           <div class="card-action">

@@ -194,7 +194,8 @@ function partitionOption(r, F) {
       trigger: 'axis',
       formatter: (ps) => `${ps[0].axisValue}<br/>` +
         ps.map((p) => `${p.marker}${p.seriesName} ${F.fmt(p.value, 4)}`).join('<br/>') +
-        (neg ? '<br/><b>出现负分量：Borcard 分解在共线很强时可以为负，别把它当"解释力"</b>' : '')
+        (neg ? '<br/><b>出现负分量。未调整 R² 下它来自过拟合（shared 的真值本就是 0，估计在 0 两侧飘）；'
+          + '调整后 R² 下则来自罚项 —— 两种都不是"共线把数字拉负"，对比文献前先看清口径</b>' : '')
     },
     xAxis: { type: 'category', data: cats },
     yAxis: { type: 'value', name: 'R² 份额' },
