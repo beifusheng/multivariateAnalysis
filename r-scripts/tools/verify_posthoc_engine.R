@@ -274,6 +274,87 @@ cat("
      paste(unlist(r3$r$diagnostics), collapse = " / "))
 }
 
+cat("\n── 7. 分组项由引擎从公式推（用户实机报回的那条 bug 的回归防线）──\n")
+{
+  # 视图以前自己拆公式：formula.split('+')[0] —— 于是主引擎完全接受的
+  # `dist ~ as.factor(Group) + Age` 到了事后检验变成「变量 "as.factor(Group)" 不存在」。
+  # 那是要求用户重写一个合法公式。现在拆法在 R 一侧，答案按**手算的已知值**核对。
+  # 注意本文件的 ok() 签名是 (cond, label, detail)，与 verify_era_engine.R 相反。
+  set.seed(5)
+  Aa <- rnorm(5, 0); Bb <- rnorm(5, 1.6); Cc <- rnorm(5, 0.6)
+  D7 <- unname(as.matrix(dist(c(Aa, Bb, Cc))))
+  g7 <- c(rep("CTRL", 5), rep("CASE", 5), rep("MID", 5))
+  sd7 <- list(SampleID = paste0("S", 1:15), Group = g7, Age = as.character(20:34))
+
+  cases <- list(
+    list(f = "dist ~ Group",                  want = "Group", key = ""),
+    list(f = "dist ~ as.factor(Group) + Age", want = "Group", key = ""),
+    list(f = "Group + Age",                   want = "Group", key = ""),
+    list(f = "dist ~ Group:Age",              want = "Group", key = ""),
+    list(f = "dist ~ as.factor( Group ) ",    want = "Group", key = ""),
+    list(f = "dist ~ Age + Group",            want = "", key = "取值都不同"),
+    list(f = "dist ~ Treatment",              want = "", key = "不是样本表里的列名"),
+    list(f = "dist ~ ",                       want = "", key = "没有可用的项")
+  )
+  for (cs in cases) {
+    r <- run_ph(list(distanceMatrix = D7, sampleData = sd7, formula = cs$f,
+                     permutations = 199L, seed = 3L), paste0("f_", make.names(cs$f)))
+    if (!nzchar(cs$key)) {
+      ok(r$code == 0L && identical(as.character(r$r$group_variable), cs$want),
+         sprintf("公式「%s」-> 分组项 %s（拆法与 permanova.R 同源）", cs$f, cs$want),
+         if (r$code != 0L) r$err else paste0("echo=", r$r$group_variable))
+    } else {
+      # 拒单必须拒在**正确的理由**上：拒成"列不存在"就是把合法公式说成非法
+      ok(r$code != 0L && grepl(cs$key, r$err, fixed = TRUE),
+         sprintf("公式「%s」拒单，理由正是「%s」", cs$f, cs$key), substr(r$err, 1, 150))
+    }
+  }
+
+  # 两条给法必须等价 —— 这才是"移到 R 一侧"没改变统计结果的证据
+  a7 <- run_ph(list(distanceMatrix = D7, sampleData = sd7, formula = "dist ~ as.factor(Group) + Age",
+                    permutations = 199L, seed = 3L), "equiv_formula")
+  b7 <- run_ph(list(distanceMatrix = D7, groups = g7, permutations = 199L, seed = 3L), "equiv_groups")
+  ok(a7$code == 0L && b7$code == 0L, "两种给法都跑通", paste(a7$err, b7$err))
+  if (a7$code == 0L && b7$code == 0L) {
+    ok(identical(as.character(a7$r$p_bh), as.character(b7$r$p_bh)),
+       "公式路径与显式 groups 路径的 p_bh 逐位相同（拆公式不改统计）",
+       paste(unlist(a7$r$p_bh), collapse = " / "))
+    ok(identical(as.character(a7$r$pairs), as.character(b7$r$pairs)), "对子标签也逐个相同", "")
+  }
+
+  c7 <- run_ph(list(distanceMatrix = D7, groups = g7, sampleData = sd7,
+                    formula = "dist ~ Group", permutations = 199L, seed = 3L), "both_given")
+  ok(c7$code == 0L && any(grepl("以 groups 为准", unlist(c7$r$diagnostics))),
+     "groups 与 sampleData+formula 同时给时不静默优先：以 groups 为准并当场说明",
+     paste(unlist(c7$r$diagnostics), collapse = " / "))
+
+  # 跨引擎一致性只能打在行为上（主引擎输出不带术语名，为它重构主管道不值得）：
+  # 主管道能建模的公式，事后检验不许报"列不存在"。
+  pm <- file.path("r-scripts", "permanova.R")
+  ok(file.exists(pm), "主引擎脚本在位（跨引擎一致性检查的前提）", pm)
+  if (file.exists(pm)) {
+    main_ok <- function(f) {
+      i2 <- tempfile(fileext = ".json"); o2 <- paste0(i2, ".out"); e2 <- paste0(i2, ".err")
+      writeLines(jsonlite::toJSON(list(distanceMatrix = D7, sampleData = sd7, formula = f,
+                                       permutations = 199L, seed = 3L), auto_unbox = TRUE, digits = 10), i2)
+      st <- suppressWarnings(system2(file.path("r-portable", "bin", "Rscript.exe"),
+                                     c(shQuote(pm), shQuote(i2), shQuote(o2), shQuote(e2)),
+                                     stdout = FALSE, stderr = FALSE))
+      err <- if (file.exists(e2)) paste(readLines(e2, warn = FALSE), collapse = " ") else ""
+      unlink(c(i2, o2, e2)); list(code = st, err = err)
+    }
+    for (f in c("dist ~ Group", "dist ~ as.factor(Group) + Age")) {
+      m <- main_ok(f)
+      s <- run_ph(list(distanceMatrix = D7, sampleData = sd7, formula = f,
+                       permutations = 199L, seed = 3L), paste0("xeng_", make.names(f)))
+      ok(m$code != 0L || s$code == 0L || !grepl("不是样本表里的列名", s$err, fixed = TRUE),
+         sprintf("主引擎接受「%s」时事后检验不许说列不存在（两边解释同源）", f),
+         sprintf("主 exit=%d 事后 exit=%d %s", m$code, s$code, substr(s$err, 1, 80)))
+    }
+  }
+}
+
+
 cat("\u2500\u2500 6. 只有 2 组时数组不许降级 \u2500\u2500\n")
 {
   set.seed(12)

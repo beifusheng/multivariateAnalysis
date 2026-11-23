@@ -180,14 +180,20 @@ export default class RController {
   async runPERMANOVAPosthoc(params: any): Promise<any> {
     logger.info('[RController] Running PERMANOVA posthoc');
     logger.info('[RController] posthoc matrix size:', params?.distanceMatrix?.length,
-                'groups:', params?.groups?.length);
+                'formula:', params?.formula, 'groups:', params?.groups?.length,
+                'primary:', params?.primary);
 
+    // 字段必须逐个过：这一层与前端 api/r.js 各有一份白名单，任一处漏了都会静默丢，
+    // 而 R 侧只会看到"没给"，于是走回退分支，界面看不出任何异常。
     const cleanParams: any = {
       distanceMatrix: params.distanceMatrix,
-      groups: params.groups,
       permutations: params.permutations ?? 999,
-      seed: params.seed ?? 12345
+      seed: params.seed ?? 12345,
+      primary: params.primary ?? 'bh'
     };
+    if (params.sampleData != null) cleanParams.sampleData = params.sampleData;
+    if (params.formula != null) cleanParams.formula = params.formula;
+    if (params.groups != null) cleanParams.groups = params.groups;
     if (params.exact_max != null) cleanParams.exact_max = params.exact_max;
 
     const result = await rService.runScript({

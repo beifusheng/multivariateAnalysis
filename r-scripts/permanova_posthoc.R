@@ -30,9 +30,24 @@ input_file <- args[1]; output_file <- args[2]; error_file <- args[3]
 as_arr  <- function(v) I(as.vector(as.numeric(v)))
 as_carr <- function(v) I(as.character(v))
 
+# 公式项的拆法与 permanova.R 里的 formula_terms_of **逐字符一致**（同一组正则）。
+# 这不是抄一遍好看：尺子里有一节拿一批公式同时喂两个引擎，要求它们对
+# 「首项是哪一列」的意见完全相同 —— 有人只改一边时那一节当场红。
+posthoc_formula_terms <- function(f) {
+  if (!length(f) || !nzchar(f)) return(character(0))
+  rhs <- if (grepl("~", f)) trimws(strsplit(f, "~")[[1]][2]) else trimws(f)
+  parts <- trimws(unlist(strsplit(rhs, "[+*:{}]", perl = TRUE)))
+  parts <- trimws(gsub("^as\\.factor\\((.*)\\)$", "\\1", parts))
+  parts <- trimws(gsub("^factor\\((.*)\\)$", "\\1", parts))
+  parts <- parts[nzchar(parts)]
+  unique(parts)
+}
+
 run <- function() {
   params <- jsonlite::fromJSON(input_file)
   diagnostics <- character(0)
+  lab_in <- NULL                      # 由下面两种给法之一填
+  group_variable <- NA_character_   # 由 sampleData+formula 推出时会填上；显式 groups 时保持 NA
 
   ## ---------------- 输入校验：每句都说清「哪里、几个、怎么办」 ----------------
   D_raw <- params$distanceMatrix
@@ -65,7 +80,52 @@ run <- function() {
   }
   if (any(D < -1e-8)) stop(sprintf("距离矩阵里有负值（最小 %.4g）。", min(D)))
 
-  lab_in <- params$groups
+  # 分组变量有两种给法。**首选 sampleData + formula**：由引擎决定哪个是分组项，
+  # 而不是让前端拆字符串。视图原先自己拆（formula.split('+')[0]），于是主引擎完全接受的
+  # 写法 `dist ~ as.factor(Group) + Age` 到了事后检验变成「变量 "as.factor(Group)" 不存在」——
+  # 那是要求用户重写一个合法公式，而不是报告一个真实问题。
+  if (is.null(params$groups) && !is.null(params$sampleData) && !is.null(params$formula)) {
+    sd_names <- names(params$sampleData)
+    terms <- posthoc_formula_terms(as.character(params$formula))
+    if (!length(terms)) {
+      stop(sprintf("公式「%s」右侧没有可用的项。请写成 <距离> ~ 分组列名（可加协变量）。",
+                   as.character(params$formula)))
+    }
+    tt <- terms[1]
+    group_variable <- tt
+    if (!(tt %in% sd_names)) {
+      detail <- vapply(sd_names, function(cc) {
+        v <- unique(as.character(unlist(params$sampleData[[cc]], use.names = FALSE)))
+        paste0(cc, "（取值：", paste(utils::head(v, 4), collapse = ", "),
+               if (length(v) > 4) sprintf(", …共 %d 个", length(v)) else "", "）")
+      }, character(1))
+      stop(paste0("公式首项 ", tt, " 不是样本表里的列名。公式要写**列名**（取值不写进公式）。",
+                  "可用列：", paste(detail, collapse = "; "), "。"))
+    }
+    vals_raw <- as.character(unlist(params$sampleData[[tt]], use.names = FALSE))
+    if (length(vals_raw) != nrow(D)) {
+      stop(sprintf("样本表列 %s 有 %d 个值，距离矩阵却有 %d 个样本：整列传入，长度必须等于样本数。",
+                   tt, length(vals_raw), nrow(D)))
+    }
+    ok_lbl <- !is.na(vals_raw) & nzchar(trimws(vals_raw))
+    # 首项逐样本唯一 => 它是标识列，不是分组列。这与 permanova.R 同一判据（看取值不看位置）。
+    if (sum(ok_lbl) > 1L && length(unique(vals_raw[ok_lbl])) == sum(ok_lbl)) {
+      stop(sprintf(paste0("公式首项 %s 每个样本的取值都不同（%d 个可用标签 / %d 个不同取值），",
+                          "它看着是样本标识列而不是分组变量：两两比较会落到每组只有 1 个样本，",
+                          "距离比较没有意义。请把公式首项换成分组列（如 Group/Habitat），",
+                          "协变量放到后面。"), tt, sum(ok_lbl), length(unique(vals_raw[ok_lbl]))))
+    }
+    lab_in <- vals_raw
+  } else if (!is.null(params$groups) && !is.null(params$sampleData) && !is.null(params$formula)) {
+    terms <- posthoc_formula_terms(as.character(params$formula))
+    if (length(terms)) group_variable <- terms[1]
+    diagnostics <- c(diagnostics, paste0(
+      "同时给了 groups 与 sampleData + formula：以 groups 为准（公式只用于回显分组列名）。"))
+  }
+  # 只有上面没从 sampleData + formula 推出分组时才回退到显式 groups。
+  # （上一版这里写的是无条件 lab_in <- params$groups，把刚推出来的结果覆盖成 NULL，
+  # 于是公式路径全落在「缺少分组变量」上 —— 判据红了才知道。）
+  if (is.null(lab_in)) lab_in <- params$groups
   if (is.null(lab_in)) {
     stop("缺少分组变量（groups）。它应该是模型公式里那一列整列的值，不是你自己挑的子集。")
   }
@@ -245,6 +305,7 @@ run <- function() {
     method = "pairwise PERMANOVA（每组对子独立置换 pseudo-F；BH 主口径 + Bonferroni 对照）",
     n_samples = n, n_groups = length(gps), n_pairs = npairs,
     groups = as_carr(gps),
+    group_variable = as.character(group_variable),
     permutations = B, seed = seed, exact_max = exact_max,
     p_floor = as_arr(p_floor),
     pairs     = as_carr(vapply(res, function(x) sprintf("%s vs %s", x$g1, x$g2), character(1))),

@@ -33,6 +33,41 @@ const check = (name, cond, detail = '') => {
   else { fail++; fails.push(name + (detail ? ` —— ${detail}` : '')); console.log('  ✗ ' + name + (detail ? `\n      ${detail}` : '')); }
 };
 
+// 剥注释必须尊重字符串：上一版用两条正则，于是 'http://x' 里的 // 把后半行吃掉，
+// 藏在字符串之后的代码就从守卫眼前消失了（假绿）。这里是一个只认三种引号的小扫描器。
+const stripComments = (src) => {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (c === '/' && d === '*') {
+      const j = src.indexOf('*/', i + 2);
+      i = j < 0 ? src.length : j + 2;
+      out += ' ';
+      continue;
+    }
+    if (c === '/' && d === '/') {
+      while (i < src.length && src[i] !== '\n') i++;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      out += c;
+      i++;
+      while (i < src.length) {
+        if (src[i] === '\\') { out += src[i] + (src[i + 1] || ''); i += 2; continue; }
+        if (src[i] === c) { out += c; i++; break; }
+        if (c !== '`' && src[i] === '\n') break;
+        out += src[i++];
+      }
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+};
+
 const { sheetIo } = await loadFrontendUtils(['sheetIo']);
 
 const DIST = [
@@ -84,7 +119,77 @@ try {
   check('视图 SFC 能被加载', !!comp && typeof comp.methods === 'object');
 } catch (e) {
   check('视图 SFC 能被加载', false, e.message);
-  await server.close(); process.exit(1);
+  
+console.log('\n=== 通道契约：视图发出的每个键，两层白名单都必须认得 ===');
+{
+  // 为什么单独立一节：api/r.js 与 rController.ts 各有一份**白名单**，串联生效。
+  // 上一轮加的 primary（显著性口径）两边都没列进去，于是下拉框改了等于没改 ——
+  // 而 verify_posthoc_engine.R 是直接调 R 的，15 项口径判据全绿。
+  // 也就是说：引擎对，链路错，用户看到的东西静默回退到默认值。这种错只有契约测试能抓。
+  const bodyOf = (src, sig) => {
+    const i = src.indexOf(sig);
+    if (i < 0) return null;
+    let d = 0, started = false;
+    for (let k = i; k < src.length; k++) {
+      if (src[k] === '{') { d++; started = true; }
+      else if (src[k] === '}') { d--; if (started && d === 0) return src.slice(i, k + 1); }
+    }
+    return src.slice(i);
+  };
+  // JS/R 里"键出现了"不等于"键被转发了"：要抽的是赋值位置上的键名
+  const keysAssigned = (body) => {
+    if (!body) return null;
+    const out = new Set();
+    for (const m of body.matchAll(/(?:^|[{,;\s])([A-Za-z_][\w]*)\s*:/gm)) out.add(m[1]);
+    for (const m of body.matchAll(/\.([\w]+)\s*=/g)) out.add(m[1]);
+    for (const m of body.matchAll(/\[["']([\w]+)["']\]\s*=/g)) out.add(m[1]);
+    return out;
+  };
+  // TS 的类型注解会让 "params: any" 这种被当成键，得先把 : Promise<any> 之类剔掉
+  const keysAssignedTs = (body) => {
+    const ks = keysAssigned(body);
+    if (!ks) return null;
+    return new Set([...ks].filter((k) => k !== 'cleanParams' && k !== 'params' && k !== 'any'));
+  };
+
+  const viewBody = bodyOf(pmViewSource, 'async runPosthocTest()');
+  const apiSrc = fs.readFileSync(path.join(FRONTEND, 'src/api/r.js'), 'utf8');
+  const ctlSrc = fs.readFileSync(path.join(ROOT, 'electron/controller/rController.ts'), 'utf8');
+  const apiBody = bodyOf(apiSrc, 'export async function runPERMANOVAPosthoc');
+  const ctlBody = bodyOf(ctlSrc, 'async runPERMANOVAPosthoc');
+
+  const sentKeys = keysAssigned(viewBody ? bodyOf(viewBody, 'runPERMANOVAPosthoc({') : null);
+  check('能解析出视图发出的载荷键（解析失效就是测试自己坏了，不许空过）',
+    !!sentKeys && sentKeys.size >= 4, sentKeys ? [...sentKeys].join(',') : 'null');
+
+  const apiKeys = keysAssigned(apiBody);
+  const ctlKeys = keysAssignedTs(ctlBody);
+  check('api/r.js 的事后检验函数在（两层白名单的第一层）', !!apiBody, '');
+  check('rController.ts 的事后检验方法在（第二层）', !!ctlBody, '');
+
+  if (sentKeys && apiKeys && ctlKeys) {
+    const missingApi = [...sentKeys].filter((k) => !apiKeys.has(k));
+    const missingCtl = [...sentKeys].filter((k) => !ctlKeys.has(k));
+    check('视图发出的每个键都在 api/r.js 的白名单里（漏一个就静默丢一个）',
+      missingApi.length === 0, `api 侧缺：${missingApi.join(', ')}`);
+    check('同样每个键都在 rController 的白名单里（两层串联，缺一层等于没传）',
+      missingCtl.length === 0, `controller 侧缺：${missingCtl.join(', ')}`);
+    // 口径这个键以前就是在这里丢的，单独点名一次（万一将来整节被重构掉）
+    check('primary（显著性口径）确实穿过两层通道',
+      apiKeys.has('primary') && ctlKeys.has('primary'), `api=${apiKeys.has('primary')} ctl=${ctlKeys.has('primary')}`);
+    check('分组改走 sampleData + formula 后，这两个键也必须在通道上',
+      apiKeys.has('sampleData') && apiKeys.has('formula') &&
+        ctlKeys.has('sampleData') && ctlKeys.has('formula'), '');
+    check('groups 不许被无条件转发（缺席时要让 R 走公式路径，塞 null 会被当成空分组）',
+      !/groups:\s*JSON\.parse\(JSON\.stringify\(params\.groups\)\)/.test(apiBody), '');
+    // 视图这一侧的旧错法不许回来
+    check('视图不再自己拆公式取分组（firstVar = formula.split 那一类）',
+      !/formula\.split\(/.test(stripComments(viewBody || '')) &&
+        !/const firstVar/.test(stripComments(viewBody || '')), '');
+  }
+}
+
+await server.close(); process.exit(1);
 }
 
 // 视图源码：模板里有没有概览卡片这类东西，只能在源码层面查（SSR 渲染不出 el-collapse 的细节）
@@ -537,10 +642,6 @@ console.log('\n=== 事后检验换成真置换：造假路径必须彻底断开 
   check('任何视图都不许出现 Math.random（统计量不许在前台造）',
     withRandom.length === 0, withRandom.join(', '));
 
-  // 2) 事后检验必须走 R，且视图不再自己算 F / R² / p
-  // 判据必须打在**生效的代码**上：我把旧代码原文抄进注释当“不许回退”的证据，
-  // 上一版这两条就因此误红 —— 正则命中的是我自己的注释（本项目第四次“为错理由而红/绿”）。
-  const stripComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   const phStart = pmViewSource.indexOf('async runPosthocTest');
   const phBody = phStart >= 0 ? stripComments(pmViewSource.slice(phStart, phStart + 7000)) : '';
   check('事后检验调用引擎（runPERMANOVAPosthoc，而不是本地双重循环）',
@@ -596,5 +697,6 @@ console.log('\n=== 事后检验换成真置换：造假路径必须彻底断开 
 
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }
+
 await server.close();
 process.exit(fails.length ? 1 : 0);

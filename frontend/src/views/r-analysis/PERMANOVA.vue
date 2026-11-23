@@ -578,6 +578,7 @@
             <InfoFilled />
           </el-icon>
           <span>
+            本次按列<strong>{{ posthocResult.groupVariable || '（引擎未回显）' }}</strong>分组 —— 分组项由 R 从公式首项推出（与主管道同一套拆法），前端不再自己拆字符串。<br />
             星号取自当前口径（本次为<strong>{{ posthocPrimaryLabel }}</strong>）那列 p：*** &lt; 0.001，** &lt; 0.01，* &lt; 0.05。<br />
             置换检验的 p 有分辨率下限：随机置换是 1/(次数+1)。p 报到底只能说明「至少这么小」，不能当作「绝对显著」。<br />
             BH 与 Bonferroni 两列永远并列：两者结论不同的对子最该被看见，不由软件替读者决定。
@@ -2029,13 +2030,13 @@ export default {
         return;
       }
 
+      // 一开跑就丢掉上一次的结果。上一版失败路径什么都不清，于是引擎当场拒单之后，
+      // 界面仍然挂着**上一次的表**，导出按钮也还亮着 —— 那份数字属于另一次分析。
+      this.posthocResult = null;
       this.posthocLoading = true;
 
       try {
-        // 获取分组变量
-        const sampleData = this.permanovaParams.sampleData;
-        // 公式没填就直接说，不能凭空补一个 'Treatment'：
-        // 那个列名根本不在用户表里，接下来只会变成“变量不存在”这种看不出根因的错。
+        // 分组交给 R：视图把整张样本表与公式原样传过去
         const formula = String(this.permanovaParams.formula || '').trim();
         if (!formula) {
           this.$message.error({
@@ -2047,36 +2048,15 @@ export default {
           return;
         }
 
-        // 从公式中提取第一个分类变量
-        const firstVar = formula.split('+')[0].trim();
-        const groups = sampleData[firstVar];
+        // 分组项**不在前端挑**。以前这里写的是
+        //     const firstVar = formula.split('+')[0].trim();
+        //     const groups = sampleData[firstVar];
+        // 于是主引擎完全接受的 `dist ~ as.factor(Group) + Age` 到了事后检验变成
+        // 「变量 "as.factor(Group)" 不存在」—— 那是要求用户重写一个合法公式。
+        // 现在把整张样本表与公式原样交给 R，由引擎决定分组项（与 permanova.R 同源），
+        // 并且它会拒绝"取值逐样本唯一"的首项（那是标识列，不是分组）。
+        // 视图也不在这里数分组个数：判断一次就够，重复的判断迟早和 R 漂移。
 
-        if (!groups) {
-          this.$message.error(`公式中的变量 "${firstVar}" 在样本数据中不存在`);
-          this.posthocLoading = false;
-          return;
-        }
-
-        console.log('[Posthoc] Groups:', groups);
-
-        // 获取唯一分组
-        const uniqueGroups = [...new Set(groups)];
-        console.log('[Posthoc] Unique groups:', uniqueGroups);
-
-        if (uniqueGroups.length < 2) {
-          this.$message.error('至少需要 2 个分组才能进行事后检验');
-          this.posthocLoading = false;
-          return;
-        }
-
-        // 距离矩阵 + 分组交给 R：pseudo-F、R²、置换 p、BH 与 Bonferroni 全部由
-        // r-scripts/permanova_posthoc.R 算。**视图不算任何统计量**。
-        //
-        // 这一段以前长这样（抄在这里当防回退的证据）：
-        //   const p = Math.random() < 0.05 ? Math.random() * 0.05 : 0.05 + Math.random() * 0.1;
-        //   const p_adj = p; // TODO: 实现 FDR/Bonferroni 校正
-        // 注释自己写着「模拟 p 值」，却把原始 p 标成「校正 p 值」算星号、写进 Excel。
-        // 那不是功能没做完，那是给用户编造统计结论。
         const distanceMatrix = this.permanovaParams.distanceMatrix;
         if (!Array.isArray(distanceMatrix) || !distanceMatrix.length) {
           this.$message.error({
@@ -2087,9 +2067,25 @@ export default {
           return;
         }
 
+        // 距离矩阵与公式同源检查：样本表行数必须与矩阵一致，否则引擎会拿
+        // 半张表去配对子。这条留给引擎报也报得清，但在这里拦下更早、更省一次进程。
+        const sampleData = this.permanovaParams.sampleData;
+        const sampleN = sampleData && Object.keys(sampleData).length
+          ? (sampleData[Object.keys(sampleData)[0]] || []).length : 0;
+        if (sampleN !== distanceMatrix.length) {
+          this.$message.error({
+            message: `样本表有 ${sampleN} 行，距离矩阵是 ${distanceMatrix.length} 个样本：两者必须同序同数，`
+                   + '否则事后检验会把分组贴到别的样本上。',
+            duration: 8000, showClose: true
+          });
+          this.posthocLoading = false;
+          return;
+        }
+
         const res = await runPERMANOVAPosthoc({
           distanceMatrix,
-          groups,
+          sampleData,
+          formula: String(this.permanovaParams.formula || '').trim(),
           permutations: this.posthocParams.permutations,
           seed: this.permanovaParams.seed || 12345,
           primary: this.posthocParams.method
@@ -2119,6 +2115,7 @@ export default {
 
         this.posthocResult = {
           comparisons,
+          groupVariable: res.group_variable,
           method: res.method,
           primary: res.primary,
           permutations: res.permutations,

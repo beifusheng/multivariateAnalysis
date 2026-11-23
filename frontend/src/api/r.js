@@ -78,12 +78,20 @@ export async function runPERMANOVA(params) {
  */
 export async function runPERMANOVAPosthoc(params) {
   const ipc = getIpcRenderer();
+  // 白名单是**两层串联**的（这里 + rController），漏一个字段就静默丢一个字段：
+  // 上一轮加的 primary（显著性口径）两边都没列，于是下拉框改了也等于没改，
+  // 而尺子直接调 R 所以全绿。契约测试 test_pm_view 现在盯着这一层。
   const cleanParams = {
     distanceMatrix: JSON.parse(JSON.stringify(params.distanceMatrix)),
-    groups: JSON.parse(JSON.stringify(params.groups)),
     permutations: params.permutations || 999,
-    seed: params.seed || 12345
+    seed: params.seed || 12345,
+    primary: params.primary || 'bh'
   };
+  // 可选字段只在给了的时候才传：groups 缺席时要让 R 走 sampleData + formula 那条路，
+  // 把 undefined 变成 null 传下去会被引擎当成"给了一个空分组"。
+  if (params.sampleData) cleanParams.sampleData = JSON.parse(JSON.stringify(params.sampleData));
+  if (params.formula) cleanParams.formula = String(params.formula);
+  if (params.groups) cleanParams.groups = JSON.parse(JSON.stringify(params.groups));
   if (params.exact_max) cleanParams.exact_max = params.exact_max;
   const result = await ipc.invoke(ipcApiRoute.rRunPERMANOVAPosthoc, cleanParams);
   return result;
