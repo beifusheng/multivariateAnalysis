@@ -251,6 +251,65 @@ tryCatch({
                               function(a, b) paste0(a, "\u2192", b)))
   colnames(dir_flat) <- colnames(ind_flat) <- colnames(tot_flat) <- cell_lab
 
+  # ---------------- 分中介通路：每条 X -> M_k -> Y 各贡献多少 ----------------
+  # 以前只能报“间接效应合计”，而合计会把方向相反的两条通路抵消掉：
+  # 用户看到“间接不显著”就以为“没有中介”，实际上两条强通路互相抹平了。
+  # 列序与 cell_lab 一致（列主序：X1Y1..XpY1, X1Y2...），靠“对每个 j 把
+  # Gm * Om[,j] 拼在一起”保证，不依赖广播（R 不广播尾部维度）。
+  nd <- chains * Skeep
+  path_flats <- lapply(seq_len(k), function(kk) {
+    Gm <- matrix(gammas[, , kk], nrow = nd, ncol = p)
+    Om <- matrix(betas[, p + kk, ], nrow = nd, ncol = q)
+    out <- do.call(cbind, lapply(seq_len(q), function(j) Gm * Om[, j]))
+    dimnames(out) <- list(NULL, cell_lab)
+    out
+  })
+  path_sum <- Reduce(`+`, path_flats)
+  # 恒等式：分中介之和必须逐抽样等于合计间接效应（代数事实，不是近似）。
+  # 不对就是这里的列序/广播搞错了 —— 自己拦下来，不等用户看出图不对劲。
+  path_ident <- max(abs(path_sum - ind_flat))
+  if (path_ident > 1e-8) {
+    diagnostics <- c(diagnostics, sprintf(
+      "内部校验失败：分中介通路之和与合计间接效应差 %.3g，实现有 bug，请报告。", path_ident))
+  }
+  # OLS 侧的拆路与恒等式在下面算完 ols_g / ols_full 之后补（那里才是它们的定义点）
+  path_pm <- lapply(path_flats, function(f) matrix(colMeans(f), p, q))
+  # 抵消识别（三条，每一条都有变异测试证明它打人）：
+  #   1) 第二大通路 >= 0.15                —— 两条都得算一条真通路，挡住"微弱随机数互相碰"
+  #                                          （highdim 曾因下限太松报 5/24 格）
+  #   2) 第二大通路 >= 最大一条的 30%      —— 抵消必须是同量级两条通路的事
+  #   3) |合计| <= 最大一条的 40%          —— 合计确实被抹掉了
+  # 这里以前还写了"必须一正一负"的显式符号条件。它是**冗余的**：同号时 |合计| >= 最大一条，
+  # 条件 3 数学上就把同号全挡住。我把符号条件整行废掉跑变异，验收一条都不红 ——
+  # 于是确认它是装饰品并删掉。“写了但打不掉”的判据比没有判据更危险：
+  # 它会让人以为那道门有人守。
+  cancel_idx <- integer(0)
+  if (k >= 2L) {
+    stack <- simplify2array(lapply(path_pm, function(m) as.vector(m)))   # p*q x k（k=2 时也是矩阵）
+    if (!is.matrix(stack)) stack <- matrix(as.vector(stack), ncol = k)
+    for (e in seq_len(p * q)) {
+      v <- stack[e, ]
+      o <- sort(abs(v), decreasing = TRUE)
+      strongest <- o[1]; second <- o[2]
+      # 条件 1 与 2 是合取：只写比例会松一档 —— 实测那样"微弱随机符号"对照组立刻报警，
+      # 那条变异就是发现这个的。
+      if (second >= max(0.15, 0.3 * strongest) &&
+          abs(sum(v)) <= 0.4 * strongest) cancel_idx <- c(cancel_idx, e)
+    }
+  }
+  if (length(cancel_idx)) {
+    describe <- vapply(cancel_idx, function(e) {
+      v <- sapply(path_pm, function(m) m[[e]])
+      sprintf("%s：经 M%s 分别 %s，合计 %.2f", cell_lab[e],
+              paste(seq_len(k), collapse = "/"),
+              paste(sprintf("%+.2f", v), collapse = " / "), sum(v))
+    }, character(1))
+    diagnostics <- c(diagnostics, paste0(
+      paste(length(cancel_idx),
+        " 个格子的间接效应被抵消（两条通路方向相反，相加后接近 0）。别把“间接不显著”读成“没有中介”："),
+      paste(describe, collapse = "；"), "。"))
+  }
+
   # ---------------- 收敛诊断：口径来自 mcmc_diagnostics.R，不在这里另写一份 ----------------
   as_chains <- function(flat) lapply(seq_len(chains), function(ci)
     flat[((ci - 1) * Skeep + 1):(ci * Skeep), , drop = FALSE])
@@ -295,6 +354,14 @@ tryCatch({
   }
   ols_dir  <- ols_full[1:p, , drop = FALSE]
   ols_ind  <- ols_g %*% ols_full[(p + 1):(p + k), , drop = FALSE]
+  # 分通路的频率派对照：每条 X_i -> M_k -> Y_j 就是 γ_ik · ω_kj 的外积。
+  # 与合计那份用同一条纪律：加起来必须逐元素等于 ols_ind，否则列序/外积方向错了。
+  ols_paths <- lapply(seq_len(k), function(kk) {
+    matrix(outer(ols_g[, kk], ols_full[p + kk, ]), p, q)
+  })
+  if (max(abs(Reduce(`+`, lapply(ols_paths, as.vector)) - as.vector(ols_ind))) > 1e-8) {
+    diagnostics <- c(diagnostics, "内部校验失败：OLS 分通路之和不等于合计间接效应，请报告。")
+  }
   pm_dir   <- matrix(colMeans(dir_flat), p, q)
   pm_ind   <- matrix(colMeans(ind_flat), p, q)
   # 先验 λ=prior_l 会带来一点收缩，所以不能用硬阈值比小数位。
@@ -322,6 +389,17 @@ tryCatch({
   effects <- list(direct = eff_block(dir_flat, ols_dir),
                   indirect = eff_block(ind_flat, ols_ind),
                   total = eff_block(tot_flat, ols_dir + ols_ind))
+  # 分中介通路：每根柱子一条 M_k。k=1 时也保留这个结构（一条），
+  # 视图不需要为“只有一个中介”写形状分支 —— 形状分支就是上面那几个 bug 的温床。
+  by_mediator <- list(
+    # 字符数组用 I(as.character(.)) 钉形状（与 cell_labels 同一写法）；
+    # as_arr 是给数值用的，拿它包字符串会静默变成一串 NA。
+    mediator_labels = I(as.character(paste0("M", seq_len(k)))),
+    cells = I(as.character(cell_lab)),
+    per_mediator = lapply(seq_len(k), function(kk) eff_block(path_flats[[kk]], ols_paths[[kk]])),
+    cancelled_cells = I(as.character(cell_lab[cancel_idx])),
+    cancelled_count = length(cancel_idx)
+  )
   # 总效应的频率派对照：Y~X 单侧回归（不含 M）。它与 dir+ind 的差别本身就是信息：
   # 差别大说明 M 参与了通路；这里只把它作为参照给出，不当判据。
   effects$total$ols_single_predictor_regression <-
@@ -400,6 +478,7 @@ tryCatch({
     cell_labels = I(as.character(cell_lab)),
 
     effects = effects,
+    indirect_by_mediator = by_mediator,
     direct_matrix = pm_dir, indirect_matrix = pm_ind, total_matrix = pm_dir + pm_ind,
     variance_partition = list(
       x_unique = as_arr(part$x_unique), m_unique = as_arr(part$m_unique),

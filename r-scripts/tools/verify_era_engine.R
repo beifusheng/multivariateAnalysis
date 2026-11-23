@@ -404,6 +404,138 @@ cat(sprintf("\n\u5f15\u64ce\u72b6\u6001\uff1a%s\n",
                    "placeholder —— 首页卡片继续标开发中")))
 }
 
+# ── 30. 分中介通路：拆开看得见，且不许误报 ────────────────────────
+# 引擎每个格子原本只报合计间接效应。两条方向相反的强通路会在合计里互相抹平，
+# 于是「间接效应不含 0」不成立被读成「没有中介」—— 那是反的。
+#
+# 读法必须 simplifyVector = FALSE。fromJSON 默认会把「对象数组」简化成 data.frame：
+# per_mediator 两个块变成 2 行 9 列，length() 拿到 9（列数）而不是 2 ——
+# 断言就对着一个被重塑过的结构比划。这个坑只在 R 侧自查时出现（JS 拿到的是对象数组），
+# 第一次撞上就是刚才那次「通路组 9 / 中介 2」。
+{
+  from_json_raw <- function(f) jsonlite::fromJSON(
+    paste(readLines(f, warn = FALSE), collapse = ""), simplifyVector = FALSE)
+  nums <- function(x) as.numeric(unlist(x))
+
+  mk_paths <- function(samesign) {
+    n <- 80
+    X <- matrix(stats::rnorm(n * 2), n, 2)
+    G <- matrix(c(1.2, 0.9, 0.8, 1.1), 2, 2, byrow = TRUE)          # p x k
+    M <- X %*% G + matrix(stats::rnorm(n * 2, 0, 0.35), n, 2)        # 噪声不能为 0，否则秩亏拒单
+    W <- if (samesign) matrix(c(1.0, 0.9, 1.0, 0.9), 2, 2, byrow = TRUE)
+         else matrix(c(1.0, -0.9, -1.0, 0.9), 2, 2, byrow = TRUE)    # 反号 => 相互抵消
+    B <- matrix(c(0.5, -0.3, 0.2, 0.4), 2, 2, byrow = TRUE)
+    Y <- X %*% B + M %*% W + matrix(stats::rnorm(n * 2, 0, 0.7), n, 2)
+    list(X = unname(X), M = unname(M), Y = unname(Y))
+  }
+
+  set.seed(77L); canc <- mk_paths(FALSE)
+  rc <- run_era(canc, tag = "paths_cancel")
+  if (rc$code != 0L) {
+    ok(FALSE, "分中介通路：反向抵消夹具能跑通", rc$err)
+  } else {
+    r <- from_json_raw(rc$file); bm <- r$indirect_by_mediator
+    ncell <- length(bm$cells); p_ <- as.integer(r$p); q_ <- as.integer(r$q)
+    ok(length(bm$per_mediator) == 2L && length(bm$mediator_labels) == 2L,
+       "两个中介就给出两条通路（不是把合计拆成好看的份数）",
+       sprintf("通路组 %d / 中介 %d", length(bm$per_mediator), length(bm$mediator_labels)))
+    ssum <- nums(bm$per_mediator[[1]]$mean)
+    if (length(bm$per_mediator) > 1L) for (kk in 2:length(bm$per_mediator)) ssum <- ssum + nums(bm$per_mediator[[kk]]$mean)
+    ind_mean <- nums(r$effects$indirect$mean)
+    ok(ncell == p_ * q_ && max(abs(ssum - ind_mean)) < 1e-9,
+       "恒等式：Σ 分通路后验均值 == 合计间接效应（逐格）",
+       sprintf("格 %d / 最大偏差 %.3g", ncell, max(abs(ssum - ind_mean))))
+    so <- nums(bm$per_mediator[[1]]$ols)
+    if (length(bm$per_mediator) > 1L) for (kk in 2:length(bm$per_mediator)) so <- so + nums(bm$per_mediator[[kk]]$ols)
+    ok(max(abs(so - nums(r$effects$indirect$ols))) < 1e-9,
+       "恒等式同样成立于频率派一侧（Σ OLS 通路 == OLS 间接）",
+       sprintf("最大偏差 %.3g", max(abs(so - nums(r$effects$indirect$ols)))))
+    # 阈值按实测（2/4）留一格余量，而不是按"设计上应该 4 格全部抵消"的愿望。
+    # 为什么不是 4：X1 两条通路的量级差得比 X2 多一些（噪声实现不同，标准化后比例不同），
+    # 判据是比例式的，所以格子数本来就随数据走 —— 要的是"能识别出抵消"，不是数满。
+    ok(as.integer(bm$cancelled_count) >= 2L,
+       sprintf("反向通路被识别为抵消（%d/%d 格）", as.integer(bm$cancelled_count), ncell),
+       sprintf("count=%s cells=%s", bm$cancelled_count, paste(unlist(bm$cancelled_cells), collapse = "/")))
+    ok(all(unlist(bm$cancelled_cells) %in% bm$cells),
+       "抵消必须点名到具体格子（只给个数用户无法复核）",
+       paste(unlist(bm$cancelled_cells), collapse = "/"))
+    ok(any(grepl("抵消", unlist(r$diagnostics))), "诊断里说了「抵消」并把两个方向摆出来",
+       paste(unlist(r$diagnostics), collapse = " / "))
+    path_max <- max(abs(unlist(lapply(bm$per_mediator, function(b) nums(b$mean)))))
+    tot_max <- max(abs(ind_mean))
+    ok(tot_max < 0.5 * path_max,
+       sprintf("合计被压到单条通路的一半以下（%.3f vs %.3f）", tot_max, path_max),
+       sprintf("合计最大 %.4f / 单条最大 %.4f", tot_max, path_max))
+    ok(all(unlist(lapply(bm$per_mediator, function(b)
+      length(b$hdi_lo) == ncell && length(b$hdi_hi) == ncell))),
+       "每条通路都给上下界（只给均值就画不出「拆开看得见」）",
+       paste(sapply(bm$per_mediator, function(b) length(b$hdi_lo)), collapse = "/"))
+  }
+
+  set.seed(77L); same <- mk_paths(TRUE)
+  rs <- run_era(same, tag = "paths_same")
+  if (rs$code != 0L) {
+    ok(FALSE, "分中介通路：同向夹具能跑通", rs$err)
+  } else {
+    jrs <- from_json_raw(rs$file); bms <- jrs$indirect_by_mediator
+    # 同向对照组。注意它守的是"必须有反号"这一层，**不守量级阈值**：
+    # 我试过把量级下限从 0.15 放到 0.02，这条一条都不红（同向夹具里根本没有负号）。
+    # 量级那一层由下面"符号随机但通路微弱"那条对照守，它被同一个变异打掉了。
+    ok(as.integer(bms$cancelled_count) == 0L,
+       "同向强通路不许报抵消（对照组，只守符号那一层）",
+       sprintf("报了 %s 格：%s", bms$cancelled_count, paste(unlist(bms$cancelled_cells), collapse = "/")))
+    ims <- nums(jrs$effects$indirect$mean)
+    ok(min(abs(ims)) > 0.2, "同向时合计应当远离 0（拆开与不拆开结论一致）",
+       paste(sprintf("%.2f", ims), collapse = " "))
+  }
+
+  # 第三个对照：**符号随机但通路都很微弱**。这条才真正守量级阈值。
+  # 为什么需要它：我先把"同向不报警"当成阈值收紧的依据，然后把下限从 0.15 放到 0.02
+  # 去做变异 —— 一条都不红。因为同向夹具里根本没有负号，它只守得住"必须有反号"。
+  # 而线上真正的误报来源是 highdim 那种"随机符号互相碰"（曾经报 5/24 格）。
+  set.seed(79L)
+  n3 <- 60
+  X3 <- matrix(stats::rnorm(n3 * 3), n3, 3)
+  G3 <- matrix(stats::rnorm(9) * 0.6, 3, 3)                     # p x k，中等强度
+  M3 <- X3 %*% G3 + matrix(stats::rnorm(n3 * 3, 0, 1), n3, 3)
+  W3 <- matrix(c(0.06, -0.05, 0.04, -0.06, 0.05, -0.04, 0.05, 0.04, -0.06), 3, 3, byrow = TRUE)
+  B3 <- matrix(stats::rnorm(9) * 0.2, 3, 3)
+  Y3 <- X3 %*% B3 + M3 %*% W3 + matrix(stats::rnorm(n3 * 3, 0, 1), n3, 3)
+  rw <- run_era(list(X = unname(X3), M = unname(M3), Y = unname(Y3),
+                     chains = 2L, iterations = 2000L, thin = 4L, seed = 11L,
+                     prior_lambda = 1, prob = 0.95), tag = "paths_weak")
+  if (rw$code != 0L) {
+    ok(FALSE, "分中介通路：微弱随机符号夹具能跑通", rw$err)
+  } else {
+    jw <- from_json_raw(rw$file); bmw <- jw$indirect_by_mediator
+    wmax <- max(abs(unlist(lapply(bmw$per_mediator, function(b) nums(b$mean)))))
+    ok(as.integer(bmw$cancelled_count) == 0L,
+       sprintf("符号随机但通路微弱（最大 %.3f）不许报抵消 —— 这条守的是量级阈值", wmax),
+       sprintf("报了 %s 格：%s", bmw$cancelled_count, paste(unlist(bmw$cancelled_cells), collapse = "/")))
+  }
+
+  # k=1 是最容易把结构写崩的形状：通路层必须还在，而且与合计逐格相等
+  set.seed(77L); one <- mk_paths(FALSE); one$M <- one$M[, 1, drop = FALSE]
+  r1 <- run_era(one, tag = "paths_k1")
+  if (r1$code != 0L) {
+    ok(FALSE, "分中介通路：只有一个中介时能跑通", r1$err)
+  } else {
+    j1 <- from_json_raw(r1$file); bm1 <- j1$indirect_by_mediator
+    ok(length(bm1$per_mediator) == 1L && as.integer(bm1$cancelled_count) == 0L &&
+         max(abs(nums(bm1$per_mediator[[1]]$mean) - nums(j1$effects$indirect$mean))) < 1e-12,
+       "k=1 时通路层保留、与合计完全一致、且不误报抵消",
+       sprintf("组 %d / 抵消 %s", length(bm1$per_mediator), bm1$cancelled_count))
+    raw <- paste(readLines(r1$file, warn = FALSE), collapse = " ")
+    ok(grepl('"mediator_labels"[ \t]*:[ \t]*\\[', raw),
+       "k=1 时 mediator_labels 在 JSON 里仍是数组",
+       substr(raw, max(1L, regexpr('"mediator_labels"', raw)), 60))
+    ok(grepl('"cancelled_cells"[ \t]*:[ \t]*\\[', raw),
+       "没有抵消格子时 cancelled_cells 是空数组而不是 null",
+       substr(raw, max(1L, regexpr('"cancelled_cells"', raw)), 60))
+  }
+}
+
+
 cat("\n\u2500\u2500\u2500 Bayesian ERA 验收汇总 \u2500\u2500\u2500\n")
 if (length(fails)) {
   cat(sprintf("[FAIL] %d 项通过 / %d 项失败\n", pass, length(fails)))

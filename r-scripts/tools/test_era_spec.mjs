@@ -33,7 +33,8 @@ const require_ = createRequire(import.meta.url);
 // §3 用它逐键消费。两处共用一份清单，避免"§2 放行、§3 沉默"。
 const JUDGED = ['indirect_excl_zero_min', 'indirect_excl_zero_max', 'direct_excl_zero_min',
   'direct_contains_zero_min', 'sign_inconsistent_min', 'total_contains_zero_min',
-  'r2_xm_min', 'convergence_ok', 'must_warn', 'must_refuse', 'shrinkage', 'prob_effect'];
+  'r2_xm_min', 'convergence_ok', 'must_warn', 'must_refuse', 'shrinkage', 'prob_effect',
+  'cancelled_min'];
 
 let pass = 0, fail = 0;
 const fails = [];
@@ -75,9 +76,9 @@ console.log('\n=== 1. 声明本身（视图的外壳靠这些字段循环）==='
 console.log('\n=== 2. 模板目录与设计事实（不跑 R 也能验的那部分）===');
 const ids = Object.keys(spec.ERA_TEMPLATE_MAP);
 {
-  t('十个模板，顺序与分组写死（加/删模板必须同时动对账器）',
-    ids.length === 10 && ids.length === spec.ERA_TEMPLATE_COUNT &&
-      ids.join(',') === 'fullmed,partmed,strongprior,prob80,nome,inconsistent,collinear,highdim,nonconv,smallN', ids.join(','));
+  t('十一个模板，顺序与分组写死（加/删模板必须同时动对账器）',
+    ids.length === 11 && ids.length === spec.ERA_TEMPLATE_COUNT &&
+      ids.join(',') === 'fullmed,partmed,strongprior,prob80,nome,inconsistent,collinear,cancelmed,highdim,nonconv,smallN', ids.join(','));
   // label 上的数字必须与 spec 一致：rank1 曾写"80 样本"而 spec 是 40，用户照文案准备数据就踩空
   const badLabel = ids.filter((id) => {
     const sp = spec.ERA_TEMPLATE_MAP[id].spec;
@@ -219,12 +220,47 @@ console.log('\n=== 3. 六个模板逐个端到端：真 xlsx → 解析 → 填�
       'effects.direct.mean', 'effects.direct.hdi_lo', 'effects.direct.hdi_hi', 'effects.direct.rhat',
       'effects.direct.ess', 'effects.direct.ols', 'effects.indirect.mean', 'effects.indirect.hdi_lo',
       'effects.indirect.prob_gt0', 'effects.total.mean', 'variance_partition.x_unique',
-      'variance_partition.shared', 'variance_partition.residual', 'convergence.rhat', 'convergence.ess'];
+      'variance_partition.shared', 'variance_partition.residual', 'convergence.rhat', 'convergence.ess',
+      // 分中介通路：k=1 / q=1 时最容易降级，而视图对它做的是 .map()
+      'indirect_by_mediator.mediator_labels', 'indirect_by_mediator.cells',
+      'indirect_by_mediator.cancelled_cells', 'indirect_by_mediator.per_mediator.0.mean'];
     const dig = (obj, dotted) => dotted.split('.').reduce((o, kk) => (o == null ? o : o[kk]), obj);
     const degraded = ARR_PATHS.filter((pp) => !Array.isArray(dig(r, pp)));
     t(`${tag} 逐响应/逐格字段全是数组（长度 1 也不许降级成标量）`,
       degraded.length === 0, degraded.length ? `降级成了标量：${degraded.join(', ')}` : '');
     if (degraded.length) continue;
+
+    // 分中介通路的恒等式是**代数事实**，每张表都查、不写进 expect
+    // （写进 expect 就变成"只有填了它的模板才验"，那是 §19 里 prob 的下场）。
+    {
+      const bm = r.indirect_by_mediator;
+      const sumByMed = bm.cells.map((_, ci) =>
+        bm.per_mediator.reduce((acc, blk) => acc + blk.mean[ci], 0));
+      const maxDiff = Math.max(...sumByMed.map((v, ci) => Math.abs(v - r.effects.indirect.mean[ci])));
+      t(`${tag} Σ(分中介通路) 逐格等于合计间接效应（最大偏差 ${maxDiff.toExponential(1)}）`,
+        bm.per_mediator.length === bm.mediator_labels.length &&
+          bm.cells.length === r.cell_labels.length && maxDiff < 1e-6,
+        `通路组 ${bm.per_mediator.length} / 中介 ${bm.mediator_labels.length} / 格 ${bm.cells.length}`);
+      if (bm.mediator_labels.length === 1) {
+        t(`${tag} 只有一个中介：通路必须与合计完全一致，且不许误报抵消`,
+          bm.cancelled_count === 0 &&
+            bm.per_mediator[0].mean.every((v, ci) => Math.abs(v - r.effects.indirect.mean[ci]) < 1e-9),
+          `抵消=${bm.cancelled_count}`);
+      }
+      if (bm.cancelled_count > 0) {
+        t(`${tag} 报了 ${bm.cancelled_count} 个抵消格子，就必须点名是哪几格（不许只给个数）`,
+          bm.cancelled_cells.length === bm.cancelled_count &&
+            bm.cancelled_cells.every((x) => r.cell_labels.includes(x)),
+          JSON.stringify(bm.cancelled_cells));
+      }
+      // 表上的"参与抵消"标记走的是导出/界面共用的 eraMediatorPathRows：
+      // 这里验它，等于同时验导出里那一列不是装饰品
+      const prow = spec.eraMediatorPathRows(r);
+      const marked = prow.slice(1).filter((rw) => rw[8] === '是').length;
+      t(`${tag} 参与抵消标记与引擎判定一致（每格至少两条通路被打上，否则看不出是谁抵消谁）`,
+        marked === 0 || marked >= 2 * bm.cancelled_cells.length,
+        `标记 ${marked} 行 / 抵消 ${bm.cancelled_cells.length} 格`);
+    }
 
     // ---- 逐键消费 expect ----
     const truth = spec.eraTemplateTruth(id);
@@ -255,6 +291,16 @@ console.log('\n=== 3. 六个模板逐个端到端：真 xlsx → 解析 → 填�
       } else if (kk === 'convergence_ok') {
         t(`${tag} expect 收敛达标（R̂max ${r.convergence.rhat_max.toFixed(4)} / ESSmin ${Math.round(r.convergence.ess_min)}）`,
           r.convergence.ok === vv, JSON.stringify(r.convergence).slice(0, 160));
+      } else if (kk === 'cancelled_min') {
+        const bm = r.indirect_by_mediator;
+        t(`${tag} expect 至少 ${vv} 个格子被识别为两条通路相互抵消（实际 ${bm.cancelled_count}：${bm.cancelled_cells.join('/') || '无'}）`,
+          bm.cancelled_count >= vv, String(bm.cancelled_count));
+        // 光数个数不够。抵消的意义就在"合计看不见、拆开看得见"，所以同时要求
+        // 至少一条单中介通路的区间明显偏离 0 —— 否则"抵消"只是两个微弱数互相碰。
+        const strongPath = bm.per_mediator.some((blk) =>
+          blk.hdi_lo.some((lo) => lo > 0.05) || blk.hdi_hi.some((hi) => hi < -0.05));
+        t(`${tag} 抵消必须"拆开看得见"：至少一条单中介通路的区间明显偏离 0`, strongPath,
+          JSON.stringify(bm.per_mediator.map((b) => b.hdi_lo.map((x) => x.toFixed(2)))));
       } else if (kk === 'shrinkage') {
         // 同一轮结果里自比：强先验必须把后验均值往 0 拉（实测 0.0716 vs OLS 0.4395）
         const pm = Math.max(...r.effects.indirect.mean.map((x) => Math.abs(x)));
@@ -354,9 +400,26 @@ console.log('\n=== 4. 导出计划器 ===');
       jobs.length === 4 && jobs.every((j) => /^BayesianERA .+_\d{8}_\d{6}\.(xlsx|json|png)$/.test(j.filename)),
       jobs.map((j) => j.filename).join(' , '));
     const xls = jobs.find((j) => j.type === 'xlsx');
-    t('Excel 五张表：结论/效应表/方差分解/收敛诊断/模型信息',
-      xls.sheets.map((s) => s.name).join(',') === '结论,效应表,方差分解,收敛诊断,模型信息',
+    t('Excel 六张表：结论/效应表/分中介通路/方差分解/收敛诊断/模型信息',
+      xls.sheets.map((s) => s.name).join(',') === '结论,效应表,分中介通路,方差分解,收敛诊断,模型信息',
       xls.sheets.map((s) => s.name).join(','));
+    // 分中介通路表：行数 = 格子数 × 中介数（k=1 也得有一张，不许因为"只有一个中介"就省掉）
+    {
+      const pmSheet = xls.sheets.find((x) => x.name === '分中介通路');
+      const bm = r.indirect_by_mediator;
+      t('分中介通路表 9 列、行数 = 格子 × 中介（这张表是"拆开看得见"的唯一载体）',
+        pmSheet && pmSheet.aoa[0].length === 9 &&
+          pmSheet.aoa.length === 1 + r.cell_labels.length * bm.per_mediator.length,
+        pmSheet ? `${pmSheet.aoa.length - 1} 行` : '没有这张表');
+      if (pmSheet) {
+        const sumByCell = {};
+        pmSheet.aoa.slice(1).forEach((rw) => { sumByCell[rw[0]] = (sumByCell[rw[0]] || 0) + rw[2]; });
+        const worst = Math.max(...Object.entries(sumByCell).map(([nm, v]) =>
+          Math.abs(v - r.effects.indirect.mean[r.cell_labels.indexOf(nm)])));
+        t(`表里的通路之和与效应表的合计间接对得上（最大偏差 ${worst.toExponential(1)}）`,
+          worst < 1e-6, '');
+      }
+    }
     const eff = xls.sheets.find((s) => s.name === '效应表').aoa;
     t('效应表把直接/间接/总的区间与 OLS 对照一起带上（用户能自己核）',
       eff[0].includes('间接·下界') && eff[0].includes('OLS 间接') && eff.length === 1 + r.p * r.q,

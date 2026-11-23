@@ -256,8 +256,61 @@ export const ERA_CHART_BLANK_REASON = {
   diag: 'effects.*.rhat / ess'
 };
 
+/**
+ * 分中介通路：每格拆成“经 M1 / 经 M2 …”的柱子 + 合计间接效应点。
+ *
+ * 存在的理由就是一个画面：两条强通路反号时，柱子一边正一边负，
+ * 而合计的点贴在 0 上 —— 用户于是不会再读成“没有中介”。
+ * 被引擎判为抵消的格子在类目上挂个 ⚖，鼠标上去还会再讲一遂。
+ */
+function pathBarsOption(r, F) {
+  const bm = r.indirect_by_mediator;
+  // 没有这个块只有两种情况：旧版引擎的输出，或结果本身不完整 —— 两种都宁可不出图
+  if (!bm || !Array.isArray(bm.per_mediator) || !bm.per_mediator.length) return null;
+  const cells = Array.isArray(bm.cells) && bm.cells.length ? bm.cells : (r.cell_labels || []);
+  if (!cells.length) return null;
+  const cancelled = new Set(bm.cancelled_cells || []);
+  const colors = ['#409eff', '#e6a23c', '#67c23a', '#f56c6c', '#909399', '#b37feb'];
+  const series = bm.per_mediator.map((blk, mi) => ({
+    type: 'bar',
+    name: '经 ' + ((bm.mediator_labels || [])[mi] || 'M' + (mi + 1)),
+    itemStyle: { color: colors[mi % colors.length] },
+    barMaxWidth: 26,
+    data: cells.map((_, ci) => F.num((blk.mean || [])[ci]))
+  }));
+  series.push({
+    type: 'scatter', name: '合计间接（后验均值）', symbolSize: 11,
+    itemStyle: { color: '#303133' },
+    data: cells.map((_, ci) => F.num((r.effects.indirect.mean || [])[ci]))
+  });
+  return {
+    _cancelled: bm.cancelled_cells || [],
+    grid: { left: 62, right: 26, top: 46, bottom: 58 },
+    legend: { top: 8 },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (ps) => {
+        const nm = String(ps[0].axisValue).replace(/ ⚖$/, '');
+        return `${nm}<br/>` + ps.map((p) => `${p.marker}${p.seriesName} ${F.fmt(p.value, 4)}`).join('<br/>') +
+          (cancelled.has(nm)
+            ? '<br/><b>此格被判定为抵消：两条通路方向相反且量级相当，合计接近 0。'
+              + '“间接效应不含 0”不成立不等于“没有中介”。</b>'
+            : '');
+      }
+    },
+    xAxis: {
+      type: 'category',
+      data: cells.map((nm) => (cancelled.has(nm) ? nm + ' ⚖' : nm)),
+      axisLabel: { interval: 0, rotate: cells.length > 8 ? 32 : 0, fontSize: 11 }
+    },
+    yAxis: { type: 'value', name: '标准化通路强度' },
+    series
+  };
+}
+
 export const ERA_CHART_TABS = [
   { id: 'forest', name: '效应森林图', tip: '每格直接/间接/总三块区间与 0 参考线 —— 含不含 0 一眼看出' },
+  { id: 'paths', name: '分中介通路', tip: '每格按“经 M1 / 经 M2 …”拆开 + 合计点：两条强通路反号时，合计贴在 0 上但柱子看得见' },
   { id: 'density', name: '间接效应密度', tip: '逐格后验密度（ridge）：区间宽度与"含 0"是两件事，这里看得清' },
   { id: 'partition', name: '方差分解', tip: '逐响应 X 独有 / X∩M / M 独有 / 残差，四块之和必须为 1' },
   { id: 'diag', name: '收敛诊断', tip: 'ESS × split-R̂ 与两条阈值线：越线的格子（红）不该拿来下结论' }
@@ -265,6 +318,7 @@ export const ERA_CHART_TABS = [
 
 export const ERA_CHART_BUILDERS = {
   forest: (r, F) => forestOption(r, F),
+  paths: (r, F) => pathBarsOption(r, F),
   density: (r, F) => densityOption(r, F),
   partition: (r, F) => partitionOption(r, F),
   diag: (r, F) => diagOption(r, F)

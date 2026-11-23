@@ -277,6 +277,61 @@ console.log('\n=== 5. 图表构造器（E）===');
     const cut3 = JSON.parse(JSON.stringify(r)); cut3.effects.indirect.ess = [];
     check('诊断图 ESS 为空 -> builder 返回 null', b.diag(cut3, FMT) === null);
 
+    // ---- 分中介通路图：引擎新报的那一层必须真能画，而不是多一个 tab 占位 ----
+    // k=1（这份 partmed）：一张图 = 1 柱 + 1 个合计点，而且不许误报抵消。
+    const p1 = b.paths(r, FMT);
+    check('分中介通路：k=1 时出得来（1 组柱子 + 合计点），不能当成退化形状直接不出图',
+      !!p1 && p1.series.length === 2 && p1.series[0].data.length === r.cell_labels.length,
+      p1 ? `${p1.series.length} 组系列` : 'null');
+    check('分中介通路：k=1 时类目上不许出现抵消标记', p1 && !p1.xAxis.data.some((x) => /⚖/.test(x)),
+      p1 && p1.xAxis.data.join(','));
+    const cutP = JSON.parse(JSON.stringify(r)); delete cutP.indirect_by_mediator;
+    check('分中介通路：没有这一层时 builder 返回 null（由视图决定怎么开口）',
+      b.paths(cutP, FMT) === null, '');
+
+    // 真跑一份 cancelmed（两条中介反号）：抵消必须在这个图上能看见。
+    // 不在这里手造一个假 bm —— 那个只能证明我自己的图代码能画自己编的数。
+    const shC = spec.eraTemplateSheets('cancelmed');
+    const kvC = Object.fromEntries(shC[3].aoa.slice(1));
+    const runC = runR({
+      X: shC[0].aoa.slice(1).map((x) => x.slice(1).map(Number)),
+      M: shC[1].aoa.slice(1).map((x) => x.slice(1).map(Number)),
+      Y: shC[2].aoa.slice(1).map((x) => x.slice(1).map(Number)),
+      chains: 2, iterations: +kvC.iterations, thin: +kvC.thin, seed: +kvC.seed,
+      prior_lambda: +kvC.prior_lambda, prob: +kvC.prob
+    }, 'view-cancelmed');
+    if (runC.err) {
+      check('cancelmed 真跑得出来（分中介通路图的先决条件）', false, runC.err.slice(0, 180));
+    } else {
+      const rc = runC.r;
+      const bm = rc.indirect_by_mediator;
+      check('cancelmed：两个中介都被拆开给出', bm.per_mediator.length === 2 && bm.mediator_labels.length === 2,
+        JSON.stringify(bm.mediator_labels));
+      check(`cancelmed：引擎真报了抵消（${bm.cancelled_count} 格），这些格子在图上挂 ⚖`,
+        bm.cancelled_count >= 3 && bm.cancelled_cells.every((x) => rc.cell_labels.includes(x)),
+        `${bm.cancelled_count} 格：${bm.cancelled_cells.join('/')}`);
+      const p2 = b.paths(rc, FMT);
+      const withFlag = p2.xAxis.data.filter((x) => /⚖$/.test(x)).length;
+      check('图上每个被判定抵消的格子都看得见（⚖ 数量 = 抵消格数，不是只写在诊断里）',
+        withFlag === bm.cancelled_count, `旗标 ${withFlag} / 抵消 ${bm.cancelled_count}`);
+      const tip = p2.tooltip.formatter([{ axisValue: bm.cancelled_cells[0], value: 0, seriesName: 'x', marker: '' }]);
+      check('鼠标提示会把“抵消不等于没有中介”说出来（用户不必自己回推）',
+        /抵消/.test(tip) && /不等于/.test(tip), tip.replace(/<[^>]+>/g, '').slice(0, 90));
+      // 柱子之和与合计点对得上：图与结论不能各算各的（本项目老对头）
+      const sumBars = rc.cell_labels.map((_, ci) =>
+        bm.per_mediator.reduce((acc, blk) => acc + blk.mean[ci], 0));
+      check('柱子里相加就是合计点（同一份数字，不自己重算）',
+        Math.max(...sumBars.map((v, ci) => Math.abs(v - rc.effects.indirect.mean[ci]))) < 1e-6, '');
+      check('抵消的代价看得见：合计贴 0 而单条通路远离 0',
+        Math.max(...rc.effects.indirect.mean.map(Math.abs)) < 0.5 *
+          Math.max(...bm.per_mediator[0].mean.map(Math.abs)),
+        `合计最大 ${Math.max(...rc.effects.indirect.mean.map(Math.abs)).toFixed(3)}`);
+      check('导出与界面共用同一个行表函数（分中介通路表不为导出另写一份）',
+        typeof spec.eraMediatorPathRows === 'function' &&
+          spec.eraMediatorPathRows(rc).length === 1 + rc.cell_labels.length * 2,
+        `${spec.eraMediatorPathRows(rc).length} 行`);
+    }
+
     console.log('\n=== 6. renderChart 的每条失败路径都要开口 ===');
     const vm = makeVm();
     vm.analysisResult = null;

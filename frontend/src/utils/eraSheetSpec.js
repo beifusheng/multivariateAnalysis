@@ -208,6 +208,22 @@ export const ERA_TEMPLATE_GROUPS = [
           expect: { must_refuse: 'X 与 M 合起来秩亏' },
           note: '这不是采样问题，加迭代也没用 —— 得改设计（增加 M 的测量时点，或删掉那一列中介）'
         }
+      },
+      {
+        id: 'cancelmed', icon: '⚖️', label: '两条中介相互抵消（60 样本 × 2 预测 × 2 中介 × 2 响应）',
+        tip: 'M1 与 M2 的下游系数反号且量级相当：合计间接效应接近 0，看起来“没中介”，其实两条强通路在互相抹平。以前引擎只报合计，这张图根本没法做',
+        // 真值上 |γ·ω| 每条约 1，而四个格子的合计只有 ±0.3 —— 这就是“抵消”的形状。
+        // noiseM 不能太小：上一版拿 0 做夹具，M 直接落在 X 的张成空间里，当场秩亏拒单。
+        spec: {
+          p: 2, k: 2, q: 2, n: 60,
+          gamma: [1.2, 0.9, 0.8, 1.1],
+          beta: [0.5, -0.3, 0.2, 0.4],
+          omega: [1.0, -0.9, -1.0, 0.9],
+          noiseM: 0.35, noiseY: 0.7,
+          seed: 518, chains: 4, iterations: 4000, thin: 5, priorLambda: 1, prob: 0.95,
+          expect: { cancelled_min: 3, indirect_excl_zero_max: 1, convergence_ok: true, r2_xm_min: 0.3 },
+          note: '“间接不显著”在这张表上是错读：得按中介拆开才看得见两条强通路'
+        }
       }
     ]
   },
@@ -482,10 +498,42 @@ export function eraToFormPatch(fields) {
 }
 
 /* ==================== 导出计划器 ==================== */
+/**
+ * 分中介通路的表行（导出与界面共用一份）。
+ *
+ * 为什么单独一张：引擎每个格子报的“间接效应”是**所有中介的合计**。
+ * 两条方向相反的强通路会在合计里互相抹平 —— 只看合计就会把
+ * “有两条强中介通路”错读成“没有中介”。cancelmed 模板实测 4/4 格被判抵消，
+ * 而合计间接效应最多 1 格的区间不含 0。
+ *
+ * 列序与引擎的 cell_lab 一致（列主序：X1Y1..XpY1, X1Y2...），
+ * 所以直接拿 bm.cells 当下标用，不自己拼标签（两边各自拼就会错位）。
+ */
+export function eraMediatorPathRows(r) {
+  const head = ['格子', '中介', '通路·均值', '通路·下界', '通路·上界',
+    '通路 >0 概率', 'OLS 通路', '本格合计间接', '参与抵消'];
+  const bm = r && r.indirect_by_mediator;
+  if (!bm || !Array.isArray(bm.per_mediator) || !bm.per_mediator.length) return [head];
+  const cells = Array.isArray(bm.cells) ? bm.cells : (r.cell_labels || []);
+  const cancelled = new Set(bm.cancelled_cells || []);
+  const rows = [];
+  cells.forEach((nm, ci) => {
+    bm.per_mediator.forEach((blk, mi) => {
+      const m = (blk.mean || [])[ci];
+      rows.push([nm, (bm.mediator_labels || [])[mi], m,
+        (blk.hdi_lo || [])[ci], (blk.hdi_hi || [])[ci], (blk.prob_gt0 || [])[ci],
+        (blk.ols || [])[ci], (r.effects.indirect.mean || [])[ci],
+        // “参与抵消”只给量级够大的通路打勾：微弱数互相碰不算抵消（引擎里同一阈值）
+        cancelled.has(nm) && Math.abs(m) >= 0.15 ? '是' : '']);
+    });
+  });
+  return [head].concat(rows);
+}
+
 export const ERA_EXPORT_OPTIONS = [
   {
     key: 'excel',
-    label: '分析结果（Excel：结论 / 效应表 / 方差分解 / 收敛诊断 / 模型信息）',
+    label: '分析结果（Excel：结论 / 效应表 / 分中介通路 / 方差分解 / 收敛诊断 / 模型信息）',
     type: 'xlsx',
     fileTag: '结果',
     sheets(ctx) {
@@ -540,6 +588,7 @@ export const ERA_EXPORT_OPTIONS = [
       return [
         { name: '结论', aoa: concl },
         { name: '效应表', aoa: [effHead].concat(effRows) },
+        { name: '分中介通路', aoa: eraMediatorPathRows(r) },
         { name: '方差分解', aoa: part },
         { name: '收敛诊断', aoa: conv },
         { name: '模型信息', aoa: info }
