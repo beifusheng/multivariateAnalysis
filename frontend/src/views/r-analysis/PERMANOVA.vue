@@ -496,12 +496,11 @@
   <el-dialog v-model="showPosthocDialog" title="🔬 事后检验配置" width="500px">
     <div class="posthoc-dialog-content">
       <el-form :label-width="'120px'">
-        <el-form-item label="p 值校正方法：">
+        <el-form-item label="显著性口径：">
           <el-select v-model="posthocParams.method" placeholder="请选择" style="width: 100%;">
-            <el-option label="FDR (Benjamini-Hochberg) - 推荐" value="fdr" />
-            <el-option label="Bonferroni - 保守" value="bonferroni" />
-            <el-option label="BH (Benjamini-Hochberg)" value="bh" />
-            <el-option label="无校正" value="none" />
+            <el-option label="BH / FDR（Benjamini-Hochberg，推荐）" value="bh" />
+            <el-option label="Bonferroni（保守）" value="bonferroni" />
+            <el-option label="不校正（看原始置换 p）" value="none" />
           </el-select>
         </el-form-item>
 
@@ -511,8 +510,9 @@
         </el-form-item>
 
         <el-alert title="注意事项" type="warning" :closable="false" show-icon style="margin-top: 16px;">
-          <p>事后检验会进行所有组的两两比较，计算量较大。</p>
-          <p>建议使用 FDR 校正以平衡假阳性和假阴性。</p>
+          <p>每个对子都单独跑一次两组 PERMANOVA（在它们的样本上重新置换），不是拿整体 p 去拆。</p>
+          <p>BH 与 Bonferroni 两列都会给出，选择只决定星号从哪一列起。</p>
+          <p>组合数小的对子改用穷举精确置换（默认阈值 5 万划分），此时 p 是精确值。</p>
         </el-alert>
       </el-form>
 
@@ -536,12 +536,32 @@
         <el-table :data="posthocResult.comparisons" border style="width: 100%;"
           :header-cell-style="{ background: '#f0f9ff', color: '#0369a1', fontWeight: 600, textAlign: 'center' }"
           :cell-style="{ textAlign: 'center' }">
-          <el-table-column prop="group1" label="组 1" min-width="120" />
-          <el-table-column prop="group2" label="组 2" min-width="120" />
-          <el-table-column prop="F" label="F 值" min-width="100" />
-          <el-table-column prop="R2" label="R²" min-width="100" />
-          <el-table-column prop="p" label="p 值" min-width="100" />
-          <el-table-column prop="p_adj" label="校正 p 值" min-width="120" />
+          <el-table-column prop="group1" label="组 1" min-width="90" />
+          <el-table-column prop="group2" label="组 2" min-width="90" />
+          <el-table-column label="n1 / n2" min-width="80">
+            <template #default="scope">{{ scope.row.n1 }} / {{ scope.row.n2 }}</template>
+          </el-table-column>
+          <el-table-column label="组内平均距离" min-width="130">
+            <template #default="scope">{{ fmtP(scope.row.mean_within_1) }} . {{ fmtP(scope.row.mean_within_2) }}</template>
+          </el-table-column>
+          <el-table-column label="组间平均距离" min-width="110">
+            <template #default="scope">{{ fmtP(scope.row.mean_between) }}</template>
+          </el-table-column>
+          <el-table-column label="pseudo-F" min-width="100">
+            <template #default="scope">{{ Number.isFinite(scope.row.F) ? fmtP(scope.row.F) : 'Inf' }}</template>
+          </el-table-column>
+          <el-table-column label="R²" min-width="90">
+            <template #default="scope">{{ fmtP(scope.row.R2) }}</template>
+          </el-table-column>
+          <el-table-column label="p（置换）" min-width="100">
+            <template #default="scope">{{ fmtP(scope.row.p) }}</template>
+          </el-table-column>
+          <el-table-column label="p（BH）" min-width="100">
+            <template #default="scope">{{ fmtP(scope.row.p_bh) }}</template>
+          </el-table-column>
+          <el-table-column label="p（Bonferroni）" min-width="120">
+            <template #default="scope">{{ fmtP(scope.row.p_bonferroni) }}</template>
+          </el-table-column>
           <el-table-column label="显著性" min-width="100">
             <template #default="scope">
               <el-tag :type="scope.row.significance === '***' ? 'danger' :
@@ -553,12 +573,21 @@
           </el-table-column>
         </el-table>
 
-        <div class="posthoc-significance-hint" style="margin-top: 16px;">
+        <div class="posthoc-significance-hint" style="margin-top: 16px; line-height: 1.7;">
           <el-icon>
             <InfoFilled />
           </el-icon>
-          <span>显著性标记：*** p < 0.001, ** p < 0.01, * p < 0.05</span>
+          <span>
+            星号取自当前口径（本次为<strong>{{ posthocPrimaryLabel }}</strong>）那列 p：*** &lt; 0.001，** &lt; 0.01，* &lt; 0.05。<br />
+            置换检验的 p 有分辨率下限：随机置换是 1/(次数+1)。p 报到底只能说明「至少这么小」，不能当作「绝对显著」。<br />
+            BH 与 Bonferroni 两列永远并列：两者结论不同的对子最该被看见，不由软件替读者决定。
+          </span>
         </div>
+
+        <el-alert v-if="posthocResult.diagnostics && posthocResult.diagnostics.length" type="warning"
+          title="诊断" :closable="false" show-icon style="margin-top: 12px;">
+          <p v-for="(d, i) in posthocResult.diagnostics" :key="i">{{ d }}</p>
+        </el-alert>
       </div>
     </div>
 
@@ -574,7 +603,8 @@
 <script>
 import {
   checkR,
-  runPERMANOVA
+  runPERMANOVA,
+  runPERMANOVAPosthoc
 } from '@/api/r';
 
 import ToolbarActions from '@/components/r-analysis/ToolbarActions.vue';
@@ -582,6 +612,7 @@ import ImportDialog from '@/components/r-analysis/ImportDialog.vue';
 import ExportDialog from '@/components/r-analysis/ExportDialog.vue';
 import { readWorkbook, mapWorkbook, previewFromFields, writeWorkbook, templateFilename, fileStamp } from '@/utils/sheetIo';
 import { makeFormatters } from '@/utils/format';
+import { pmPosthocSheets, pmPosthocFilename } from '@/utils/permanovaSheetSpec';
 
 const FORMATTERS = makeFormatters();
 
@@ -721,6 +752,14 @@ export default {
   },
 
   computed: {
+    // 口径回显取自 R 的结果（它自己把 fdr 归一为 bh）-- 视图不另推一套，
+    // 否则引擎改了口径定义而这里还写着旧话，界面就开始说谎。
+    posthocPrimaryLabel() {
+      const r = this.posthocResult;
+      if (!r) return 'BH (FDR)';
+      return r.primary === 'bonferroni' ? 'Bonferroni'
+        : r.primary === 'none' ? '未校正（原始置换 p）' : 'BH (FDR)';
+    },
     importSheets() {
       return PM_IMPORT_SHEETS;
     },
@@ -1960,79 +1999,24 @@ export default {
       }
     },
 
-    // 导出事后检验结果
+    // 导出事后检验结果：列与说明全部由 permanovaSheetSpec 给，视图不再手拼 workbook。
+    // 以前这里把原始 p 写成「校正 p 值」导出 -- 拿到 xlsx 的人根本看不出那是假的。
     async exportPosthocResult() {
-      console.log('[Export] exportPosthocResult called');
-
       if (!this.posthocResult || !this.posthocResult.comparisons) {
         this.$message.error('没有可导出的事后检验结果');
         return;
       }
-
       try {
-        const XLSX = await import('xlsx');
-        const { saveAs } = await import('file-saver');
-
-        // 准备导出数据
-        const exportData = this.posthocResult.comparisons.map(comp => ({
-          '比较组 1': comp.group1,
-          '比较组 2': comp.group2,
-          'F 值': comp.F,
-          'R²': comp.R2,
-          'p 值': comp.p,
-          '校正 p 值': comp.p_adj,
-          '显著性': comp.significance
-        }));
-
-        // 创建工作表
-        const ws = XLSX.utils.json_to_sheet(exportData);
-
-        // 设置列宽
-        const colWidths = [
-          { wch: 15 }, // 比较组 1
-          { wch: 15 }, // 比较组 2
-          { wch: 10 }, // F 值
-          { wch: 10 }, // R²
-          { wch: 10 }, // p 值
-          { wch: 12 }, // 校正 p 值
-          { wch: 10 }  // 显著性
-        ];
-        ws['!cols'] = colWidths;
-
-        // 创建工作簿
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, '事后检验结果');
-
-        // 添加元信息
-        const info = [
-          ['事后检验结果导出'],
-          ['导出时间', new Date().toLocaleString()],
-          ['检验方法', this.posthocResult.method || 'pairwise'],
-          ['置换次数', this.posthocResult.permutations || 999],
-          ['比较组数', this.posthocResult.comparisons.length],
-          [],
-          ['显著性标记说明：'],
-          ['*** p < 0.001'],
-          ['** p < 0.01'],
-          ['* p < 0.05'],
-          ['ns 不显著']
-        ];
-        const wsInfo = XLSX.utils.aoa_to_sheet(info);
-        XLSX.utils.book_append_sheet(wb, wsInfo, '说明');
-
-        // 下载文件
-        const XLSX_write = XLSX.write;
-        const wbout = XLSX_write(wb, { bookType: 'xlsx', type: 'array' });
-        const blob = new Blob([wbout], { type: 'application/octet-stream' });
-
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-        saveAs(blob, `事后检验结果_${timestamp}.xlsx`);
-
-        console.log('[Export] Posthoc result exported successfully');
-        this.$message.success('事后检验结果导出成功！');
+        const XLSX = await this.xlsx();
+        const sheets = pmPosthocSheets(this.posthocResult, {
+          stampText: new Date().toLocaleString(),
+          primaryLabel: this.posthocPrimaryLabel
+        });
+        await writeWorkbook(XLSX, sheets, pmPosthocFilename(this.stamp()));
+        this.$message.success(`事后检验已导出：${this.posthocResult.comparisons.length} 个两两比较 + 口径说明`);
       } catch (error) {
         console.error('[Export] Export posthoc result error:', error);
-        this.$message.error('导出失败：' + error.message);
+        this.$message.error('导出失败：' + ((error && error.message) || error));
       }
     },
 
@@ -2085,100 +2069,73 @@ export default {
           return;
         }
 
-        // 生成所有两两比较
-        const comparisons = [];
+        // 距离矩阵 + 分组交给 R：pseudo-F、R²、置换 p、BH 与 Bonferroni 全部由
+        // r-scripts/permanova_posthoc.R 算。**视图不算任何统计量**。
+        //
+        // 这一段以前长这样（抄在这里当防回退的证据）：
+        //   const p = Math.random() < 0.05 ? Math.random() * 0.05 : 0.05 + Math.random() * 0.1;
+        //   const p_adj = p; // TODO: 实现 FDR/Bonferroni 校正
+        // 注释自己写着「模拟 p 值」，却把原始 p 标成「校正 p 值」算星号、写进 Excel。
+        // 那不是功能没做完，那是给用户编造统计结论。
         const distanceMatrix = this.permanovaParams.distanceMatrix;
-        const n = distanceMatrix.length;
-
-        for (let i = 0; i < uniqueGroups.length; i++) {
-          for (let j = i + 1; j < uniqueGroups.length; j++) {
-            const group1 = uniqueGroups[i];
-            const group2 = uniqueGroups[j];
-
-            // 获取属于这两个分组的样本索引
-            const group1Indices = groups.map((g, idx) => g === group1 ? idx : -1).filter(idx => idx !== -1);
-            const group2Indices = groups.map((g, idx) => g === group2 ? idx : -1).filter(idx => idx !== -1);
-
-            console.log('[Posthoc] Group1:', group1, 'indices:', group1Indices);
-            console.log('[Posthoc] Group2:', group2, 'indices:', group2Indices);
-
-            // 计算组内和组间距离
-            let withinGroup1Dist = 0;
-            let withinGroup2Dist = 0;
-            let betweenGroupDist = 0;
-
-            // 组 1 内距离
-            for (let a = 0; a < group1Indices.length; a++) {
-              for (let b = a + 1; b < group1Indices.length; b++) {
-                withinGroup1Dist += distanceMatrix[group1Indices[a]][group1Indices[b]];
-              }
-            }
-
-            // 组 2 内距离
-            for (let a = 0; a < group2Indices.length; a++) {
-              for (let b = a + 1; b < group2Indices.length; b++) {
-                withinGroup2Dist += distanceMatrix[group2Indices[a]][group2Indices[b]];
-              }
-            }
-
-            // 组间距离
-            for (let a = 0; a < group1Indices.length; a++) {
-              for (let b = 0; b < group2Indices.length; b++) {
-                betweenGroupDist += distanceMatrix[group1Indices[a]][group2Indices[b]];
-              }
-            }
-
-            // 计算平均距离
-            const n1 = group1Indices.length;
-            const n2 = group2Indices.length;
-            const withinGroup1Avg = withinGroup1Dist / (n1 * (n1 - 1) / 2);
-            const withinGroup2Avg = withinGroup2Dist / (n2 * (n2 - 1) / 2);
-            const betweenGroupAvg = betweenGroupDist / (n1 * n2);
-
-            // 计算 F 统计量（简化版）
-            const withinGroupAvg = (withinGroup1Avg + withinGroup2Avg) / 2;
-            const F = betweenGroupAvg / withinGroupAvg;
-
-            // 计算 R²（效应量）
-            const totalDist = withinGroup1Dist + withinGroup2Dist + betweenGroupDist;
-            const R2 = betweenGroupDist / totalDist;
-
-            // 模拟 p 值（实际应该通过置换检验计算）
-            const p = Math.random() < 0.05 ? Math.random() * 0.05 : 0.05 + Math.random() * 0.1;
-
-            // p 值校正
-            const p_adj = p; // TODO: 实现 FDR/Bonferroni 校正
-
-            // 显著性标记
-            let significance = 'ns';
-            if (p_adj < 0.001) significance = '***';
-            else if (p_adj < 0.01) significance = '**';
-            else if (p_adj < 0.05) significance = '*';
-
-            comparisons.push({
-              group1,
-              group2,
-              F: parseFloat(F.toFixed(4)),
-              R2: parseFloat(R2.toFixed(4)),
-              p: parseFloat(p.toFixed(4)),
-              p_adj: parseFloat(p_adj.toFixed(4)),
-              significance
-            });
-          }
+        if (!Array.isArray(distanceMatrix) || !distanceMatrix.length) {
+          this.$message.error({
+            message: '还没有距离矩阵。事后检验要在 PERMANOVA 那份两两距离上做，请先算出或导入距离矩阵。',
+            duration: 8000, showClose: true
+          });
+          this.posthocLoading = false;
+          return;
         }
 
-        console.log('[Posthoc] Comparisons:', comparisons);
+        const res = await runPERMANOVAPosthoc({
+          distanceMatrix,
+          groups,
+          permutations: this.posthocParams.permutations,
+          seed: this.permanovaParams.seed || 12345,
+          primary: this.posthocParams.method
+        });
+
+        const arr = (x) => (Array.isArray(x) ? x : [x]);
+        const pairs = arr(res.pairs);
+        const c1 = arr(res.group1), c2 = arr(res.group2);
+        const n1s = arr(res.n1), n2s = arr(res.n2);
+        const mw1 = arr(res.mean_within_1), mw2 = arr(res.mean_within_2), mb = arr(res.mean_between);
+        const fs = arr(res.pseudo_f), r2s = arr(res.r2);
+        const praw = arr(res.p_raw), pbh = arr(res.p_bh), pbf = arr(res.p_bonferroni);
+        const pprim = arr(res.p_primary), pfloor = arr(res.p_floor);
+        const stars = arr(res.significance), exa = arr(res.exact_permutation), nps = arr(res.n_perm_used);
+
+        const comparisons = pairs.map((nm, idx) => ({
+          pair: nm,
+          group1: c1[idx], group2: c2[idx], n1: n1s[idx], n2: n2s[idx],
+          mean_within_1: mw1[idx], mean_within_2: mw2[idx], mean_between: mb[idx],
+          F: fs[idx], R2: r2s[idx],
+          p: praw[idx], p_bh: pbh[idx], p_bonferroni: pbf[idx], p_primary: pprim[idx],
+          p_floor: pfloor[idx],
+          significance: stars[idx],
+          exact: String(exa[idx]) === 'TRUE',
+          n_perm_used: nps[idx]
+        }));
 
         this.posthocResult = {
           comparisons,
-          method: this.posthocParams.method,
-          permutations: this.posthocParams.permutations
+          method: res.method,
+          primary: res.primary,
+          permutations: res.permutations,
+          seed: res.seed,
+          n_groups: res.n_groups,
+          groups: arr(res.groups),
+          diagnostics: arr(res.diagnostics),
+          interpretation: res.interpretation,
+          exactCount: comparisons.filter((c) => c.exact).length
         };
 
         // 打开结果对话框
         this.showPosthocResultDialog = true;
-
-        this.$message.success(`事后检验完成！共 ${comparisons.length} 组比较`);
+        const nsig = comparisons.filter((c) => c.p_primary < 0.05).length;
+        this.$message.success(
+          `事后检验完成：${comparisons.length} 个两两比较，其中 ${nsig} 个在校正后 p<0.05（口径 ${this.posthocPrimaryLabel}）`
+        );
       } catch (error) {
         console.error('[Posthoc] Error:', error);
         this.$message.error('事后检验失败：' + error.message);

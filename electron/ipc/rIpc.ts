@@ -46,6 +46,19 @@ export function registerRIPC() {
     }
   });
 
+  // PERMANOVA 事后两两比较（真实置换检验，替代视图里的随机数假 p）
+  ipcMain.handle('controller/r/runPERMANOVAPosthoc', async (event, params: any) => {
+    logger.debug('[RIPC] Handling runPERMANOVAPosthoc');
+    try {
+      const result = await rController.runPERMANOVAPosthoc(params);
+      return JSON.parse(JSON.stringify(result));
+    } catch (error: any) {
+      logger.error('[RIPC] runPERMANOVAPosthoc error:', error.message);
+      // 不把 R 的拒单理由丢掉：用户需要知道是哪一格不对（长度不符/不对称/某组只有 1 个样本）
+      throw new Error('事后检验失败：' + error.message);
+    }
+  });
+
   // 执行 PERMANOVA-med 中介分析
   ipcMain.handle('controller/r/runPERMANOVAMed', async (event, params: any) => {
     logger.debug('[RIPC] Handling runPERMANOVAMed');

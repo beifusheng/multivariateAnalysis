@@ -11,6 +11,7 @@ const ipcApiRoute = {
   rSetPath: 'controller/r/setRPath',
   rGetPortableInfo: 'controller/r/getPortableRInfo',
   rRunPERMANOVA: 'controller/r/runPERMANOVA',
+  rRunPERMANOVAPosthoc: 'controller/r/runPERMANOVAPosthoc',
   rRunPERMANOVAMed: 'controller/r/runPERMANOVAMed',
   rRunGMR4: 'controller/r/runGMR4',
   rRunBayesianERA_Mediation: 'controller/r/runBayesianERA_Mediation',

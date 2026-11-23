@@ -69,6 +69,27 @@ export async function runPERMANOVA(params) {
 }
 
 /**
+ * PERMANOVA 事后两两比较（pairwise PERMANOVA）
+ *
+ * 这里只搬运数据，不做任何统计：p 值全部由 r-scripts/permanova_posthoc.R 算。
+ * 以前这件事在前台用 Math.random() 完成（注释写着"模拟 p 值"），并把原始 p
+ * 标成「校正 p 值」写进导出 —— 那是编造统计结论。前端不许再算校正，
+ * 免得两处口径不一致（BH 只在 R 里用 p.adjust 算一次）。
+ */
+export async function runPERMANOVAPosthoc(params) {
+  const ipc = getIpcRenderer();
+  const cleanParams = {
+    distanceMatrix: JSON.parse(JSON.stringify(params.distanceMatrix)),
+    groups: JSON.parse(JSON.stringify(params.groups)),
+    permutations: params.permutations || 999,
+    seed: params.seed || 12345
+  };
+  if (params.exact_max) cleanParams.exact_max = params.exact_max;
+  const result = await ipc.invoke(ipcApiRoute.rRunPERMANOVAPosthoc, cleanParams);
+  return result;
+}
+
+/**
  * 执行 PERMANOVA-med 中介分析
  */
 export async function runPERMANOVA_Med(params) {

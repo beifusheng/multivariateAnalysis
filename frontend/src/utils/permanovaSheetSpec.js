@@ -220,3 +220,65 @@ export function planExport(keys, ctx, stamp) {
   }
   return jobs;
 }
+
+/**
+ * 事后检验（pairwise PERMANOVA）的列定义与表内容。
+ *
+ * 为什么单独立到这里：这些列以前在视图里就地拼，而上一版的「校正 p 值」列填的其实是
+ * 原始 p（旁边写着 TODO: 实现 FDR/Bonferroni 校正），p 本身来自 Math.random()。
+ * 列名与口径写进 spec，测试就能不渲染界面直接核对「表头说的」与「R 给的」是否同一件事。
+ */
+export const PM_POSTHOC_COLUMNS = [
+  '比较组 1', '比较组 2', 'n1', 'n2',
+  '组内平均距离 1', '组内平均距离 2', '组间平均距离',
+  'pseudo-F', 'R²', 'p（置换）', 'p（BH）', 'p（Bonferroni）',
+  '显著性', '置换口径', 'p 分辨率下限'
+];
+
+export function pmPosthocAoA(posthocResult) {
+  const rows = (posthocResult?.comparisons || []).map((c) => [
+    c.group1, c.group2, c.n1, c.n2,
+    c.mean_within_1, c.mean_within_2, c.mean_between,
+    c.F, c.R2, c.p, c.p_bh, c.p_bonferroni,
+    c.significance,
+    c.exact ? `精确（${c.n_perm_used} 个划分）` : `随机 ${c.n_perm_used} 次`,
+    c.p_floor
+  ]);
+  return [PM_POSTHOC_COLUMNS].concat(rows);
+}
+
+/**
+ * 事后检验工作簿的两张表：数据表 + 说明表。
+ * 说明表必须把口径写死在文件里 —— 拿到 xlsx 的人不在界面前，看不到星号跟哪一列走。
+ */
+export function pmPosthocSheets(posthocResult, ctx = {}) {
+  const cs = posthocResult?.comparisons || [];
+  const info = [
+    ['事后检验结果导出'],
+    ['导出时间', ctx.stampText || ''],
+    ['检验方法', posthocResult?.method || 'pairwise PERMANOVA（每组对子独立置换 pseudo-F）'],
+    ['显著性口径（本次）', ctx.primaryLabel || 'BH (FDR)'],
+    ['p 值来源', 'R 脚本 r-scripts/permanova_posthoc.R：对每对组独立置换，视图不参与任何统计计算'],
+    ['BH 与 Bonferroni', '两列同时给出；两者结论不同的对子最该被看见，不由软件替读者决定'],
+    ['穷举精确的对子数', `${posthocResult?.exactCount || 0} / ${cs.length}`],
+    ['随机置换次数', posthocResult?.permutations ?? ''],
+    ['种子', posthocResult?.seed ?? ''],
+    [],
+    ['怎么读这张表'],
+    ['p（置换）', '该对子两组 PERMANOVA 的置换 p；随机置换的下限是 1/(次数+1)'],
+    ['p 分辨率下限', '本行 p 能表示的最小值。等于它时只能说"至少这么小"，不能说"绝对显著"'],
+    ['pseudo-F / R²', 'Anderson (2001) 的距离平方和分解，与 vegan::adonis2 同一口径'],
+    ['组内/组间平均距离', '原始距离尺度（不是平方），用来目视核对 F 的方向是否合理'],
+    ...(posthocResult?.diagnostics || []).length
+      ? [[], ['诊断'], ...(posthocResult.diagnostics || []).map((d) => [d])]
+      : []
+  ];
+  return [
+    { name: '事后检验', aoa: pmPosthocAoA(posthocResult) },
+    { name: '说明', aoa: info }
+  ];
+}
+
+export function pmPosthocFilename(stamp) {
+  return `PERMANOVA 事后检验_${stamp}.xlsx`;
+}

@@ -514,6 +514,82 @@ console.log('\n=== 7. 编码语义：整数分组被当趋势拟合时必须开�
 }
 
 
+
+console.log('\n=== 事后检验换成真置换：造假路径必须彻底断开 ===');
+{
+  // 这一节防的不是回归，是"回到老路"：视图里原来这样算 p ——
+  //   const p = Math.random() < 0.05 ? Math.random() * 0.05 : 0.05 + Math.random() * 0.1;
+  //   const p_adj = p; // TODO: 实现 FDR/Bonferroni 校正
+  // 然后把 p_adj 标成「校正 p 值」写进 Excel。那是编造统计结论，不是功能没做完。
+
+  // 1) 全项目硬约束：前台不许出现 Math.random
+  const viewFiles = fs.readdirSync(path.join(FRONTEND, 'src/views/r-analysis'))
+    .filter((f) => f.endsWith('.vue'));
+  const withRandom = viewFiles.filter((f) => {
+    const t = fs.readFileSync(path.join(FRONTEND, 'src/views/r-analysis', f), 'utf8')
+      .replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');   // 注释里提它不算
+    return /Math\.random\s*\(/.test(t);
+  });
+  check('任何视图都不许出现 Math.random（统计量不许在前台造）',
+    withRandom.length === 0, withRandom.join(', '));
+
+  // 2) 事后检验必须走 R，且视图不再自己算 F / R² / p
+  // 判据必须打在**生效的代码**上：我把旧代码原文抄进注释当“不许回退”的证据，
+  // 上一版这两条就因此误红 —— 正则命中的是我自己的注释（本项目第四次“为错理由而红/绿”）。
+  const stripComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const phStart = pmViewSource.indexOf('async runPosthocTest');
+  const phBody = phStart >= 0 ? stripComments(pmViewSource.slice(phStart, phStart + 7000)) : '';
+  check('事后检验调用引擎（runPERMANOVAPosthoc，而不是本地双重循环）',
+    /runPERMANOVAPosthoc\(/.test(phBody), phBody.slice(0, 60));
+  check('事后检验里没有本地伪造式（Math.random / p_adj / 自算 F 与 R² 全部禁止）',
+    !/Math\.random\s*\(/.test(phBody) && !/p_adj/.test(phBody) &&
+      !/betweenGroupAvg/.test(phBody) && !/withinGroupAvg/.test(phBody) &&
+      !/Math\.random/.test(phBody),
+    phBody.slice(0, 70));
+  check('不再存在「p_adj = p」这种把原始 p 当校正 p 的写法',
+    !/p_adj\s*=\s*p\b/.test(stripComments(pmViewSource)) &&
+      !/prop="p_adj"/.test(stripComments(pmViewSource)), '');
+  check('表里三列 p 都在：置换 p / BH / Bonferroni（只给一列就是替读者决定）',
+    /p（BH）/.test(pmViewSource) && /p（Bonferroni）/.test(pmViewSource) && /p（置换）/.test(pmViewSource), '');
+  check('星号口径由引擎回显（primary），视图不自己推一套',
+    /posthocPrimaryLabel/.test(pmViewSource) && /r\.primary === 'bonferroni'/.test(pmViewSource), '');
+
+  // 3) spec 的表：列名与行宽一致，且每格都有值（undefined 会在 xlsx 里留空洞）
+  const specMod = await server.ssrLoadModule('/src/utils/permanovaSheetSpec.js');
+  const { pmPosthocSheets, pmPosthocAoA, PM_POSTHOC_COLUMNS } = specMod;
+  const fake = {
+    comparisons: [{
+      group1: 'Control', group2: 'Treatment', n1: 2, n2: 2,
+      mean_within_1: 0.35, mean_within_2: 0.45, mean_between: 0.44,
+      F: 0.29, R2: 0.042, p: 0.82, p_bh: 0.82, p_bonferroni: 0.82,
+      significance: 'ns', exact: true, n_perm_used: 6, p_floor: 1 / 6
+    }],
+    method: 'pairwise PERMANOVA（每组对子独立置换 pseudo-F；BH 主口径 + Bonferroni 对照）',
+    primary: 'bh', permutations: 999, seed: 12345, exactCount: 1,
+    diagnostics: ['只有 2 个分组 => 只有 1 个对子。此时 BH 与 Bonferroni 都等于原始 p，多重校正在这里不起作用（不是「没校正」）。']
+  };
+  const aoa = pmPosthocAoA(fake);
+  check('事后检验表头 15 列，且与行宽逐个一致',
+    PM_POSTHOC_COLUMNS.length === 15 && aoa[0].length === 15 &&
+      aoa.slice(1).every((r) => r.length === aoa[0].length), `${aoa[0].length} / ${(aoa[1] || []).length}`);
+  check('数据行没有 undefined/空值（导出不能出现空洞）',
+    aoa.slice(1).every((r) => r.every((v) => v !== undefined && v !== null && v !== '')), JSON.stringify(aoa[1]));
+  const sheets = pmPosthocSheets(fake, { stampText: '2026-11-23 12:00:00', primaryLabel: 'BH (FDR)' });
+  check('导出两张表：事后检验 + 说明（拿到文件的人不在界面前）',
+    sheets.length === 2 && sheets[1].aoa.some((r) => String(r[0]).includes('显著性口径')),
+    sheets.map((x) => x.name).join(','));
+  const infoText = sheets[1].aoa.map((r) => r.join(' ')).join('\n');
+  check('说明表写明 p 来自 R 脚本（写死出处，而不是含糊的"由软件计算"）',
+    infoText.includes('permanova_posthoc.R'), infoText.slice(0, 90));
+  check('说明表写明分辨率下限的含义（p 等于下限不等于绝对显著）',
+    /至少这么小/.test(infoText), '');
+  check('诊断也写进说明表（只有 1 个对子时校正不起作用这件事必须留痕）',
+    sheets[1].aoa.some((r) => String(r[0]).includes('只有 1 个对子')), '');
+  check('置换口径写清：精确（穷举划分）与随机必须分得开',
+    /精确（6 个划分）/.test(JSON.stringify(aoa)), JSON.stringify(aoa[1] || []));
+}
+
+
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }
 await server.close();

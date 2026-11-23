@@ -170,6 +170,41 @@ export default class RController {
   }
 
   /**
+   * PERMANOVA 事后两两比较：每组对子做一次两组 PERMANOVA（受限置换 pseudo-F），
+   * 再按 BH（主口径）+ Bonferroni（对照列）校正。
+   *
+   * 存在理由：视图里原来那版事后检验用 Math.random() 造 p 值，把原始 p 标成
+   * 「校正 p 值」并写进 Excel 导出。那不是功能没做完，那是给用户编造统计结论。
+   * 已知答案自检见 r-scripts/tools/verify_posthoc_engine.R（含与 vegan::adonis2 的锈点）。
+   */
+  async runPERMANOVAPosthoc(params: any): Promise<any> {
+    logger.info('[RController] Running PERMANOVA posthoc');
+    logger.info('[RController] posthoc matrix size:', params?.distanceMatrix?.length,
+                'groups:', params?.groups?.length);
+
+    const cleanParams: any = {
+      distanceMatrix: params.distanceMatrix,
+      groups: params.groups,
+      permutations: params.permutations ?? 999,
+      seed: params.seed ?? 12345
+    };
+    if (params.exact_max != null) cleanParams.exact_max = params.exact_max;
+
+    const result = await rService.runScript({
+      scriptName: 'permanova_posthoc.R',
+      params: cleanParams,
+      timeout: 600000
+    });
+
+    if (!result.success) {
+      logger.error('[RController] posthoc failed:', result.error);
+      throw new Error(result.error || 'posthoc execution failed');
+    }
+    logger.info('[RController] posthoc success, pairs:', result.data?.n_pairs);
+    return result.data;
+  }
+
+  /**
    * 执行 PERMANOVA-med 中介分析（基于 LDM::permanovaFL, test.mediation=TRUE）
    *
    * 角色约定（LDM 的语义与直觉相反，左侧矩阵才是中介）：
