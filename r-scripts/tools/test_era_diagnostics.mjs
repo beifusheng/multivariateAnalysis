@@ -23,9 +23,10 @@ const RSCRIPT = process.env.RSCRIPT || path.join(ROOT, 'r-portable/bin/Rscript.e
 const VERIFY = path.join('r-scripts', 'tools', 'verify_era_engine.R');
 // 尺子自检 16 项（T1–T16）+ 引擎验收 24 项（E1–E24）。
 // 故意写死：R 侧加/删测试时这里必须跟着改，否则“悄悄少跑了一段”没人发现。
-// 45 -> 58：§19 加了四张参数分支模板，本轮又加分中介通路层（E30 的 13 条）。
+// 45 -> 58 -> 64：§19 加四张参数分支模板，本轮加"分中介通路"层（恒等式 2 条、
+// 四个对照夹具、语义复核 flag_audit ×4、k=1 结构与 JSON 形状、上下界齐全）。
 // 这个数字必须**显式**改：它防的就是"删测试也能全绿"，所以涨项也要留一句为什么。
-const EXPECT_TESTS = 58;
+const EXPECT_TESTS = 64;
 
 let pass = 0, fail = 0;
 const fails = [];
