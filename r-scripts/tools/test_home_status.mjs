@@ -227,6 +227,27 @@ console.log('\n=== 3e) 卡片上的能力标签必须真有其事 ===');
       /p\.adjust\([^)]*"BH"/.test(phRuler), '');
   check('尺子自己写明“前置条件不成立时必须红”（防空表通过）',
     /前置条件失败，未验证/.test(phRuler), '');
+  // 数量锁：今天发生过一件事——切片时把 §5 那 8 条整段弄丢了，
+  // 而同期新加的 §4b 正好也是 8 条，总数从 57 变成 65 看着反而“涨了”，跑结果全绿。
+  // 所以光看汇总项数不够，必须按**具体判据关键词**点名：丢哪一节就红哪一条。
+  const PH_SECTIONS = {
+    '手算核对': /\u624b\u7b97\u53ef\u6838\u5bf9\u7684 pseudo_F|pseudo-F \u624b\u7b97\u6838\u5bf9/,
+    'adonis2 锚点': /adonis2/,
+    '零假设校准': /KS|\u5747\u5300\u5206\u5e03/,
+    'p 的 +1 代数核对': /1 \+ n_ge|\(1 \+ n_ge\)|n_ge/,
+    'BH 与 p.adjust 逐位': /p\.adjust\([^)]*method\s*=\s*"BH"/,
+    'Bonferroni 公式': /min\(1, m\*p\)|pmin\(1,/,
+    '口径切换': /primary=\$\{pm\}|primary = pm/,
+    '两组时数组不降级': /\u53ea\u6709 1 \u4e2a\u5bf9\u5b50\u65f6 p_raw|\u4e0d\u8bb8\u964d\u7ea7/,
+    '逐字节可复现': /\u9010\u5b57\u8282\u76f8\u540c/,
+    '坏输入拒绝': /\u574f\u8f93\u5165\u5fc5\u987b\u5f53\u573a\u62d2\u7edd/
+  };
+  const lostSections = Object.keys(PH_SECTIONS).filter((kk) => !PH_SECTIONS[kk].test(phRuler));
+  check('事后检验尺子十个章节逐点名都在（丢哪节红哪条，而不是只看总数）',
+    lostSections.length === 0, `缺失：${lostSections.join(' / ') || '无'}`);
+  const nOk = (phRuler.match(/\bok\(/g) || []).length;
+  check('事后检验尺子的 ok() 调用数不缩水（60 条起步）',
+    nOk >= 55, `实际 ${nOk}`);
   for (const c of parsed) {
     check(`${c.name}：带两个能力标签（不许只剩「可用」一个光标签）`,
       c.plainTags.length === 2, `[${c.plainTags.join(' | ')}]`);

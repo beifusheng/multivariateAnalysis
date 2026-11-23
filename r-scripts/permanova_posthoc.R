@@ -170,6 +170,7 @@ run <- function() {
       }
       p_raw <- ge / ncol(mats)
       n_used <- ncomb
+      n_ge <- ge; n_space <- ncol(mats)   # 穷举：样本空间就是划分总数
       p_floor[s] <- 1 / ncomb
     } else {
       set.seed(seed + s)                            # 每个对子独立且可复现的随机流
@@ -181,6 +182,7 @@ run <- function() {
       }
       p_raw <- (1 + ge) / (1 + B)                   # 教科书式 P：把观测那次也算进去
       n_used <- B
+      n_ge <- ge; n_space <- B                 # 随机：样本空间就是置换次数
       p_floor[s] <- 1 / (B + 1)
     }
 
@@ -189,7 +191,7 @@ run <- function() {
       mw1 = if (sum(same & (code[ii] == cA)) > 0) mean(d_raw[same & (code[ii] == cA)]) else 0,
       mw2 = if (sum(same & (code[ii] == cB)) > 0) mean(d_raw[same & (code[ii] == cB)]) else 0,
       mb  = if (sum(!same) > 0) mean(d_raw[!same]) else 0,
-      f = f_obs, r2 = r2_obs, p = p_raw,
+      f = f_obs, r2 = r2_obs, p = p_raw, ge = n_ge, space = n_space,
       exact = exact, n_used = n_used
     )
   }
@@ -256,6 +258,10 @@ run <- function() {
     pseudo_f = as_arr(vapply(res, function(x) x$f, numeric(1))),
     r2       = as_arr(vapply(res, function(x) x$r2, numeric(1))),
     p_raw = as_arr(p_raw), p_bh = as_arr(p_bh), p_bonferroni = as_arr(p_bf),
+    # 原始计数一起给出来。+1 这种约定在 B=999 上只差 0.001，而 MC 噪声 3σ 就有 0.015 ——
+    # 统计上测不出来，只能代数核对 p == (1+n_ge)/(1+n_space)。藏着不报就是让别人无法验我。
+    n_ge = as_arr(vapply(res, function(x) x$ge, numeric(1))),
+    n_space = as_arr(vapply(res, function(x) x$space, numeric(1))),
     primary = primary, p_primary = as_arr(p_primary),
     significance = as_carr(stars),
     exact_permutation = as_carr(vapply(res, function(x) as.character(x$exact), character(1))),

@@ -171,34 +171,76 @@ cat("\n\u2500\u2500 4. 零假设校准：p 不该普遍偏小（抓 off-by-one�
   }
 }
 
-cat("\n\u2500\u2500 5. 多重校正：口径与次序 \u2500\u2500\n")
+cat("\n── 4b. p 的 +1 约定：用代数核对，不用统计去猜 ──\n")
+{
+  # 为什么不能用统计：B=999 时丢掉 +1 只移动 0.001，而 MC 噪声的 3σ 就有 0.015 ——
+  # 我第一版正是这样写的（40 次零假设重复 + KS），结果变异 ge/B 之后 57 项全绿。
+  # 办法是让引擎把原始计数 n_ge 与样本空间 n_space 一起报出来，然后核公式本身。
+  set.seed(77)
+  Xsep <- c(rep(-100, 4), rep(100, 4)) + rnorm(8, 0, 0.01)
+  Dsep <- as.matrix(dist(Xsep)); lsep <- rep(c("A", "B"), each = 4)
+
+  rB <- run_ph(list(distanceMatrix = Dsep, groups = lsep, permutations = 999L,
+                    seed = 3L, exact_max = 1L), "floor_rand")
+  if (rB$code != 0L) ok(FALSE, "随机置换分支能跑通", rB$err) else {
+    ppp <- nums(rB$r$p_raw); gge <- nums(rB$r$n_ge); nn <- nums(rB$r$n_space)
+    ok(all(nn == 999), "随机分支报告的样本空间就是置换次数", paste(nn, collapse = "/"))
+    ok(all(abs(ppp - (1 + gge) / (1 + nn)) < 1e-12),
+       "p 逐对子等于 (1+n_ge)/(1+n_space) —— 少加任何一个 1 都会红",
+       sprintf("p[1]=%.8f 公式=%.8f", ppp[1], (1 + gge[1]) / (1 + nn[1])))
+    ok(all(ppp > 0), "p 恒大于 0：置换检验给不出 p=0，写出 0 就是把分辨率当证据强度", "")
+    ok(all(ppp >= 1 / 1000 - 1e-12), "p 不低于分辨率下限 1/(B+1)", "")
+  }
+
+  rE <- run_ph(list(distanceMatrix = Dsep, groups = lsep, permutations = 999L,
+                    seed = 3L, exact_max = 100000L), "floor_exact")
+  if (rE$code != 0L) ok(FALSE, "穷举分支能跑通", rE$err) else {
+    pe <- nums(rE$r$p_raw); ge2 <- nums(rE$r$n_ge); sp2 <- nums(rE$r$n_space)
+    ok(all(sp2 == choose(8, 4)), "穷举分支的样本空间是 C(8,4)=70 个划分", paste(sp2, collapse = "/"))
+    ok(abs(pe - ge2 / sp2) < 1e-12, sprintf("p = n_ge/n_space（观测那次天然在内，得 %.5f）", pe), "")
+    ok(pe > 0 && ge2 >= 1, "观测划分必然被计入，所以 p >= 1/70", sprintf("ge=%.0f p=%.5f", ge2, pe))
+  }
+
+  # 两条分支必须给同一个答案（随机分支靠 +1 逼近真值）：这测的是置换机器本身
+  if (rB$code == 0L && rE$code == 0L) {
+    dif <- abs(nums(rB$r$p_raw)[1] - nums(rE$r$p_raw)[1])
+    ok(dif < 0.02, sprintf("随机与穷举两条分支的 p 相差 %.4f（穷举是参照）", dif), "")
+  }
+}
+
+cat("\n── 5. 多重校正：口径与次序 ──\n")
 {
   set.seed(9)
   X <- as.matrix(dist(rnorm(24)))
   lab <- rep(c("A","B","C","D"), each = 6)
   r <- run_ph(list(distanceMatrix = X, groups = lab, permutations = 999L, seed = 3L,
                    exact_max = 10L), "multi")
-  if (r$code != 0L) ok(FALSE, "4 组设计能跑通", r$err) else {
+  if (r$code != 0L) {
+    ok(FALSE, "4 组设计能跑通", r$err)
+  } else {
     pr <- nums(r$r$p_raw); pbh <- nums(r$r$p_bh); pbf <- nums(r$r$p_bonferroni)
     ok(length(pr) == 6L && length(r$r$pairs) == 6L, "4 组应有 6 个两两对子",
        sprintf("pairs=%d", length(r$r$pairs)))
-    ok(identical(as.character(r$r$pairs),
-                 as.character(apply(utils::combn(sort(unique(lab)), 2L), 2, function(x) paste(x[1], x[2], sep = " vs ")))),
+    ok(identical(as.character(unlist(r$r$pairs)),
+                 as.character(apply(utils::combn(sort(unique(lab)), 2L), 2,
+                                    function(x) paste(x[1], x[2], sep = " vs ")))),
        "对子顺序就是 combn(排序后的组名,2)，视图与导出不许自己另排一套",
        paste(unlist(r$r$pairs), collapse = ", "))
-    ok(all(abs(pbh - p.adjust(pr, "BH")) < 1e-15),
-       "BH 与 R 的 p.adjust(method='BH') 逐位相同（不在别处再写一份公式）", "")
+    # 用 R 自己的 p.adjust 复核：如果哪天有人手写一份 BH 公式，这里会红
+    ok(all(abs(pbh - p.adjust(pr, method = "BH")) < 1e-15),
+       "BH 与 R 的 p.adjust(method = 'BH') 逐位相同（不在别处再写一份公式）", "")
     ok(all(abs(pbf - pmin(1, length(pr) * pr)) < 1e-15), "Bonferroni 就是 min(1, m*p)", "")
     ok(all(pbh >= pr - 1e-15), "校正后 p 恒 >= 原始 p", "")
     ok(all(pbh <= pbf + 1e-15), "BH 恒不宽于 Bonferroni", "")
-    st <- unlist(r$r$significance)
+    st <- as.character(unlist(r$r$significance))
     ok(all(st[pbh < 0.05] %in% c("*","**","***")) && all(st[pbh >= 0.05] == "ns"),
-       "星号取自 BH 后的 p，不是取自原始 p", paste(st, collapse = "/"))
-    ok(!("diagnostics" %in% names(r$r)) || length(r$r$diagnostics) == 0 ||
-       all(grepl("置换|分辨率|内部校验|排除", unlist(r$r$diagnostics))),
+       "星号与 BH 列口径一致", paste(st, collapse = "/"))
+    ok(!("diagnostics" %in% names(r$r)) || length(r$r$diagnostics) == 0L ||
+       all(grepl("置换|分辨率|内部校验|排除|口径", unlist(r$r$diagnostics))),
        "诊断里没有来历不明的条目", paste(unlist(r$r$diagnostics), collapse = " / "))
   }
 }
+
 
 cat("
 ── 5b. 口径切换：星号必须跟着用户选的那一列走 ──
