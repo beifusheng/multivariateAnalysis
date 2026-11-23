@@ -119,77 +119,7 @@ try {
   check('视图 SFC 能被加载', !!comp && typeof comp.methods === 'object');
 } catch (e) {
   check('视图 SFC 能被加载', false, e.message);
-  
-console.log('\n=== 通道契约：视图发出的每个键，两层白名单都必须认得 ===');
-{
-  // 为什么单独立一节：api/r.js 与 rController.ts 各有一份**白名单**，串联生效。
-  // 上一轮加的 primary（显著性口径）两边都没列进去，于是下拉框改了等于没改 ——
-  // 而 verify_posthoc_engine.R 是直接调 R 的，15 项口径判据全绿。
-  // 也就是说：引擎对，链路错，用户看到的东西静默回退到默认值。这种错只有契约测试能抓。
-  const bodyOf = (src, sig) => {
-    const i = src.indexOf(sig);
-    if (i < 0) return null;
-    let d = 0, started = false;
-    for (let k = i; k < src.length; k++) {
-      if (src[k] === '{') { d++; started = true; }
-      else if (src[k] === '}') { d--; if (started && d === 0) return src.slice(i, k + 1); }
-    }
-    return src.slice(i);
-  };
-  // JS/R 里"键出现了"不等于"键被转发了"：要抽的是赋值位置上的键名
-  const keysAssigned = (body) => {
-    if (!body) return null;
-    const out = new Set();
-    for (const m of body.matchAll(/(?:^|[{,;\s])([A-Za-z_][\w]*)\s*:/gm)) out.add(m[1]);
-    for (const m of body.matchAll(/\.([\w]+)\s*=/g)) out.add(m[1]);
-    for (const m of body.matchAll(/\[["']([\w]+)["']\]\s*=/g)) out.add(m[1]);
-    return out;
-  };
-  // TS 的类型注解会让 "params: any" 这种被当成键，得先把 : Promise<any> 之类剔掉
-  const keysAssignedTs = (body) => {
-    const ks = keysAssigned(body);
-    if (!ks) return null;
-    return new Set([...ks].filter((k) => k !== 'cleanParams' && k !== 'params' && k !== 'any'));
-  };
-
-  const viewBody = bodyOf(pmViewSource, 'async runPosthocTest()');
-  const apiSrc = fs.readFileSync(path.join(FRONTEND, 'src/api/r.js'), 'utf8');
-  const ctlSrc = fs.readFileSync(path.join(ROOT, 'electron/controller/rController.ts'), 'utf8');
-  const apiBody = bodyOf(apiSrc, 'export async function runPERMANOVAPosthoc');
-  const ctlBody = bodyOf(ctlSrc, 'async runPERMANOVAPosthoc');
-
-  const sentKeys = keysAssigned(viewBody ? bodyOf(viewBody, 'runPERMANOVAPosthoc({') : null);
-  check('能解析出视图发出的载荷键（解析失效就是测试自己坏了，不许空过）',
-    !!sentKeys && sentKeys.size >= 4, sentKeys ? [...sentKeys].join(',') : 'null');
-
-  const apiKeys = keysAssigned(apiBody);
-  const ctlKeys = keysAssignedTs(ctlBody);
-  check('api/r.js 的事后检验函数在（两层白名单的第一层）', !!apiBody, '');
-  check('rController.ts 的事后检验方法在（第二层）', !!ctlBody, '');
-
-  if (sentKeys && apiKeys && ctlKeys) {
-    const missingApi = [...sentKeys].filter((k) => !apiKeys.has(k));
-    const missingCtl = [...sentKeys].filter((k) => !ctlKeys.has(k));
-    check('视图发出的每个键都在 api/r.js 的白名单里（漏一个就静默丢一个）',
-      missingApi.length === 0, `api 侧缺：${missingApi.join(', ')}`);
-    check('同样每个键都在 rController 的白名单里（两层串联，缺一层等于没传）',
-      missingCtl.length === 0, `controller 侧缺：${missingCtl.join(', ')}`);
-    // 口径这个键以前就是在这里丢的，单独点名一次（万一将来整节被重构掉）
-    check('primary（显著性口径）确实穿过两层通道',
-      apiKeys.has('primary') && ctlKeys.has('primary'), `api=${apiKeys.has('primary')} ctl=${ctlKeys.has('primary')}`);
-    check('分组改走 sampleData + formula 后，这两个键也必须在通道上',
-      apiKeys.has('sampleData') && apiKeys.has('formula') &&
-        ctlKeys.has('sampleData') && ctlKeys.has('formula'), '');
-    check('groups 不许被无条件转发（缺席时要让 R 走公式路径，塞 null 会被当成空分组）',
-      !/groups:\s*JSON\.parse\(JSON\.stringify\(params\.groups\)\)/.test(apiBody), '');
-    // 视图这一侧的旧错法不许回来
-    check('视图不再自己拆公式取分组（firstVar = formula.split 那一类）',
-      !/formula\.split\(/.test(stripComments(viewBody || '')) &&
-        !/const firstVar/.test(stripComments(viewBody || '')), '');
-  }
-}
-
-await server.close(); process.exit(1);
+  await server.close(); process.exit(1);
 }
 
 // 视图源码：模板里有没有概览卡片这类东西，只能在源码层面查（SSR 渲染不出 el-collapse 的细节）
@@ -695,8 +625,89 @@ console.log('\n=== 事后检验换成真置换：造假路径必须彻底断开 
 }
 
 
+console.log('\n=== 通道契约：视图发出的每个键，两层白名单都必须认得 ===');
+{
+  // 为什么单独立一节：api/r.js 与 rController.ts 各有一份**白名单**，串联生效。
+  // 上一轮加的 primary（显著性口径）两边都没列进去，于是下拉框改了等于没改 ——
+  // 而 verify_posthoc_engine.R 是直接调 R 的，15 项口径判据全绿。
+  // 也就是说：引擎对，链路错，用户看到的东西静默回退到默认值。这种错只有契约测试能抓。
+  const bodyOf = (src, sig) => {
+    const i = src.indexOf(sig);
+    if (i < 0) return null;
+    let d = 0, started = false;
+    for (let k = i; k < src.length; k++) {
+      if (src[k] === '{') { d++; started = true; }
+      else if (src[k] === '}') { d--; if (started && d === 0) return src.slice(i, k + 1); }
+    }
+    return src.slice(i);
+  };
+  // JS/R 里"键出现了"不等于"键被转发了"：要抽的是赋值位置上的键名
+  const keysAssigned = (body) => {
+    if (!body) return null;
+    const out = new Set();
+    for (const m of body.matchAll(/(?:^|[{,;\s])([A-Za-z_][\w]*)\s*:/gm)) out.add(m[1]);
+    for (const m of body.matchAll(/\.([\w]+)\s*=/g)) out.add(m[1]);
+    for (const m of body.matchAll(/\[["']([\w]+)["']\]\s*=/g)) out.add(m[1]);
+    return out;
+  };
+  // TS 的类型注解会让 "params: any" 这种被当成键，得先把 : Promise<any> 之类剔掉
+  const keysAssignedTs = (body) => {
+    const ks = keysAssigned(body);
+    if (!ks) return null;
+    return new Set([...ks].filter((k) => k !== 'cleanParams' && k !== 'params' && k !== 'any'));
+  };
+
+  const viewBody = bodyOf(pmViewSource, 'async runPosthocTest()');
+  const apiSrc = fs.readFileSync(path.join(FRONTEND, 'src/api/r.js'), 'utf8');
+  const ctlSrc = fs.readFileSync(path.join(ROOT, 'electron/controller/rController.ts'), 'utf8');
+  const apiBody = bodyOf(apiSrc, 'export async function runPERMANOVAPosthoc');
+  const ctlBody = bodyOf(ctlSrc, 'async runPERMANOVAPosthoc');
+
+  const sentKeys = keysAssigned(viewBody ? bodyOf(viewBody, 'runPERMANOVAPosthoc({') : null);
+  check('能解析出视图发出的载荷键（解析失效就是测试自己坏了，不许空过）',
+    !!sentKeys && sentKeys.size >= 4, sentKeys ? [...sentKeys].join(',') : 'null');
+
+  const apiKeys = keysAssigned(apiBody);
+  const ctlKeys = keysAssignedTs(ctlBody);
+  check('api/r.js 的事后检验函数在（两层白名单的第一层）', !!apiBody, '');
+  check('rController.ts 的事后检验方法在（第二层）', !!ctlBody, '');
+
+  if (sentKeys && apiKeys && ctlKeys) {
+    const missingApi = [...sentKeys].filter((k) => !apiKeys.has(k));
+    const missingCtl = [...sentKeys].filter((k) => !ctlKeys.has(k));
+    check('视图发出的每个键都在 api/r.js 的白名单里（漏一个就静默丢一个）',
+      missingApi.length === 0, `api 侧缺：${missingApi.join(', ')}`);
+    check('同样每个键都在 rController 的白名单里（两层串联，缺一层等于没传）',
+      missingCtl.length === 0, `controller 侧缺：${missingCtl.join(', ')}`);
+    // 口径这个键以前就是在这里丢的，单独点名一次（万一将来整节被重构掉）
+    check('primary（显著性口径）确实穿过两层通道',
+      apiKeys.has('primary') && ctlKeys.has('primary'), `api=${apiKeys.has('primary')} ctl=${ctlKeys.has('primary')}`);
+    check('分组改走 sampleData + formula 后，这两个键也必须在通道上',
+      apiKeys.has('sampleData') && apiKeys.has('formula') &&
+        ctlKeys.has('sampleData') && ctlKeys.has('formula'), '');
+    check('groups 不许被无条件转发（缺席时要让 R 走公式路径，塞 null 会被当成空分组）',
+      !/groups:\s*JSON\.parse\(JSON\.stringify\(params\.groups\)\)/.test(apiBody), '');
+    // 视图这一侧的旧错法不许回来
+    check('视图不再自己拆公式取分组（firstVar = formula.split 那一类）',
+      !/formula\.split\(/.test(stripComments(viewBody || '')) &&
+        !/const firstVar/.test(stripComments(viewBody || '')), '');
+  }
+}
+
+// 计数锁：上一轮我把「通道契约」整节插进了 catch 里，于是它一次都没跑，
+// 而汇总照样报 0 失败 —— 把它露出来的不是逻辑，是"打印的勾比计到的多 9"这个不一致。
+// 那就把这个信号变成硬条件：跑到的判据数必须等于写死的期望，多一条少一条都算失败。
+// （加/删判据时必须同时改这里 —— 这正是我要的那种"想起来就疼"）
+const EXPECT_TOTAL = 112;
+
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }
+if (pass + fail !== EXPECT_TOTAL) {
+  console.log(' [计数锁] 期望跑到 ' + EXPECT_TOTAL + ' 条判据，实际 ' + (pass + fail) + ' 条 —— '
+    + '有判据没被执行（多半是插入位置错了，或某节走进了不成立的分支）');
+  fail++; fails.push('计数锁：判据执行数与期望不符（有节没跑到）');
+}
+
 
 await server.close();
 process.exit(fails.length ? 1 : 0);
