@@ -79,7 +79,7 @@ export const ERA_PREVIEW_TABS = [
 
 /* ==================== 模板：设计（通路系数写在明面上）==================== */
 /**
- * 六个设计共用同一个数据生成器：X ~ N(0,1)；M = X·Γ + 噪声；Y = X·B + M·Ω + 噪声。
+ * 各张设计共用同一个数据生成器：X ~ N(0,1)；M = X·Γ + 噪声；Y = X·B + M·Ω + 噪声。
  * 引擎把三张表按列标准化后再拟合，所以"真值"也在标准化尺度上算（见 eraTemplateTruth），
  * 这一点是硬要求：spike 里那个"覆盖率 37.5%"的假事故就是拿原始尺度真值
  * 去比标准化尺度后验造出来的。
@@ -116,6 +116,39 @@ export const ERA_TEMPLATE_GROUPS = [
           expect: { indirect_excl_zero_min: 4, direct_excl_zero_min: 3,
             r2_xm_min: 0.4, convergence_ok: true },
           note: '第 2 个格子（X1→Y2）的直接真值是 0，故意留一个"应当含 0"的格子防止全绿自嗨'
+        }
+      },
+      {
+        id: 'strongprior', icon: '🧲', label: '先验很强（48 样本 × 2 预测 × 1 中介 × 2 响应，λ=100）',
+        tip: '同一份数据把 λ 从 1 拉到 100：后验被往 0 拉。要看的是"收缩真的发生了"，而不是哪个格显著',
+        spec: {
+          p: 2, k: 1, q: 2, n: 48,
+          gamma: [0.9, -0.6],
+          beta: [0.45, -0.2, 0.0, 0.4],
+          omega: [0.8, -0.7],
+          noiseM: 0.8, noiseY: 0.7,
+          seed: 20261120, chains: 4, iterations: 4000, thin: 5, priorLambda: 100, prob: 0.95,
+          // shrinkage：同一次运行里直接对账 max|后验均值| 与 max|OLS|，
+          // 不靠另一张表做跨模板比较（那样任何一边改动都会把它变成噪声）
+          expect: { shrinkage: true, convergence_ok: true, r2_xm_min: 0.4 },
+          note: '先验强到一定程度，后验均值比 OLS 小是必然的：这张表验的就是它真的发生'
+        }
+      },
+      {
+        id: 'prob80', icon: '📏', label: '80% 区间（48 样本 × 2 预测 × 1 中介 × 2 响应）',
+        tip: '与「部分中介」同一份数据、同一颗种子，只把区间口径改成 80%。宽度是**你选的**，不是数据给的',
+        spec: {
+          p: 2, k: 1, q: 2, n: 48,
+          gamma: [0.9, -0.6],
+          beta: [0.45, -0.2, 0.0, 0.4],
+          omega: [0.8, -0.7],
+          noiseM: 0.8, noiseY: 0.7,
+          seed: 20261120, chains: 4, iterations: 4000, thin: 5, priorLambda: 1, prob: 0.8,
+          expect: { convergence_ok: true, r2_xm_min: 0.4, prob_effect: true },
+          // 上一版这里写的是 mean_width_max: 0.16 —— 我拍的，实测 0.2440。
+          // 但“卡一个宽度区间”根本证明不了 prob 生效，所以换成 prob_effect：
+          // 从结果自带的后验抽样里同时算 80% 与 95% 区间宽度，要求报告值就就是 80% 那个。
+          note: '六个入参里 prob 以前从没变过（每张表都是 0.95）—— 这张表就是为了让这条路径被真跑一遍'
         }
       }
     ]
@@ -155,6 +188,26 @@ export const ERA_TEMPLATE_GROUPS = [
             r2_xm_min: 0.25, convergence_ok: true },
           note: '只有一个格子，所以符号相反必须被报出来 —— 这张表没有"平均一下就行"的余地'
         }
+      },
+      {
+        id: 'collinear', icon: '🧊', label: '不可识别（48 样本 × 2 预测 × 1 中介 × 2 响应）',
+        tip: '一个中介不带噪声，于是它能被 X 完全解释。这张表**就是要让引擎拒绝**，让用户看清拒绝怎么说',
+        // noiseM=0 时 M 的第一列 = X·γ 的严格线性组合，落在 X 的张成空间里 => 秩亏。
+        // 选 1e-8 量级的输入是故意避开"差一点但没到"：那一档现在也能被 1e-7 阈值拦住。
+        spec: {
+          p: 2, k: 1, q: 2, n: 48,
+          // γ 必须是 [3, 0] 而不是 [3, -1.2]：数据写盘前四舍五入到 4 位，
+          // 两个系数同时在的话舍入残差就供给了一个约 1e-5 的独立分量，
+          // rcond 落在 4.6e-06 —— 刚好躲过 1e-7 硬停、进"软警告区"，模板就不再拒单了。
+          // （而那份数据仍然会算出 OLS 间接效应 = 8762 的疯数字，本身就是共线的好教材）
+          gamma: [3, 0],
+          beta: [0.45, -0.2, 0.0, 0.4],
+          omega: [0.8, -0.7],
+          noiseM: 0, noiseY: 0.7,
+          seed: 20261120, chains: 4, iterations: 4000, thin: 5, priorLambda: 1, prob: 0.95,
+          expect: { must_refuse: 'X 与 M 合起来秩亏' },
+          note: '这不是采样问题，加迭代也没用 —— 得改设计（增加 M 的测量时点，或删掉那一列中介）'
+        }
       }
     ]
   },
@@ -181,6 +234,24 @@ export const ERA_TEMPLATE_GROUPS = [
           // 就在于后者能不能说出差的那 13 格为什么不显著。
           expect: { indirect_excl_zero_min: 11, r2_xm_min: 0.35, convergence_ok: true },
           note: '这张表用来证明默认迭代数不是照着小张表调的'
+        }
+      },
+      {
+        id: 'nonconv', icon: '🌀', label: '采样不够（48 样本 × 2 预测 × 1 中介 × 2 响应，120 迭代）',
+        tip: '数据就是那张干净的"部分中介"，但 chains=4 / iterations=120 / thin=20，每链只留几个点。界面必须把它标成红色"区间不可信"',
+        spec: {
+          p: 2, k: 1, q: 2, n: 48,
+          gamma: [0.9, -0.6],
+          beta: [0.45, -0.2, 0.0, 0.4],
+          omega: [0.8, -0.7],
+          noiseM: 0.8, noiseY: 0.7,
+          seed: 20261120, chains: 4, iterations: 500, thin: 50, priorLambda: 1, prob: 0.95,
+          // 实测（就是下面这四个数）：R̂max 1.0885 / ESSmin 40 / ok=false，
+          // 诊断首条就是「2 个量的 split-R̂ 超过 1.05…区间不可信」。
+          // 上一版写的是 iterations:120 —— 那会被引擎夹紧到 200，而且表单 :min=500 直接拦下，
+          // 模板与界面约束打架；500/50 既在合法范围内又真的不达标。
+          expect: { convergence_ok: false, must_warn: 'split-R̂ 超过' },
+          note: '贝叶斯特有的一课：算得出数不等于可信；R̂/ESS 没过阈就得先加迭代'
         }
       },
       {
@@ -299,7 +370,7 @@ export function eraTemplateTruth(id) {
 
 /**
  * 下载文件名后缀用卡片上的中文名（与 GMR⁴ 同一处理由）：内部 id 界面上根本看不到，
- * 六份模板都叫同一个名字的话，用户下三份就分不清谁是谁。
+ * 所有模板都叫同一个名字的话，用户下三份就分不清谁是谁。
  */
 export function eraTemplateFileTag(id) {
   const tpl = ERA_TEMPLATE_MAP[id];

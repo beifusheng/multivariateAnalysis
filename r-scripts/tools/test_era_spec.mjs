@@ -33,7 +33,7 @@ const require_ = createRequire(import.meta.url);
 // §3 用它逐键消费。两处共用一份清单，避免"§2 放行、§3 沉默"。
 const JUDGED = ['indirect_excl_zero_min', 'indirect_excl_zero_max', 'direct_excl_zero_min',
   'direct_contains_zero_min', 'sign_inconsistent_min', 'total_contains_zero_min',
-  'r2_xm_min', 'convergence_ok', 'must_warn'];
+  'r2_xm_min', 'convergence_ok', 'must_warn', 'must_refuse', 'shrinkage', 'prob_effect'];
 
 let pass = 0, fail = 0;
 const fails = [];
@@ -75,9 +75,9 @@ console.log('\n=== 1. 声明本身（视图的外壳靠这些字段循环）==='
 console.log('\n=== 2. 模板目录与设计事实（不跑 R 也能验的那部分）===');
 const ids = Object.keys(spec.ERA_TEMPLATE_MAP);
 {
-  t('六个模板，顺序与分组写死（加/删模板必须同时动对账器）',
-    ids.length === 6 && ids.length === spec.ERA_TEMPLATE_COUNT &&
-      ids.join(',') === 'fullmed,partmed,nome,inconsistent,highdim,smallN', ids.join(','));
+  t('十个模板，顺序与分组写死（加/删模板必须同时动对账器）',
+    ids.length === 10 && ids.length === spec.ERA_TEMPLATE_COUNT &&
+      ids.join(',') === 'fullmed,partmed,strongprior,prob80,nome,inconsistent,collinear,highdim,nonconv,smallN', ids.join(','));
   // label 上的数字必须与 spec 一致：rank1 曾写"80 样本"而 spec 是 40，用户照文案准备数据就踩空
   const badLabel = ids.filter((id) => {
     const sp = spec.ERA_TEMPLATE_MAP[id].spec;
@@ -199,6 +199,15 @@ console.log('\n=== 3. 六个模板逐个端到端：真 xlsx → 解析 → 填�
       execFileSync(RSCRIPT, [path.join(ROOT, 'r-scripts/bayesian_era_mediation.R'), fIn, fIn + '.out', fIn + '.err'],
         { stdio: 'pipe', timeout: 900000 });
     } catch (e) { code = e.status || 1; }
+    if (exp.must_refuse) {
+      // 这张模板的价值就在于**被拒绝**：不可识别的输入必须当场停下来并说清为什么。
+      // 断言方向反过来，所以别的模板不能偷偷也带 must_refuse（§2 会查 expect 键）
+      t(`${tag} 真被拒绝（exit≠0）而不是吐出一堆好看的区间`, code !== 0,
+        code === 0 ? '居然大获成功，说明秩亏阈值没拦住' : '');
+      const err = code !== 0 ? fs.readFileSync(fIn + '.err', 'utf8') : '';
+      t(`${tag} 拒绝理由点名「${exp.must_refuse}」`, err.includes(exp.must_refuse), err.slice(0, 150));
+      continue;
+    }
     t(`${tag} 真跑通（exit=0）`, code === 0, code ? fs.readFileSync(fIn + '.err', 'utf8').slice(0, 200) : '');
     if (code !== 0) continue;
     const r = JSON.parse(fs.readFileSync(fIn + '.out', 'utf8'));
@@ -246,6 +255,28 @@ console.log('\n=== 3. 六个模板逐个端到端：真 xlsx → 解析 → 填�
       } else if (kk === 'convergence_ok') {
         t(`${tag} expect 收敛达标（R̂max ${r.convergence.rhat_max.toFixed(4)} / ESSmin ${Math.round(r.convergence.ess_min)}）`,
           r.convergence.ok === vv, JSON.stringify(r.convergence).slice(0, 160));
+      } else if (kk === 'shrinkage') {
+        // 同一轮结果里自比：强先验必须把后验均值往 0 拉（实测 0.0716 vs OLS 0.4395）
+        const pm = Math.max(...r.effects.indirect.mean.map((x) => Math.abs(x)));
+        const po = Math.max(...r.effects.indirect.ols.map((x) => Math.abs(x)));
+        t(`${tag} expect 强先验确实收缩了后验（max|后验| ${pm.toFixed(4)} vs max|OLS| ${po.toFixed(4)}）`,
+          pm < po * 0.8, `比值 ${(pm / po).toFixed(3)}`);
+      } else if (kk === 'prob_effect') {
+        // 光看宽度数值证明不了 prob 生效（换个数也能凑）。这里用结果自带的后验抽样
+        // 同时算 80% 与 95% 区间宽度：报告值必须贴着 80% 那一头，而不是 95%。
+        const q = (a, pp) => {
+          const b = a.slice().sort((x, y) => x - y);
+          const i = (b.length - 1) * pp; const lo = Math.floor(i); const hi = Math.ceil(i);
+          return b[lo] + (b[hi] - b[lo]) * (i - lo);
+        };
+        const rows = r.draws.ind;
+        const wReport = r.effects.indirect.hdi_hi.map((h, i) => h - r.effects.indirect.hdi_lo[i]);
+        const w80 = rows.map((row) => q(row, 0.9) - q(row, 0.1));
+        const w95 = rows.map((row) => q(row, 0.975) - q(row, 0.025));
+        const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+        t(`${tag} expect prob=0.8 真的生效（报告宽度 ${mean(wReport).toFixed(4)} ≈ 抽样 80% ${mean(w80).toFixed(4)}，且明显窄于 95% ${mean(w95).toFixed(4)}）`,
+          Math.abs(mean(wReport) - mean(w80)) / mean(w80) < 0.15 && mean(wReport) < mean(w95) * 0.95,
+          `report ${mean(wReport).toFixed(4)} / 80% ${mean(w80).toFixed(4)} / 95% ${mean(w95).toFixed(4)}`);
       } else if (kk === 'must_warn') {
         t(`${tag} expect 诊断里必须出现「${vv}」（小样本不许装作没事）`,
           diags.some((d) => d.includes(vv)), JSON.stringify(diags).slice(0, 200));
@@ -263,8 +294,16 @@ console.log('\n=== 3. 六个模板逐个端到端：真 xlsx → 解析 → 填�
     // 阈值 75% 是**算过再定的**：95% 区间在 4 格上"全中"的概率本来就只有约 0.81，
     // 把 100% 写进断言等于抽奖抽奖中了当本事。真正的校准检验在 verify_era_engine.R
     // 用跨重复的经验覆盖率做（95%/92.5%/97.5%），这里只验"设计没有跑偏"。
-    t(`${tag} 间接效应区间覆盖标准化真值 ≥ 75%（${covInd}/${truth.q * truth.p}）`,
-      covInd / (truth.q * truth.p) >= 0.75, `${covInd}/${truth.q * truth.p}`);
+    // strongprior 这张表的**目的就是偏离真值**（λ=100 把后验拉到 0 附近），
+    // 所以对它的判据方向必须反过来：覆盖不上才是对的。实测 0/4。
+    // 通用断言碰到"故意要坏"的模板时，改断言比改模板诚实 —— 模板没骗人，是我的尺子太粗。
+    if (exp.shrinkage) {
+      t(`${tag} 强先验下间接效应区间**覆盖不上**真值（${covInd}/${truth.q * truth.p}，收缩是真的）`,
+        covInd / (truth.q * truth.p) <= 0.5, `${covInd}/${truth.q * truth.p}`);
+    } else {
+      t(`${tag} 间接效应区间覆盖标准化真值 ≥ 75%（${covInd}/${truth.q * truth.p}）`,
+        covInd / (truth.q * truth.p) >= 0.75, `${covInd}/${truth.q * truth.p}`);
+    }
     t(`${tag} 直接效应区间覆盖标准化真值 ≥ 75%（${covDir}/${truth.q * truth.p}）`,
       covDir / (truth.q * truth.p) >= 0.75, `${covDir}/${truth.q * truth.p}`);
     t(`${tag} 方差分解逐响应四块之和 = 1`,

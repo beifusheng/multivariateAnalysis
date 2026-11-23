@@ -219,16 +219,30 @@ tryCatch({
   }
 
   # ---------------- 超参候选 ----------------
+  # ranks/lambdas 可能是数组（视图解析后的形式），也可能是“1,2”这种逗号串
+  #（模型参数表里就是这个写法）。上一版只吃数组：字符串经 as.integer 变 NA，
+  # rank_grid 就成了 NA，后面某个 if 拿到 NA 直接崩成
+  # 「需要TRUE/FALSE值的地方不可以用缺少值」—— 把输入问题又报成内部错误。
+  num_vec <- function(x, what) {
+    if (is.null(x)) return(integer(0))
+    raw <- if (is.character(x)) unlist(strsplit(paste(as.character(x), collapse = ","), "[,; ]+")) else x
+    v <- suppressWarnings(as.numeric(unlist(raw)))
+    v <- v[is.finite(v)]
+    if (length(v) == 0L && length(unlist(raw)) > 0L) {
+      diagnostics <<- c(diagnostics, sprintf("你给的 %s 一个都读不出来（要用逗号分隔的数字）", what))
+    }
+    v
+  }
   rank_grid <- unique(as.integer(c(1:s_max)))
-  if (!is.null(params$ranks)) {
-    rg <- as.integer(unlist(params$ranks))
+  rg <- as.integer(num_vec(params$ranks, "ranks"))
+  if (length(rg) > 0L) {
     rank_grid <- sort(unique(rg[rg >= 1 & rg <= s_max]))
     if (length(rank_grid) == 0L) {
       diagnostics <- c(diagnostics, sprintf("你给的 ranks 没有一个落在 1..%d，改用全部候选。", s_max))
       rank_grid <- 1:s_max
     }
   }
-  lam_grid <- as.numeric(unlist(params$lambdas))
+  lam_grid <- num_vec(params$lambdas, "lambdas")
   if (length(lam_grid) == 0L) {
     lam_grid <- unique(round(10 ^ seq(-3, 2, length.out = 12), 6))     # 0.001 .. 100
   }
@@ -313,13 +327,18 @@ tryCatch({
   }
 
   # ---------------- 输出契约 ----------------
+  # 长度可变的向量强制成 JSON 数组：见下面 rank_grid / R2_per_response 的注释
+  as_arr <- function(x) if (is.null(x)) NULL else I(as.array(as.numeric(unname(x))))
   mk <- function(m) { if (is.null(m)) NULL else { d <- dimnames(m); dimnames(m) <- NULL; m } }
   output <- list(
     success = TRUE,
     method = "GMR4 (generalized multi-response reduced-rank ridge regression)",
     n_samples = n, p = p, q = q,
     rank_selected = S_sel, lambda_selected = lam_sel,
-    rank_grid = rank_grid, lambda_grid = lam_grid,
+    # rank_grid 只有一个候选时（q=1 或手填 ranks=3），auto_unbox 会把它拍成标量，
+    # 前端 rank_grid.length 拿到 undefined，默认图与 CV 表一起崩 —— q=1 以前
+    # 没有任何模板覆盖过，所以这条路一直没被走过（与 ERA 的 as_arr 同一个教训）
+    rank_grid = as_arr(rank_grid), lambda_grid = as_arr(lam_grid),
     s_max = s_max, kfold = kfold, seed = seed,
     selection_rule = rule_note,
     coefficients = mk(final$B),          # p x q，标准化尺度
@@ -327,8 +346,8 @@ tryCatch({
     U = mk(final$U), V = mk(final$V),    # B = U V' 的因子形式
     R2 = r2_total,
     R2_partialled = r2_partialled,
-    R2_per_response = as.numeric(r2_each),
-    R2_per_response_partialled = as.numeric(r2_each_partialled),
+    R2_per_response = as_arr(r2_each),
+    R2_per_response_partialled = as_arr(r2_each_partialled),
     # se_min 单独给出来：视图要画"1-SE 阈值线"，必须用引擎选型时**真正**用的那个
     # 标准误。让前端自己去 cv.se 里猜最小值，图与结论可能各算各的（差一个格子就错）。
     cv = list(mean = mk(as.matrix(cv_mean)), se = mk(as.matrix(cv_se)),

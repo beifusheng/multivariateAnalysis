@@ -267,7 +267,7 @@ export const GMR4_TEMPLATE_GROUPS = [
       {
         id: 'rank1', icon: '📏', label: '真实秩 1（60 样本 × 4 预测 × 6 响应）：所有响应共享一条轴',
         tip: '只有一个潜在方向。此时「载荷双标图」画不出来（只有一维），视图必须明说而不是给张空图',
-        // 2026-11-20 真跑实测（“六个模板逐个对账”那个循环第一次跑就把这条抓出来了）：
+        // 2026-11-20 真跑实测（“九个模板逐个对账”那个循环第一次跑就把这条抓出来了）：
         //   n=60、noise=0.18（默认）、zOnX=zOnY=0、6 档 lambda -> S=1、λ=1、R²偏后=0.954。
         // 改之前这里是**双份的假**：label 写 80 样本而 spec 是 40；expect 写 S=1 而实跑是 S=2。
         // S=2 的根因在生成器：Y = X·(AC′) + **zOnY·Z** + 噪声，而这张表不把 Z 交给引擎
@@ -299,6 +299,16 @@ export const GMR4_TEMPLATE_GROUPS = [
           lambdas: '0.01,0.1,1,10',
           expect: { rank_selected: 2, covariates: 1, R2_partialled_min: 0.7 },
           note: '这个模板专门演示「协变量不是多加一列」' }
+      },
+      {
+        id: 'ranksGrid', icon: '✋', label: '手填候选秩把自己堵死（36 样本 × 5 预测 × 8 响应，真秩 3）',
+        tip: '数据就是真秩 3 那张，但 ranks 只给 1,2 —— 选型只能在给定网格里挑，永远碰不到 3。手填等于预设结论',
+        // ranks 这个字段六张旧模板**没有一个填过**，而它正是用户报修链路上的那个参数
+        //（导入后 ranksStr 进不了表单的 bug）。现在它被真跑覆盖。
+        spec: { n: 36, p: 5, q: 8, S: 3, seed: 12345, kfold: 4, ranks: '1,2',
+          lambdas: '0.01,0.1,0.5,1,5,20', zOnX: 0.8, zOnY: 0.5,
+          expect: { rank_selected_max: 2, covariates: 0, R2_partialled_min: 0.5 },
+          note: '引擎不会替你把秩扩回去：判据是“不得超过 2”' }
       }
     ]
   },
@@ -322,6 +332,24 @@ export const GMR4_TEMPLATE_GROUPS = [
         spec: { n: 30, p: 3, q: 9, S: 3, seed: 6060, kfold: 4, lambdas: '0.01,0.1,1,10',
           expect: { rank_selected: 3, diag_pattern: '降秩没带来', R2_partialled_min: 0.7, covariates: 0 },
           note: 'S=s_max 时「降秩」其实没发生，别把 R² 当成降秩的功劳' }
+      },
+      {
+        id: 'kfold2', icon: '✂️', label: '只切 2 折（36 样本 × 5 预测 × 8 响应 + 1 协变量，真秩 3）',
+        tip: 'kfold 拉到下限 2：每折只拿一半样本训练，CV 标准误明显变大。落点仍应回到 3，但路径会抖',
+        // kfold 以前六张全是 4，这条路径从未被模板跑过
+        spec: { n: 36, p: 5, q: 8, S: 3, seed: 12345, kfold: 2, noisyResponse: 8, noiseMul: 25,
+          lambdas: '0.01,0.1,0.5,1,5,20',
+          expect: { rank_selected: 3, covariates: 1, R2_partialled_min: 0.8 },
+          note: '2 折常被当作“快速看看”，但它的选型方差很大：别把落点当结论' }
+      },
+      {
+        id: 'singleResp', icon: '1️⃣', label: '只有一个响应（40 样本 × 4 预测 × 1 响应）',
+        tip: 'q=1 时 min(p,q)=1：降秩退化成岭回归，双标图在数学上不存在 —— 界面必须说清而不是给张空图',
+        // 退化形状：旧六张最小的 q 是 4，所以 q=1 这条形状一直接触不到
+        spec: { n: 40, p: 4, q: 1, S: 1, seed: 4711, kfold: 4, zOnX: 0, zOnY: 0,
+          lambdas: '0.01,0.1,1,10',
+          expect: { rank_selected: 1, diag_pattern: '降秩没带来', covariates: 0, R2_partialled_min: 0.5 },
+          note: '上限就是 1 不是失败，而是这类数据的真实况：拿它跟多响应表比 R² 没意义' }
       }
     ]
   }

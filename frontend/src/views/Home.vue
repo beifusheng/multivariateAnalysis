@@ -138,7 +138,7 @@
             <div class="method-tags">
               <el-tag size="small" type="success" effect="dark">✅ 可用</el-tag>
               <el-tag size="small" effect="plain">对齐闭式 OLS / 岭解</el-tag>
-              <el-tag size="small" effect="plain">6 套设计模板</el-tag>
+              <el-tag size="small" effect="plain">9 套设计模板</el-tag>
             </div>
           </div>
           <div class="card-action">
@@ -159,7 +159,7 @@
             <div class="method-tags">
               <el-tag size="small" type="success" effect="dark">✅ 可用</el-tag>
               <el-tag size="small" effect="plain">对齐 vegan::rda</el-tag>
-              <el-tag size="small" effect="plain">6 套设计模板</el-tag>
+              <el-tag size="small" effect="plain">10 套设计模板</el-tag>
             </div>
           </div>
           <div class="card-action">

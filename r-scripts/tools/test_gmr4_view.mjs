@@ -490,29 +490,48 @@ console.log('\n=== 9. 导入：真 xlsx 走视图函数（两轮都没抓到的�
   }
 }
 
-console.log('\n=== 10. 六个模板逐个真跑对账（交接清单里唯一没落地的那个循环）===');
+console.log('\n=== 10. 九个模板逐个真跑对账（交接清单里唯一没落地的那个循环）===');
 {
-  // 为什么不是“只跑默认模板”：expect 是六个模板各自写下的“真跑事实”，
-  // 只验默认那个等于其余五个可以随时劣化成“下载下来跑出什么算什么”（三个老模块都这么翻过车）。
+  // 为什么不是“只跑默认模板”：expect 是九张模板各自写下的“真跑事实”，
+  // 只验默认那个等于其余八张可以随时劣化成“下载下来跑出什么算什么”（三个老模块都这么翻过车）。
   const ids = Object.keys(spec.GMR4_TEMPLATE_MAP);
+  // 模板从 6 涨到 9：界面里的数量只能从 spec 常量来（写死数字就是下一轮的谎：
+  // rank1 模板写着“80 样本”而 spec 是 40，就被这么抓过）。
+  const vs = fs.readFileSync(path.join(FRONTEND, 'src/views/r-analysis', 'GMR4.vue'), 'utf8');
+  const tplArea = vs.slice(vs.indexOf('<template>'), vs.indexOf('</template>'));
+  check('界面文案不写死模板数量（只能动态计数 gmrCount）',
+    !/\d+\s*[份个]\s*(设计|模板)/.test(tplArea) &&
+      !/[一二三四五六七八九十]\s*[份个]\s*(设计|模板)/.test(tplArea) &&
+      /gmrCount/.test(vs), '');
+  check('对账标题自己不许过期：循环里的个数就是 spec 的个数',
+    ids.length === spec.GMR4_TEMPLATE_COUNT, `循环 ${ids.length} / spec ${spec.GMR4_TEMPLATE_COUNT}`);
   // 文件名的三条全局约束（逐模板那条只能证明“带了后缀”，证不了“认得出”）
   {
     const tags = ids.map((id) => spec.gmr4TemplateFileTag(id));
-    check('六个设计的文件名后缀非空且互不相同',
+    check('九个设计的文件名后缀非空且互不相同',
       tags.every(Boolean) && new Set(tags).size === ids.length, JSON.stringify(tags));
     check('后缀取自卡片 label 的中文名，不是界面上看不到的内部 id',
       ids.every((id2, i) => spec.GMR4_TEMPLATE_MAP[id2].label.startsWith(tags[i].replace(/_/g, ' '))) &&
-        !tags.some((t) => /^(lowrank3|rank1|fullrank|confoundedZ|smallN|manyResp)$/.test(t)),
+        !tags.some((t) => /^(lowrank3|rank1|fullrank|confoundedZ|smallN|manyResp|ranksGrid|kfold2|singleResp)$/.test(t)),
       JSON.stringify(tags));
     check('后缀不含路径非法字符/公式符号/空白（文件名要能直接双击打开）',
       !tags.some((t) => /[\\/:*?"<>|（）()\[\]×\s]/.test(t)), JSON.stringify(tags));
   }
-  check('模板目录就是这 6 个（删模板必须同时删对账，加模板必须同时加判据）',
-    ids.length === 6 && ids.length === spec.GMR4_TEMPLATE_COUNT &&
-      ids.join(',') === 'lowrank3,rank1,fullrank,confoundedZ,smallN,manyResp', ids.join(','));
+  check('模板目录就是这 9 个（删模板必须同时删对账，加模板必须同时加判据）',
+    ids.length === 9 && ids.length === spec.GMR4_TEMPLATE_COUNT &&
+      ids.join(',') === 'lowrank3,rank1,fullrank,confoundedZ,ranksGrid,smallN,manyResp,kfold2,singleResp',
+    ids.join(','));
+  // label 上写给用户看的 n/p/q 必须与 spec 一致：ERA 那边抓到过 smallN 的文案不走格式，
+  // GMR⁴ 更早抓到过 rank1 写 80 样本而 spec 是 40 —— 用户照文案准备数据就会踩空。
+  const badLabel = ids.filter((id) => {
+    const sp = spec.GMR4_TEMPLATE_MAP[id].spec;
+    const m = /（(\d+) 样本 × (\d+) 预测 × (\d+) 响应/.exec(spec.GMR4_TEMPLATE_MAP[id].label);
+    return !m || +m[1] !== sp.n || +m[2] !== sp.p || +m[3] !== sp.q;
+  });
+  check('label 里的 n/p/q 与 spec 逐个一致', badLabel.length === 0, badLabel.join(','));
   // 对账器能消费的判据。expect 里出现不在这里的键，就是写了个永远不被检查的愿望。
-  const JUDGED = ['rank_selected', 'R2_partialled_min', 'covariates', 'diag_pattern',
-    'weak_response_index', 'weak_response_max'];
+  const JUDGED = ['rank_selected', 'rank_selected_max', 'R2_partialled_min', 'covariates',
+    'diag_pattern', 'weak_response_index', 'weak_response_max'];
 
   if (!XLSX) {
     check('能拿到 xlsx（本节的先决条件）', false, '三条候选路径都失败了');
@@ -602,6 +621,13 @@ console.log('\n=== 10. 六个模板逐个真跑对账（交接清单里唯一没
         if (k === 'weak_response_max') continue;   // 与 weak_response_index 合成一条
         if (k === 'rank_selected') {
           check(`${tag} expect.rank_selected=${v} 真对上`, r.rank_selected === v, `S=${r.rank_selected}`);
+        } else if (k === 'rank_selected_max') {
+          // 手填候选秩这张表的要点不只是"落点不超过上界"，还得证明**网格真的传进去了**：
+          // 否则 ranks 被静默忽略（回到默认全网格）时落点也可能 ≤2，断言就白写了。
+          const grid = (r.rank_grid || []).slice().sort((a, b) => a - b);
+          check(`${tag} expect.rank_selected≤${v} 且候选网格真被限定（grid=${grid.join('/')}）`,
+            r.rank_selected <= v && grid.length === String(sp.ranks || '').split(',').length &&
+              Math.max(...grid) <= v, `S=${r.rank_selected} grid=${JSON.stringify(r.rank_grid)}`);
         } else if (k === 'R2_partialled_min') {
           check(`${tag} expect.R2偏后>${v} 真对上`, r.R2_partialled > v, String(r.R2_partialled));
         } else if (k === 'covariates') {

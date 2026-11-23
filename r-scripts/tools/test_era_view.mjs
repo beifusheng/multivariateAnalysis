@@ -542,6 +542,15 @@ console.log('\n=== 10. 外壳与全局样式（照 GMR⁴ 清单原样搬）==='
     /navigateTo\('\/r-analysis\/bayesian-era'\)/.test(home) &&
       !/showComingSoon\('Bayesian ERA'\)/.test(home));
   const rt = fs.readFileSync(path.join(FRONTEND, 'src/router/index.js'), 'utf8');
+  // 模板数量刚刚从 6 涨到 9/10：界面必须是动态计数，写死文案是下一轮的谎。
+  {
+    const vs = fs.readFileSync(path.join(FRONTEND, 'src/views/r-analysis/Bayesian_ERA.vue'), 'utf8');
+    const tplArea = vs.slice(vs.indexOf('<template>'), vs.indexOf('</template>'));
+    check('界面文案不写死模板数量（数量只能从 spec 常量来）',
+      !/[（(]?\d+\s*[份个]\s*(设计|模板)/.test(tplArea) && !/[一二三四五六七八九十]\s*[份个]\s*(设计|模板)/.test(tplArea) &&
+        /eraCount/.test(vs), /eraCount/.test(vs) ? '动态计数在' : '没找到动态计数');
+  }
+
   check('scrollBehavior 仍在（刚进去就停在半页是实机反馈过的）', /scrollBehavior/.test(rt) && /top: 0/.test(rt));
 
   // 这条防的是**我自己的工作流**：默认 cacheDir 落在 frontend/node_modules/.vite，

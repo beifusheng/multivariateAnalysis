@@ -672,7 +672,7 @@ export default {
       }
     },
     templateFileName() {
-      // 文件名必须能认出是哪份设计：六份模板都叫「GMR4 数据模板_时间戳.xlsx」的话，
+      // 文件名必须能认出是哪份设计：各张模板都叫「GMR4 数据模板_时间戳.xlsx」的话，
       // 用户下三份就分不清谁是谁（实测就是这个状态，只能一个个开文件看参数表）。
       // 后缀用卡片上的中文名（gmr4TemplateFileTag），不用内部 id：id 界面上看不到。
       const base = templateFilename('GMR4', this.stamp());

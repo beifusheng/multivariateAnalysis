@@ -660,7 +660,7 @@ export default {
       }
     },
     templateFileName() {
-      // 文件名要能认出是哪份设计：六份模板同名，用户下三份就分不清谁是谁（实测就是这样）。
+      // 文件名要能认出是哪份设计：各张模板同名，用户下三份就分不清谁是谁（实测就是这样）。
       // 后缀用卡片上的中文名，不用内部 id —— id 在界面上根本看不到。
       const base = templateFilename('BayesianERA', this.stamp());
       const tag = this.selectedTplId ? eraTemplateFileTag(this.selectedTplId) : '';

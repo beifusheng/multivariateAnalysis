@@ -189,6 +189,52 @@ cat("\u2500\u2500 9. 契约字段齐全（视图与 L3 要读的东西）\u2500\
   } else ok(FALSE, "契约检查跑通", r$err)
 }
 
+
+# ── 20. 参数写成字符串也必须解析得动 ──────────────────────────────
+# 模型参数表里 ranks/lambdas 本来就是「1,2」这种逗号串。旧实现只吃数组：
+# as.integer("1,2") 得 NA，rank_grid 变成 NA，后面某个 if 拿到 NA 就崩成
+# 「需要TRUE/FALSE值的地方不可以用缺少值」—— 输入问题被报成内部错误。
+{
+  tr <- mk_truth(40, 4, 6, 2)
+  r <- run_gmr4(list(X = tr$X, Y = tr$Y, ranks = "1,2", lambdas = "0.1,1,10"), "strparams")
+  ok(r$code == 0, "ranks/lambdas 以逗号串给出时不再崩", r$err)
+  if (r$code == 0) {
+    ok(identical(as.integer(r$out$rank_grid), c(1L, 2L)),
+       "逗号串被解析成候选秩 1,2（不是被静默忽略）", paste(r$out$rank_grid, collapse = "/"))
+    ok(length(r$out$lambda_grid) == 3L, "lambda 网格同样解析成 3 档",
+       paste(r$out$lambda_grid, collapse = "/"))
+  }
+  r2 <- run_gmr4(list(X = tr$X, Y = tr$Y, ranks = "abc", lambdas = "xyz"), "badparams")
+  ok(r2$code == 0, "参数完全读不出来时回退默认网格，而不是当场崩", r2$err)
+  if (r2$code == 0) {
+    ok(any(grepl("读不出来", unlist(r2$out$diagnostics))),
+       "诊断里明说了参数读不出来（静默回退最坑人）",
+       paste(unlist(r2$out$diagnostics), collapse = " / "))
+  }
+}
+
+# ── 21. 长度 1 的向量在 JSON 里必须仍是数组 ────────────────────────
+# q=1（单响应）时 rank_grid 只有一个候选、R2_per_response 也只有一格；
+# auto_unbox 把它们拍成标量，前端 rank_grid.length 得 undefined，
+# 默认图与 CV 表一起崩。这条只能查**原始 JSON 文本**：
+# fromJSON(simplifyVector = TRUE) 会把长度 1 的数组又变回标量，用它查等于没查。
+{
+  tr <- mk_truth(40, 4, 1, 1)
+  r <- run_gmr4(list(X = tr$X, Y = tr$Y), "qone")
+  ok(r$code == 0, "q=1（单响应）能跑通", r$err)
+  if (r$code == 0) {
+    raw <- paste(readLines(file.path(TMP, "qone.json.out"), warn = FALSE), collapse = " ")
+    is_arr <- function(key) {
+      m <- regexpr(paste0('"', key, '"[ \t]*:[ \t]*\\['), raw)
+      m > 0
+    }
+    ok(is_arr("rank_grid"), "rank_grid 长度 1 时仍是数组",
+       substr(raw, max(1, regexpr('"rank_grid"', raw)), 70))
+    ok(is_arr("R2_per_response"), "R2_per_response 长度 1 时仍是数组",
+       substr(raw, max(1, regexpr('"R2_per_response"', raw)), 74))
+  }
+}
+
 cat("\n\u2500\u2500\u2500 gmr4 引擎校验汇总 \u2500\u2500\u2500\n")
 if (length(fails)) {
   cat(sprintf("[FAIL] %d 项通过 / %d 项失败\n", pass, length(fails)))

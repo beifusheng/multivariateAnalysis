@@ -155,26 +155,29 @@ tryCatch({
   # NA 流到后面的 `if (dev_dir > tol ...)` 才炸。一句没人看得懂的 R 内部错误，
   # 比一句"这两列成比例，删掉它"坏得多。策略：完全秩亏=硬停（参数根本不可识别），
   # 接近秩亏=开口但继续。三处比值各自算清楚，别笼统算一次 cbind(X,M) 就下结论。
+  # 阈值取 1e-7 而不是更"严格"的 1e-10：lm.fit 的 QR 默认 tol=1e-7，
+# 比它更松的输入会被 lm.fit 当成冗余列并填 NA —— 实测 rcond≈1e-8 时先撞到的
+# 是我的「内部校验失败」而不是这条拒单，等于把输入问题误报成实现 bug。
   rcond_of <- function(D) {
     sv <- svd(D, nu = 0L, nv = 0L)$d
     if (!length(sv) || max(sv) <= 0) return(0)
     min(sv) / max(sv)
   }
   rc_x <- rcond_of(Xc); rc_m <- rcond_of(Mc); rc_side <- rcond_of(cbind(Xc, Mc))
-  if (rc_x < 1e-10) {
+  if (rc_x < 1e-7) {
     stop(sprintf(paste0("X 的列之间存在完全共线（最小奇异值比 %.3g）：有变量是别的变量的倍数，",
                         "或者干脆是重复列。先删掉成比例的列 —— 不是采样不够，是这些系数",
                         "在数学上无法分开（注意：标准化会先减均值，所以第二列 = 第一列 + 常数也算完全共线）。"), rc_x))
   }
-  if (rc_m < 1e-10) {
+  if (rc_m < 1e-7) {
     stop(sprintf("M 的列之间存在完全共线（最小奇异值比 %.3g）：两个中介变量其实是一个。", rc_m))
   }
-  if (rc_side < 1e-10) {
+  if (rc_side < 1e-7) {
     stop(sprintf(paste0("X 与 M 合起来秩亏（最小奇异值比 %.3g）：某个中介能被 X 完全解释，",
                         "直接效应与间接效应不可分离。这不是采样能解决的 —— 需要改变设计",
                         "（例如增加 M 的测量时点，或删掉那一列中介）。"), rc_side))
   }
-  if (rc_side < 1e-6) {
+  if (rc_side < 1e-4) {
     diagnostics <- c(diagnostics, paste0("X 与 M 高度共线（最小奇异值比 ", sprintf("%.3g", rc_side),
                                          "）：还没到不可识别，但直接与间接的区间会明显变宽，",
                                          "别把它们当成两条独立结论。"))
