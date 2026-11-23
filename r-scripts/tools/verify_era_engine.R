@@ -417,6 +417,33 @@ cat(sprintf("\n\u5f15\u64ce\u72b6\u6001\uff1a%s\n",
     paste(readLines(f, warn = FALSE), collapse = ""), simplifyVector = FALSE)
   nums <- function(x) as.numeric(unlist(x))
 
+  # 语义复核：凡是引擎标成「抵消」的格子，必须真的满足"合计被抹到最大通路的一半以下、
+  # 而且第二大通路不算微弱"。
+  # 为什么这样写，而不是"某个夹具应该报 0 格"：偏回归会把相关中介的权重放大，
+  # 设计系数是 (+1.0, -0.5) 的夹具，报出来的比值可以是 0.35 —— 那两格被标记是判据在
+  # 正常工作，我硬断言"不许报"就把对的判成错的（第一版就是这样，红了两格）。
+  # 复核"报出来的东西名不副实"才稳：它与夹具噪声无关，而把 |合计| <= 0.4·最大 放宽到
+  # 1.2 一定会让它红 —— 否则那个常数就没有任何东西守着。
+  flag_audit <- function(j, tag) {
+    bm <- j$indirect_by_mediator
+    cells <- bm$cells
+    marked <- unlist(bm$cancelled_cells)
+    pm <- lapply(bm$per_mediator, function(b) nums(b$mean))
+    bad <- 0L; worst_ratio <- 0; worst_second <- 1
+    for (ci in seq_along(cells)) {
+      if (!(cells[[ci]] %in% marked)) next
+      v <- sapply(pm, function(x) x[ci])
+      o <- sort(abs(v), decreasing = TRUE)
+      ratio <- abs(sum(v)) / o[1]
+      worst_ratio <- max(worst_ratio, ratio); worst_second <- min(worst_second, o[2])
+      if (ratio > 0.45 || o[2] < 0.15) bad <- bad + 1L
+    }
+    ok(bad == 0L,
+       sprintf("%s：标为抵消的 %d 格名实相符（最大比值 %.2f <= 0.45，最小次通路 %.3f >= 0.15）",
+               tag, length(marked), worst_ratio, worst_second),
+       sprintf("%d 格名不副实（最大比值 %.2f / 最小次通路 %.3f）", bad, worst_ratio, worst_second))
+  }
+
   mk_paths <- function(samesign) {
     n <- 80
     X <- matrix(stats::rnorm(n * 2), n, 2)
@@ -461,6 +488,7 @@ cat(sprintf("\n\u5f15\u64ce\u72b6\u6001\uff1a%s\n",
        paste(unlist(bm$cancelled_cells), collapse = "/"))
     ok(any(grepl("抵消", unlist(r$diagnostics))), "诊断里说了「抵消」并把两个方向摆出来",
        paste(unlist(r$diagnostics), collapse = " / "))
+    flag_audit(r, "反向抵消夹具")
     path_max <- max(abs(unlist(lapply(bm$per_mediator, function(b) nums(b$mean)))))
     tot_max <- max(abs(ind_mean))
     ok(tot_max < 0.5 * path_max,
@@ -484,6 +512,7 @@ cat(sprintf("\n\u5f15\u64ce\u72b6\u6001\uff1a%s\n",
     ok(as.integer(bms$cancelled_count) == 0L,
        "同向强通路不许报抵消（对照组，只守符号那一层）",
        sprintf("报了 %s 格：%s", bms$cancelled_count, paste(unlist(bms$cancelled_cells), collapse = "/")))
+    flag_audit(jrs, "同向夹具")   # 0 格时自动通过，但它在放宽阈值的变异下必须红
     ims <- nums(jrs$effects$indirect$mean)
     ok(min(abs(ims)) > 0.2, "同向时合计应当远离 0（拆开与不拆开结论一致）",
        paste(sprintf("%.2f", ims), collapse = " "))
@@ -508,10 +537,42 @@ cat(sprintf("\n\u5f15\u64ce\u72b6\u6001\uff1a%s\n",
     ok(FALSE, "分中介通路：微弱随机符号夹具能跑通", rw$err)
   } else {
     jw <- from_json_raw(rw$file); bmw <- jw$indirect_by_mediator
+    flag_audit(jw, "微弱随机符号夹具")
     wmax <- max(abs(unlist(lapply(bmw$per_mediator, function(b) nums(b$mean)))))
     ok(as.integer(bmw$cancelled_count) == 0L,
        sprintf("符号随机但通路微弱（最大 %.3f）不许报抵消 —— 这条守的是量级阈值", wmax),
        sprintf("报了 %s 格：%s", bmw$cancelled_count, paste(unlist(bmw$cancelled_cells), collapse = "/")))
+  }
+
+  # 第四个对照：**只抵消掉一半的不算抵消**。
+  # 这条是专门给 |合计| <= 0.4·最大 那个常数造的：夹具里每条格子的两条通路是
+  # (+1.0, -0.5)，合计 0.5 —— 比值 0.5 落在 0.4 之外、1.2 之内，而另外两条判据
+  # （第二大 >= 0.15 且 >= 0.3·最大）都满足。于是"拦下它"这件事只可能由那 0.4 做到：
+  # 把 0.4 放宽到 1.2 必须让这条红。没有它，那个常数就是没有守卫的装饰品。
+  set.seed(81L)
+  # n 要够大：上一版用 60，逐格的"合计/最大通路"比值本身就带抽样噪声，
+  # 有两格飘到 0.4 以下被标记 —— 那是判据在正常工作，我的断言太硬。
+  # 把 n 提到 200、迭代加倍，比值收敛到设计值 0.5，"不许报"才站得住。
+  n4 <- 200
+  X4 <- matrix(stats::rnorm(n4 * 2), n4, 2)
+  G4 <- matrix(c(1.0, 0.5, 1.0, 0.5), 2, 2, byrow = TRUE)          # p x k：X -> M1 强，X -> M2 弱
+  M4 <- X4 %*% G4 + matrix(stats::rnorm(n4 * 2, 0, 0.35), n4, 2)
+  W4 <- matrix(c(1.0, 1.0, -1.0, -1.0), 2, 2, byrow = TRUE)         # M2 下游反号 => 部分抵消
+  B4 <- matrix(c(0.4, -0.2, 0.3, 0.2), 2, 2, byrow = TRUE)
+  Y4 <- X4 %*% B4 + M4 %*% W4 + matrix(stats::rnorm(n4 * 2, 0, 0.7), n4, 2)
+  rp <- run_era(list(X = unname(X4), M = unname(M4), Y = unname(Y4),
+                     chains = 2L, iterations = 4000L, thin = 8L, seed = 13L,
+                     prior_lambda = 1, prob = 0.95), tag = "paths_partial")
+  if (rp$code != 0L) {
+    ok(FALSE, "分中介通路：部分抵消夹具能跑通", rp$err)
+  } else {
+    jp <- from_json_raw(rp$file); bmp <- jp$indirect_by_mediator
+    flag_audit(jp, "部分抵消夹具")
+    # 同时要求这条夹具确实**没有把全部格子**都标掉：如果 8 格全标，
+    # 说明判据退化成了"有两条通路就报"
+    ok(as.integer(bmp$cancelled_count) < length(bmp$cells),
+       sprintf("部分抵消夹具里标记必须是少数（%s/%d 格），不能一视同仁",
+               bmp$cancelled_count, length(bmp$cells)), "")
   }
 
   # k=1 是最容易把结构写崩的形状：通路层必须还在，而且与合计逐格相等
