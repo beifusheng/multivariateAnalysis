@@ -8,7 +8,10 @@
  *
  * 引擎契约（r-scripts/permanova.R）：
  *  - params$distanceMatrix：纯数值二维数组，不含样本名
- *  - params$sampleData：列字典 { 列名: [值…] }，**第一列必须是样本 ID**（R 里按位置取）
+ *  - params$sampleData：列字典 { 列名: [值…] }，**第一列约定放样本 ID**（要与距离矩阵同序）。
+ *    注意这是**约定不是规则**：R 按取值判断（逐样本唯一才算 ID）。
+ *    第一列若是只有几个水平的分组列（如实机里的 Habitat），它会被当普通分组列建模 ——
+ *    上一版按位置硬判，把这种列拒了，而拒单理由说的还是假的。
  *  - params$formula：字符串，sampleData 与 formula 必须同时给才会跑模型
  */
 

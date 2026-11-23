@@ -467,8 +467,12 @@ console.log('\n=== 7. 编码语义：整数分组被当趋势拟合时必须开�
 
   // --------- 实机报回来的那一组数字（Df=8 / R²=1 / F=p=N/A）就是下面两条 ----------
   const idFit = pmErr({ ...base, formula: 'Sample' }, 'idfit');
-  check('样本 ID 列进公式 -> 明确拒绝并说清为什么（不再给 R²=1 的空模型）',
-    idFit.code !== 0 && /是样本 ID 列（第一列），不能当解释变量/.test(idFit.msg) && !/非数值参数/.test(idFit.msg),
+  // 措辞为什么变：“（第一列）”那个版本只报位置，于是一个只有 3 个水平的首列分组列
+  // （用户实机里叫 Habitat）也被它拦下，而拦下时说的话是假的。
+  // 现在理由里必须带上“多少个样本 / 多少个不同取值”这两个实际数字。
+  check('样本 ID 列进公式 -> 明确拒绝，且理由里的数字来自这份数据（9 样本/9 取值）',
+    idFit.code !== 0 && /是样本 ID 列（第一列，9 个样本有 9 个不同取值）/.test(idFit.msg) &&
+      !/非数值参数/.test(idFit.msg),
     idFit.msg.slice(0, 130));
   const ghost = pmErr({ ...base, formula: 'Treatment' }, 'ghost');
   check('公式引用了不存在的列 -> 说清"公式写列名"并列出可用列与取值',

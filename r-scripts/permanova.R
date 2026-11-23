@@ -1,5 +1,6 @@
 # PERMANOVA 分析脚本
 # 使用 vegan 包的 adonis2 函数
+# STATUS: implemented —— 已知答案自检见 r-scripts/tools/verify_permanova_engine.R
 
 args <- commandArgs(trailingOnly = TRUE)
 
@@ -117,8 +118,15 @@ tryCatch({
       col_data <- as.list(sample_data_raw[[col_name]])
       chr <- as.character(unlist(col_data, use.names = FALSE))
       if (i == 1L) {
-        out[[col_name]] <- chr                       # 首列：样本 ID
-        next
+        # 首列是不是"样本 ID"，看它的**取值**，不看它排在第几列：
+        # 逐样本唯一 => 是 ID（拿去建模就是完美拟合）；有重复水平 => 它就是普通的
+        # 分组/协变量列，按后面的规则处理。以前这里无条件当 ID，于是出现误判：
+        # 用户第一列是真分组变量（如 Habitat 三个水平）也被拒，而拒单理由写着
+        # "每个样本一个水平" —— 那句话在这份数据上根本是假的。
+        if (length(unique(chr)) == length(chr)) {
+          out[[col_name]] <- chr
+          next
+        }
       }
       if (anyNA(chr) || !length(chr)) {
         stop(sprintf("样本表第 %d 列 %s 有空值，无法建模", i, col_name))
@@ -161,18 +169,22 @@ tryCatch({
     # 实机报回来的结果是 Df=8 / R²=1.0000 / F 与 p 全是 N/A：
     # 签名指向“把样本 ID 当了解释变量”（9 个样本 9 个水平 = 逐字完美拟合）。
     # 旧代码丱完全不管：adonis2 照跑，输出照样 success，前端把 N/A 端给用户看。
-    id_col <- colnames(sample_data)[1]
+    # “第一列就是 ID”这个假设必须验证，不能当公理：取值逐样本唯一才叫 ID
+    first_col <- colnames(sample_data)[1]
+    id_like <- length(unique(as.character(sample_data[[first_col]]))) == nrow(sample_data)
+    id_col <- if (id_like) first_col else NULL
     used_terms <- formula_terms_of(formula_str)
     for (tt in used_terms) {
-      if (identical(tt, id_col)) {
-        stop(paste0("公式里的 ", tt, " 是样本 ID 列（第一列），不能当解释变量：",
-                    "每个样本一个水平，模型会“完美拟合”（R²=1），而 F 与 p 根本没有定义。",
-                    "请把公式改成分组列（如 Group）。"))
+      if (!is.null(id_col) && identical(tt, id_col)) {
+        stop(paste0("公式里的 ", tt, " 是样本 ID 列（第一列，", nrow(sample_data),
+                    " 个样本有 ", length(unique(sample_data[[tt]])), " 个不同取值），",
+                    "不能当解释变量：每个样本一个水平，模型会“完美拟合”（R²=1），",
+                    "而 F 与 p 根本没有定义。请把公式改成分组列。"))
       }
       if (!(tt %in% colnames(sample_data))) {
         # 实测有人把"取值"当"列名"写进公式（写成 G1/G2/G3，而 G1/G2/G3 是 Group 列的值）。
         # 光列可用列名不够，要把每列的取值一并给出，用户才能一眼看出该写哪个。
-        others <- setdiff(colnames(sample_data), id_col)
+        others <- if (is.null(id_col)) colnames(sample_data) else setdiff(colnames(sample_data), id_col)
         detail <- vapply(others, function(cc) {
           v <- unique(as.character(sample_data[[cc]]))
           paste0(cc, "（取值：", paste(utils::head(v, 4), collapse = ", "),
@@ -180,7 +192,10 @@ tryCatch({
         }, character(1))
         stop(paste0("公式里的 ", tt, " 不是样本表里的列名。公式要写**列名**（取值不写进公式）。",
                     "可用列：", if (length(detail)) paste(detail, collapse = "; ") else "（无）",
-                    "；第一列 ", id_col, " 是样本 ID，不参与建模。"))
+                    if (is.null(id_col)) "" else
+                      paste0("；第一列 ", first_col, " 是样本 ID，不参与建模。"),
+                    if (is.null(id_col))
+                      paste0("（注意：第一列 ", first_col, " 取值有重复，本次把它当普通列建模。）") else ""))
       }
       lev <- length(unique(sample_data[[tt]]))
       # 只对**因子列**判“水平太多”。连续协变量天然有 n 个不同取值（Age=25/28/30/27），
@@ -218,6 +233,12 @@ tryCatch({
   } else {
     # 演示模式：使用距离矩阵直接进行 PERMANOVA
     # 创建一个简单的分组变量
+    # 这个分组是**软件按行序虚构的**（前一半算 1 组，后一半算 2 组）：跟用户的实验设计
+    # 毫无关系，p 值因此也不代表任何假设检验的结论。以前这里不出声，用户看到的是一个
+    # 长得跟真结果一模一样的 p。现在每次都在 note 里写明它是虚构分组。
+    output_note <- c(output_note, paste0(
+      "演示模式：没有样本数据与公式，分组按行序虚构（前一半 vs 后一半）。",
+      "这个 p 不是任何假设检验的结论，不要引用；要结论请填样本表并在公式里写分组列名。"))
     groups <- factor(rep(1:2, length.out = n_samples))
     sample_data <- data.frame(Group = groups)
     
@@ -428,7 +449,10 @@ tryCatch({
   # ===================================
   
   # 写入输出
-  output_json <- jsonlite::toJSON(output, auto_unbox = TRUE, pretty = TRUE, digits = 6)
+  # digits = NA（全精度）：这里原来是 6，于是外部拿 adonis2 核对 R²/F 时，
+  # 看到的差其实是自己的舍入（实测 R² 差 4.8e-7）—— 与 gmr4/era/nonrandom 同一规矩。
+  # 前端本来就用 fmtP/fmt 控制显示位数，不需要引擎替它截。
+  output_json <- jsonlite::toJSON(output, auto_unbox = TRUE, pretty = TRUE, digits = NA)
   writeLines(output_json, output_file)
   
 }, error = function(e) {

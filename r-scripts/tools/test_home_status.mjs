@@ -212,6 +212,31 @@ console.log('\n=== 3e) 卡片上的能力标签必须真有其事 ===');
     'Bayesian ERA': 'r-scripts/tools/verify_era_engine.R',
     'GMR⁴': 'r-scripts/tools/verify_gmr4_engine.R'
   };
+
+  // PERMANOVA 主引擎以前**根本没有尺子**，而卡片一直标着“可用”——这不是洁癖问题：
+  // 用户实机报回来的误判（公式里用 Habitat 被拒，理由是“每样本一个水平”，
+  // 而那一列其实只有 3 个水平）只能靠人手测发现，因为它根本没有机器在验。
+  // 现在尺子逐节点名：“位置守卫换成取值守卫”这个修复一旦回退，下面直接红。
+  const pmEngine = read('r-scripts/permanova.R');
+  const pmRuler = read('r-scripts/tools/verify_permanova_engine.R');
+  check('permanova.R 头部有 STATUS: implemented',
+    /STATUS: implemented/.test(pmEngine.split('\n').slice(0, 5).join('\n')),
+    pmEngine.split('\n').slice(0, 3).join(' | ').slice(0, 90));
+  const PM_LOCKS = {
+    '首列是否 ID 看取值不看位置': /\u770b\u53d6\u503c\u4e0d\u770b\u4f4d\u7f6e/,
+    'adonis2 锚点（R² 与 F 独立算一遗）': /adonis2/,
+    '演示模式虚构分组必须出声': /\u865a\u6784/,
+    '行数与矩阵不符必须拒': /12 \u4e2a\u6837\u672c.*9 \u884c|9 \u884c/,
+    '固定种子逐字节复现': /\u540c\u8f93\u5165\u540c\u8f93\u51fa/
+  };
+  const pmLost = Object.keys(PM_LOCKS).filter((kk) => !PM_LOCKS[kk].test(pmRuler));
+  check('主引擎尺子五个章节逐点名都在（丢哪节红哪条）',
+    pmLost.length === 0, `缺失：${pmLost.join(' / ') || '无'}`);
+  check('引擎拒单理由里的数字来自数据本身（不是背模板句）',
+    /12 个样本有 12 个不同取值/.test(pmRuler) &&
+      !/\u6bcf\u4e2a\u6837\u672c\u4e00\u4e2a\u6c34\u5e73.*\u8bf7\u628a\u516c\u5f0f\u6539\u6210\u5206\u7ec4\u5217\uff08\u5982 Group\uff09/.test(pmEngine), '');
+  check('主引擎输出用全精度（digits = NA）—— 否则外部核对看到的是自己的舍入',
+    /auto_unbox = TRUE, pretty = TRUE, digits = NA/.test(pmEngine), '仍被截位');
   const variants = (tok) => [tok, tok.replace(/^[a-zA-Z]+::/, ''), tok.replace(/^vegan::/, '')]
     .filter((v, i, a) => v && a.indexOf(v) === i);
 
