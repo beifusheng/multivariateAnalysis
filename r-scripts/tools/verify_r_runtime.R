@@ -26,10 +26,15 @@ lock_path <- if (length(pos)) pos[1] else file.path(ROOT, "r-runtime.lock.json")
 
 `%NULL%` <- function(a, b) if (is.null(a)) b else a
 
+passed <- 0L
 fails <- character(0)
 warns <- character(0)
 notes <- character(0)
-say <- function(tag, msg) cat(sprintf("[%s] %s\n", tag, msg))
+say <- function(tag, msg) {
+  # 顺手记数：run_all_tests.mjs 只认机器可读的 RESULT 行，不再猜散文格式
+  if (identical(tag, "OK")) passed <<- passed + 1L
+  cat(sprintf("[%s] %s\n", tag, msg))
+}
 
 if (!file.exists(lock_path)) {
   say("FAIL", paste("找不到锁定文件:", lock_path, "（先跑 r-scripts/tools/export_r_lockfile.R）"))
@@ -237,4 +242,5 @@ if (!is.null(json_out)) {
     ok = !length(fails)
   ), auto_unbox = TRUE, pretty = TRUE), json_out)
 }
+cat(sprintf("RESULT pass=%d fail=%d\n", passed, length(fails)))
 quit(status = if (length(fails)) if (any(grepl("冒烟", fails))) 2 else 1 else 0)

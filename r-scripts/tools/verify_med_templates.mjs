@@ -145,4 +145,7 @@ if (notSig.length) console.log('不显著: ' + notSig.map((f) => f.id + '(p=' + 
 if (keep) console.log('中间文件保留: ' + tmp);
 else fs.rmSync(tmp, { recursive: true, force: true });
 
+// 机器可读结果行：run_all_tests.mjs 只认这种 ASCII 契约，
+// 不再去猜各家散文式收尾（曾经五种格式，两种被猜成 NO-SUMMARY 当成失败）
+console.log('RESULT pass=' + (rows.length - failed.length) + ' fail=' + failed.length);
 process.exit(failed.length ? 1 : 0);

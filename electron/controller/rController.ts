@@ -268,6 +268,9 @@ export default class RController {
     kfold?: number; // 交叉验证折数
     seed?: number; // 固定随机源，同输入必同输出
   }): Promise<any> {
+    // 注意：params 整包交给 rService.runScript，不做字段筛选 —— 视图 buildPayload()
+    // 新增任何键，这里与上面的类型都要同步（否则文档失真）。链路有测试兜着：
+    // r-scripts/tools/test_ipc_chain.mjs
     logger.info('[RController] Running GMR4 with params:', params);
     
     const result = await rService.runScript({
@@ -292,6 +295,12 @@ export default class RController {
     M: number[][];
     chains?: number;
     iterations?: number;
+    // 下面四个曾只存在于视图与引擎里，这里没写：类型不校验运行时，
+    // 但它是这个通道唯一的文档，缺字段会让后人以为"引擎只吃前五个"。
+    thin?: number;              // bayesian_era_mediation.R: params$thin
+    seed?: number;              // 固定 Gibbs 的随机源，同输入必同输出
+    prior_lambda?: number;      // 系数先验强度
+    prob?: number;              // HDI 置信水平
   }): Promise<any> {
     logger.info('[RController] Running Bayesian ERA with Mediation with params:', params);
     

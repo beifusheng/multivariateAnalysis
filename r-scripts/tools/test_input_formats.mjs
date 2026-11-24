@@ -17,6 +17,14 @@ const RSCRIPT = process.env.RSCRIPT || path.join(ROOT, 'r-portable', 'bin', proc
 // 用 RSCRIPT 环境变量可做 R 版本 A/B（如 4.3.3 vs 4.6.1）);
 const MED_R = path.join(ROOT, 'r-scripts', 'permanova_med.R');
 
+// 原来这个脚本只打印散文：坏例子「居然成功了(需检查)」也照旧退出码 0 ——
+// 那是静默通过。现在改成真判据 + 真退出码。
+let pass = 0; const fails = [];
+const check = (name, cond, detail = '') => {
+  if (cond) { pass++; console.log('  ✓ ' + name); }
+  else { fails.push(name + (detail ? ' —— ' + detail : '')); console.log('  ✗ ' + name + (detail ? '  [细: ' + detail + ']' : '')); }
+};
+
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-'));
 // medTemplates.js 现在依赖 ./rng.js，直接复制成 .mjs 会断，走统一的 ESM 沙箱
 const { medTemplates: { MED_TEMPLATE_MAP, buildMedTemplateData } } = await loadFrontendUtils(['medTemplates']);
@@ -80,8 +88,13 @@ for (const [tag, r] of Object.entries(res)) {
 const okv = Object.entries(res).filter(([, r]) => r.ok);
 const same = okv.length > 1 && okv.every(([, r]) => Math.abs(r.p - okv[0][1].p) < 1e-12);
 console.log('\n可解析格式数: ' + okv.length + '/' + Object.keys(variants).length);
-console.log(okv.length === 0 ? '❌ 全部失败' :
-  (same ? '✅ 多格式结果完全一致（转置方向正确）' : '⚠️ 不同格式结果不一致 -> 存在方向/消歧错误'));
+check('四种输入写法都能被解析（矩阵 / 行字典 / 列字典 / 裸向量）',
+  okv.length === Object.keys(variants).length,
+  Object.entries(res).filter(([, r]) => !r.ok).map(([k]) => k).join(', '));
+check('多格式结果逐位一致（证明转置方向与消歧没错）', same,
+  okv.map(([, r]) => r.p.toFixed(10)).join(' vs '));
+check('中介变量数在四种写法下相同（列数推断没被格式带偏）',
+  okv.length > 0 && new Set(okv.map(([, r]) => r.nvar)).size === 1, okv.map(([, r]) => r.nvar).join('/'));
 
 // ---------- 错误信息可读性 ----------
 console.log('\n=== 坏输入的报错是否可读 ===');
@@ -91,9 +104,29 @@ const badCases = {
   '含非数值': { ...base, mediatorData: d.mediatorData, predictorData: rowDict(d.predictorData.map((r) => ['Control', ...r.slice(1)]), 'S'), outcomeData: d.outcomeData },
   '样本太少': { ...base, mediatorData: [[1, 2], [3, 4]], predictorData: [[1], [0]], outcomeData: [[1], [0]] },
 };
+// 每个坏例子都必须拒掉，而且理由要说中要害（只报"出错了"不合格）
+const expectKey = {
+  lengthMismatch: /长度|不一致|行数/,
+  sampleMismatch: /样本数|对不上|不一致/,
+  nonNumeric: /数值|无法转/,
+  tooFew: /样本数过少|至少/
+};
+const badKey = { '长度不一致': 'lengthMismatch', '样本数对不上': 'sampleMismatch',
+  '含非数值': 'nonNumeric', '样本太少': 'tooFew' };
 for (const [tag, payload] of Object.entries(badCases)) {
   const r = runR(payload, 'bad_' + tag.replace(/\W/g, ''));
-  console.log(`\n[${tag}] -> ${r.ok ? '居然成功了(需检查)' : '如预期失败'}`);
-  console.log('  ' + (r.err || '(无错误摘要)').slice(0, 300));
+  console.log('\n[' + tag + '] -> ' + (r.ok ? 'OK了(不应)' : 'fail如期'));
+  console.log('  ' + (r.err || '(无摘要)').slice(0, 300));
+  const key = badKey[tag];
+  check('坏输入「' + tag + '」被拒绝且理由说中要害',
+    !r.ok && key && expectKey[key].test(r.err), r.ok ? '它竟然成功了' : (r.err || '').slice(0, 110));
+  check('坏输入「' + tag + '」不报未知错误（能指引下一步）',
+    !r.ok && !/未知|unexpected|attempt to use|non-numeric argument/.test((r.err || '').slice(0, 200)),
+    r.ok ? 'n/a' : (r.err || '').slice(0, 110));
 }
+console.log('\n======== input_formats ======');
+console.log(pass + ' 通过 / ' + fails.length + ' 失败');
+if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }
+fs.rmSync(tmp, { recursive: true, force: true });
+process.exit(fails.length ? 1 : 0);
 fs.rmSync(tmp, { recursive: true, force: true });

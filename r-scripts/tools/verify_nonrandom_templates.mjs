@@ -165,4 +165,7 @@ if (failures.length) {
   failures.forEach((f) => console.log('  - ' + f));
 }
 fs.rmSync(TMP, { recursive: true, force: true });
+// 机器可读结果行：run_all_tests.mjs 只认这种 ASCII 契约，
+// 不再去猜各家散文式收尾（曾经五种格式，两种被猜成 NO-SUMMARY 当成失败）
+console.log('RESULT pass=' + passAll + ' fail=' + failAll);
 process.exit(failures.length ? 1 : 0);
