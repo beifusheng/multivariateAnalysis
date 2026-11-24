@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'pkg-'));
@@ -137,9 +138,69 @@ console.log('\n=== 5. 构建配置与源码的静态约束 ===');
     /from '.\/rPaths'/.test(portable) && /from '.\/rPaths'/.test(svc), '');
   check('builder 的 files 里 public / node_modules 仍在（主进程与前端产物）',
     JSON.stringify(JSON.parse(fs.readFileSync(path.join(ROOT, 'cmd/builder.json'), 'utf8')).files).includes('public'), '');
+  // 上一版我只加了 asarUnpack、没加 files —— 真打一次才发现 asarUnpack 只能解包
+  // **已经进了 files 的东西**，r-scripts 不在 files 里，解包目录压根不会生成。
+  // 所以下面两条必须成对存在，少一条就是空配置。
+  for (const f of files) {
+    const j = JSON.parse(fs.readFileSync(path.join(ROOT, 'cmd', f), 'utf8'));
+    const inFiles = (j.files || []).some((x) => /r-scripts/.test(String(x)));
+    const inUnpack = (j.asarUnpack || []).some((x) => /r-scripts/.test(String(x)));
+    check(`${f} 的 files 与 asarUnpack 成对声明了 r-scripts（只写 asarUnpack 是空配置）`,
+      inFiles && inUnpack, `files=${inFiles} asarUnpack=${inUnpack}`);
+  }
+
+  console.log('\n=== 6. 真打过一次的话，直接验产物布局 ===');
+  const unpackedRoot = path.join(ROOT, 'out', 'win-unpacked', 'resources');
+  if (!fs.existsSync(unpackedRoot)) {
+    console.log('  - 跳过：没有 out/win-unpacked（未执行过打包）');
+  } else {
+    const ctx = {
+      appPath: path.join(unpackedRoot, 'app.asar').replace(/\\/g, '/'),
+      resourcesPath: unpackedRoot.replace(/\\/g, '/'),
+      cwd: path.join(ROOT, 'out', 'win-unpacked').replace(/\\/g, '/'),
+      env: {}
+    };
+    const scripts = P.pickFirst(P.rScriptsCandidates(ctx), (p) => fs.existsSync(p));
+    check('打包后解析到的脚本目录真的存在（app.asar.unpacked 里）',
+      !!scripts && fs.existsSync(path.join(String(scripts), 'permanova.R')), String(scripts));
+    const rdir = P.pickFirst(P.rPortableCandidates(ctx), (p) => fs.existsSync(p));
+    check('打包后解析到的 R 目录真的存在（extraResources 里）',
+      !!rdir && fs.existsSync(path.join(String(rdir), 'bin')), String(rdir));
+    // 真实文件系统跑一遍：把安装包里的 R 指向安装包里的脚本跑一个最小分析
+    if (rdir && scripts) {
+      const exe = path.join(String(rdir), 'bin', process.platform === 'win32' ? 'Rscript.exe' : 'Rscript');
+      let ver = '';
+      try {
+        ver = execFileSync(exe, ['--version'], { encoding: 'utf8', timeout: 120000 });
+      } catch (e) { ver = ''; }
+      check('安装包里的 Rscript 真能执行（不是拷了个空壳）', /Rscript/.test(ver), ver.trim().slice(0, 60));
+    }
+  }
+
+  // 真正要紧的是这一条：拷到哪里与去哪里找，两边必须说的是同一个地方。
+  // 上一版就是各说各话：builder 把 extraResources 放到 resources/extraResources/<to>，
+  // 而解析器搜的是 appPath/resources/r-portable（安装包里根本没这个路径）。
+  for (const f of files) {
+    const j = JSON.parse(fs.readFileSync(path.join(ROOT, 'cmd', f), 'utf8'));
+    const er = Array.isArray(j.extraResources) ? j.extraResources : [j.extraResources];
+    const hit = er.filter((x) => x && String(x.from).replace(/[\\/]+$/, '') === 'r-portable');
+    check(`${f} 把 r-portable 拷进了 extraResources`, hit.length === 1, JSON.stringify(er));
+    if (hit.length === 1) {
+      const to = String(hit[0].to).replace(/[\\/]+$/, '');
+      const ctx = {
+        appPath: 'C:/Program Files/MV/resources/app.asar',
+        resourcesPath: 'C:/Program Files/MV/resources',
+        cwd: 'C:/Program Files/MV', env: {}
+      };
+      const landing = 'C:/Program Files/MV/resources/' + to;
+      check(`${f} 的落点与解析器候选一致（${to}）`,
+        P.rPortableCandidates(ctx).includes(landing),
+        P.rPortableCandidates(ctx).join(' | '));
+    }
+  }
 }
 
-console.log('\n=== 6. 本机真实解析（假输入能过不等于真路径能中）===');
+console.log('\n=== 7. 本机真实解析（假输入能过不等于真路径能中）===');
 {
   const ctx = {
     appPath: ROOT,

@@ -245,15 +245,33 @@ npm run build-l        # Linux
 
 | 环节 | 现在怎么做的 | 谁来守 |
 | --- | --- | --- |
-| R 脚本随包分发 | 四个平台的 builder 配置都声明 `asarUnpack: ["r-scripts/**/*"]`；主进程解析到 `app.asar.unpacked/r-scripts` | `test_packaging.mjs` |
+| R 脚本随包分发 | `files` 与 `asarUnpack` 都声明了 `r-scripts/**/*`；主进程解析到 `app.asar.unpacked/r-scripts` | `test_packaging.mjs` |
 | 为什么不能只放 asar 里 | R 进程走真实文件系统，**不认识 asar**；传归档内路径只会得到一句没有上下文的 cannot open file | 同上 |
-| R 运行时随包分发 | 把 `r-portable/` 放进 `build/extraResources/`，electron-builder 会拷到 `<安装目录>/resources/extraResources/r-portable`；主进程的候选列表已包含该位置 | 同上 |
-| 没带运行时时的傅底 | 继续找用户目录下的 R-Portable 与 PATH 里的 Rscript；都找不到时日志把**搜过的位置全列出来** | 同上 |
+| R 运行时随包分发 | 四个平台配置的 `extraResources` 都多了一条 `{from: "r-portable", to: "extraResources/r-portable"}`，落到 `<安装目录>/resources/extraResources/r-portable`；主进程候选列表包含同一位置（落点与解析器两边必须说同一个地方） | 同上 |
+| 没带运行时时的兜底 | 继续找用户目录下的 R-Portable 与 PATH 里的 Rscript；都找不到时日志把**搜过的位置全列出来** | 同上 |
 
-> ⚠️ **现状**：`build/extraResources/` 里目前只有 `dll/`，**没有 r-portable**。
-> 也就是说：现在直接 `npm run build-w` 打出来的安装包，用户装好后一跑分析就找不到 R。
-> 发布前必须先把运行时拷进 `build/extraResources/r-portable`（本机已有，约 603MB），
-> 或者接受"用户自己装 R + 加入 PATH"。
+两个目录都不需要手工拷：`r-scripts/` 与 `r-portable/` 已直接写进四个平台配置的
+`files` / `asarUnpack` / `extraResources`，`r-portable` 已在 `.gitignore` 里（不会混进仓库）。
+
+### 已实测跑通（不是推测）
+
+```bash
+npm run build-w           # 正常打包（需联网下 electron 发行包）
+npm run build-w:offline   # 离线：复用 node_modules/electron/dist，不下那 97MB
+```
+
+产物验证结果：`out/win-unpacked/resources/app.asar.unpacked/r-scripts/` 与
+`out/win-unpacked/resources/extraResources/r-portable/bin/Rscript.exe` 都在；
+**用包里的 R 跑包里的脚本**，得 `R²=0.58982 / F=3.8345 / p=0.006 / 分项 2 行` ——
+与开发态已知答案逐位一致（这条由 `test_packaging.mjs` §6 在有 `out/` 时自动重验）。
+
+> 为何需要 `build-w:offline`：本机 electron-builder 缓存里只有 v22 的发行包，
+> 而项目用 39.8.10；无外网时它会卡在 `connect ETIMEDOUT`（下载与镜像都试过来）。
+> `-c.electronDist=node_modules/electron/dist` 直接复用已经装好的那一份。
+
+> 真打一次才发现的坑：`asarUnpack` 只能解包**已经进了 `files` 的东西**。
+> 我第一轮只加了 `asarUnpack`，结果 `app.asar.unpacked` 压根没生成 ——
+> 光看配置会以为是对的，这就是为什么 §5 的判据要求两者**成对存在**。
 
 > 上一轮之前更糟：主进程里把搜索根**写成了开发机的绝对路径**，且 `r-scripts` 根本没进打包清单
 > —— 开发机上两者恰好都能命中，所以从来没人发现。
@@ -266,7 +284,8 @@ npm run build-l        # Linux
 
 - 导出已全部走 spec（五个视图都是 `writeWorkbook(...)`，视图里不再有 `json_to_sheet` /
   `book_append_sheet`）—— 这条原本在待办里，本轮做完并从清单移除了。
-- **安装包里的 R 运行时尚未就位**（见上面 §5 的 ⚠）：这是目前真正挡住"发给别人用"的那一项。
+- 打包链已实测通过（`build-w:offline` 产出 `out/win-unpacked`，用包内 R 跑包内脚本得到与开发态一致的统计量）；
+  但 **没有真正启动过 GUI 安装包**，也没跑完整 nsis 安装流程（本次用 `--dir` 只出解包目录）。
 - `r-runtime.lock.json` 的 `release.url` / `sha256` 仍为 `null` → 新开发者 clone 后只能用
   `-Mode fromLocal` 或 `-Mode fromRepos` 装配 R。
 - 导出已全部走 spec（五个视图都是 `writeWorkbook(...)`，视图里不再有 `json_to_sheet` /

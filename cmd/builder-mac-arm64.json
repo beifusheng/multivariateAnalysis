@@ -9,17 +9,24 @@
   "asarUnpack": [
     "r-scripts/**/*"
   ],
-  
-  "electronLanguages": ["en-US", "zh-CN"],
+  "electronLanguages": [
+    "en-US",
+    "zh-CN"
+  ],
   "files": [
     "public",
     "package.json",
-    "node_modules/**/*"
+    "node_modules/**/*",
+    "r-scripts/**/*"
   ],
   "extraResources": [
     {
       "from": "build/extraResources",
       "to": "extraResources"
+    },
+    {
+      "from": "r-portable",
+      "to": "extraResources/r-portable"
     }
   ],
   "publish": [
