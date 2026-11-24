@@ -236,7 +236,8 @@ console.log('\n=== 3e) 卡片上的能力标签必须真有其事 ===');
     '演示模式虚构分组必须出声': /\u865a\u6784/,
     '行数与矩阵不符必须拒': /12 \u4e2a\u6837\u672c.*9 \u884c|9 \u884c/,
     '固定种子逐字节复现': /\u540c\u8f93\u5165\u540c\u8f93\u51fa/,
-    '分项（边际）检验与 R² 相加恒等式': /per_term|\u5206\u9879/
+    '分项（边际）检验与 R² 相加恒等式': /per_term|\u5206\u9879/,
+    'per_term \u96f6\u5047\u8bbe\u6821\u51c6': /\u62d2\u7edd\u7387|KS/
   };
   const pmLost = Object.keys(PM_LOCKS).filter((kk) => !PM_LOCKS[kk].test(pmRuler));
   check('主引擎尺子五个章节逐点名都在（丢哪节红哪条）',

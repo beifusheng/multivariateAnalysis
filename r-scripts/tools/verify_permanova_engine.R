@@ -124,6 +124,63 @@ cat("\n── 7. 分项（边际）检验：多因子公式必须说清是哪个
      if (r8$code == 0L) paste("per_term 长度", length(r8$out$per_term)) else r8$err)
 }
 
+cat("\n── 8. per_term 的零假设校准：分项检验不许反保守 ──\n")
+{
+  # 恒等式与 vegan 锚点都只证明"算得对"，不证明"口径不偏"。
+  # 分项检验是另跑一次 by="terms"，置换空间/自由度与整模型不同 —— 必须单独校准一次，
+  # 否则可能整模型是好的、分项却系统性偏小（用户第一个看的恰恰是分项表）。
+  NREP <- 40
+  n8 <- 15
+  grp8 <- rep(c("A", "B", "C"), each = 5)          # 标签固定；效应由坐标的随机性给
+  ps_g <- numeric(0); ps_a <- numeric(0); ps_m <- numeric(0); ran <- 0L
+  for (i in seq_len(NREP)) {
+    # 每一轮都要重新生成数据。上一版把坐标放在循环外、只换 seed ——
+    # 那测的是"同一份固定数据的置换噪声"（p 全挤在 0.15 附近），根本不是零假设分布。
+    set.seed(7000L + i)
+    coords <- matrix(rnorm(n8 * 3), n8, 3)
+    D8 <- unname(round(as.matrix(dist(coords)), 6))
+    age8 <- as.character(round(20 + rnorm(n8, 10, 4), 1))
+    r <- run(list(distanceMatrix = D8, sampleData = list(Group = grp8, Age = age8),
+                  formula = "Group + Age", permutations = 499L, seed = 1000L + i),
+             paste0("null8_", i))
+    if (r$code != 0L || length(r$out$per_term) < 2L) next
+    ran <- ran + 1L
+    pt <- r$out$per_term
+    ps_g <- c(ps_g, as.numeric(pt[[1]]$p_value))
+    ps_a <- c(ps_a, as.numeric(pt[[2]]$p_value))
+    ps_m <- c(ps_m, as.numeric(r$out$p_value))
+    # 每一项都必须是定义良好的正数，且不低于置换分辨率
+    if (any(!is.finite(c(as.numeric(pt[[1]]$p_value), as.numeric(pt[[2]]$p_value))))) {
+      okc(FALSE, "分项 p 全为有限数", paste("第", i, "次出现 NA/Inf")); break
+    }
+    if (any(c(as.numeric(pt[[1]]$p_value), as.numeric(pt[[2]]$p_value)) <= 0)) {
+      okc(FALSE, "分项 p 恒大于 0（置换检验给不出 p=0）", paste("第", i, "次")); break
+    }
+    # 精确恒等式：逐项 R² 之和 = 整模型 R²，每一次都必须成立（与置换无关）
+    id8 <- abs(sum(vapply(pt, function(x) as.numeric(x$R2), numeric(1))) - as.numeric(r$out$R2))
+    if (id8 > 1e-6) { okc(FALSE, sprintf("第 %d 次分项 R² 之和与整模型差 %.2e", i, id8), ""); break }
+  }
+  okc(ran == NREP, sprintf("40 次零假设重复全部跑成（实得 %d；跑不成这些判据就是空表通过）", ran), "")
+  if (ran >= 30L) {
+    for (nm in c("Group", "Age")) {
+      v <- if (nm == "Group") ps_g else ps_a
+      rej <- mean(v < 0.05)
+      okc(rej <= 0.225, sprintf("H0 下 %s 分项的拒绝率 %.2f（40 次里 <=9 次；理论 0.05）",
+                               nm, rej), paste(round(v, 3), collapse = " "))
+      ks <- suppressWarnings(stats::ks.test(v, "punif"))
+      okc(ks$p.value > 0.001, sprintf("%s 分项 p 与均匀分布不矛盾（KS p=%.3f）—— 抓 off-by-one",
+                                     nm, ks$p.value), "")
+      okc(all(v >= 1 / 500 - 1e-9), sprintf("%s 分项 p 不低于 1/(499+1)", nm), format(min(v)))
+    }
+    okc(!all(abs(ps_g - ps_m) < 1e-12),
+       "分项 p 不等于整模型 p（否则说明分项根本没独立检验，是把 Model 行抄了一遍）", "")
+    okc(min(ps_g) > 0 && min(ps_a) > 0, "所有分项 p 的最小值仍为正", sprintf("%.4f / %.4f", min(ps_g), min(ps_a)))
+  } else {
+    okc(FALSE, "重复次数不足，校准判据未验证（前置条件失败，未验证）", paste("ran =", ran))
+  }
+}
+
+
 cat("\n── 2. 逐样本唯一的首列仍然是 ID，写进公式必须拒 ──\n")
 r2 <- run(list(distanceMatrix = D,
               sampleData = list(SampleID = paste0("S", seq_len(n)), Habitat = hab),
