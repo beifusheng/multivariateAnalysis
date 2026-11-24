@@ -95,7 +95,7 @@
             <p class="method-desc">基于距离矩阵的置换多元方差分析</p>
             <div class="method-tags">
               <el-tag size="small" type="success" effect="dark">✅ 可用</el-tag>
-              <el-tag size="small" effect="plain">群落结构</el-tag>
+              <el-tag size="small" effect="plain">33 套设计模板</el-tag>
               <el-tag size="small" effect="plain">差异检验</el-tag>
             </div>
           </div>

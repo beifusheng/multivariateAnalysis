@@ -87,6 +87,12 @@
             <!-- 生物/医学方向 -->
             <div class="template-section-title">🔬 生物/医学方向</div>
             <div class="template-buttons">
+              <el-tooltip content="公式首项写成 as.factor(Group)：验证因子包装与“首列取值有重复”两种写法主管道与事后检验都能接住" placement="top">
+                <button type="button" @click="loadTemplate('factorFormula')"
+                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'factorFormula' }]">
+                  🧬 显式因子 + 协变量
+                </button>
+              </el-tooltip>
               <el-tooltip content="单因素 PERMANOVA，检验分组效应" placement="top">
                 <button type="button" @click="loadTemplate('singleFactor')"
                   :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'singleFactor' }]">
@@ -516,9 +522,13 @@
         </el-alert>
       </el-form>
 
-      <div v-if="posthocLoading" class="posthoc-loading">
-        <el-loading v-loading="posthocLoading" element-loading-text="正在运行事后检验..." />
-      </div>
+      <!-- v-loading 是指令不是组件。上一版这里写的是
+           <el-loading v-loading="..." /> —— 一个零宽高的未知元素，于是转圈被压在
+           一条竖窄里（用户报的“竖向窄条”就是这个）。正确用法：指令直接挂在
+           有尺寸的容器上，并整页遮罩。 -->
+      <div v-show="posthocLoading" v-loading="posthocLoading" class="posthoc-loading"
+        element-loading-text="正在运行事后检验（逐对组独立置换，可能要几十秒）..."
+        element-loading-background="rgba(255, 255, 255, 0.88)"></div>
     </div>
 
     <template #footer>
@@ -728,7 +738,10 @@ export default {
       posthocResult: null,
       posthocLoading: false,
       posthocParams: {
-        method: 'fdr',
+        // 默认值必须是下面三个 option 的 value 之一。上一版写的是 'fdr'：
+        // 选项里没有它，于是下拉框显示为空（用户以为没选），而发给引擎的
+        // primary='fdr' 全靠 R 把它归一为 bh 兑住 —— 界面上的默认状态是假的。
+        method: 'bh',
         permutations: 999
       },
 
@@ -3215,6 +3228,10 @@ export default {
 .posthoc-loading {
   position: relative;
   min-height: 200px;
+  width: 100%;
+  /* v-loading 的遮罩靠定位父级铺满；没有宽高就只会得到一条竖窄 */
+  align-self: stretch;
+  flex: 1 1 auto;
 }
 
 .posthoc-significance-hint {

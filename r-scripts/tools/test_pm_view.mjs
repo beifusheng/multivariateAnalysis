@@ -694,11 +694,117 @@ console.log('\n=== 通道契约：视图发出的每个键，两层白名单都�
   }
 }
 
+console.log('\n=== 8. 新模板 factorFormula：从按钮一路跑到两个引擎 ===');
+{
+  // 这条是用户问"这个公式在哪个模板里"引出来的：as.factor(...) 的写法以前只在
+  // 我的测试夹具里存在，界面上根本没有 —— 我等于让用户去测一个拿不到的东西。
+  const tpl = JSON.parse(fs.readFileSync(path.join(FRONTEND, 'src/data/permanova-templates.json'), 'utf8'))
+    .categories.flatMap((c) => c.templates).find((t) => t.id === 'factorFormula');
+  check('模板存在于 JSON 且公式带 as.factor', !!tpl && /as\.factor\(/.test(tpl.formula),
+    tpl ? tpl.formula : '没有 factorFormula');
+
+  // 视图的 showMessage() 直接 document.createElement 插提示条 —— 浏览器里没问题，
+  // 但这个套件是全项目**第一个**调到会碰 DOM 的方法的测试（此前没有桩）。
+  // 这里给最小桩，并显式记下它在桩什么：桩得越多，测到的越少。
+  const fakeEl = () => ({
+    className: '', style: {}, textContent: '', innerHTML: '',
+    classList: { add() {}, remove() {}, contains: () => false },
+    appendChild() {}, removeChild() {}, remove() {}, querySelector: () => null
+  });
+  const docSeen = [];
+  globalThis.document = {
+    createElement: (t) => { docSeen.push(t); return fakeEl(); },
+    body: { appendChild() {}, removeChild() {}, children: [] },
+    querySelector: () => null
+  };
+  // 本文件以前都是就地 execFileSync，没有一个封装；这里给 §8 用一个小助手
+  const runEngine = (script, payload, tag) => {
+    const f = path.join(TMP, `tpl8_${tag}.json`);
+    fs.writeFileSync(f, JSON.stringify(payload));
+    try {
+      execFileSync(RSCRIPT, [path.join(ROOT, script), f, f + '.out', f + '.err'],
+        { stdio: 'pipe', timeout: 300000, cwd: ROOT });
+      return { code: 0, r: JSON.parse(fs.readFileSync(f + '.out', 'utf8')), msg: '' };
+    } catch (e) {
+      const msg = fs.existsSync(f + '.err') ? fs.readFileSync(f + '.err', 'utf8') : String(e.message);
+      return { code: 1, r: {}, msg };
+    } finally {
+      for (const x of [f, f + '.out', f + '.err']) if (fs.existsSync(x)) fs.unlinkSync(x);
+    }
+  };
+  const vm2 = makeVm();
+  vm2.loadTemplate('factorFormula');
+  check('loadTemplate 走通了（含它自己弹提示的那段 DOM 代码）', true, '');
+  check('它确实通过 document.createElement 弹提示（桩不是空跑）',
+    docSeen.length > 0, docSeen.join(','));
+  const P = vm2.permanovaParams;
+  check('点按钮真的把三样都灌进了表单（公式 / 样本表 / 矩阵）',
+    P.formula === tpl.formula && !!P.sampleData && P.distanceMatrix.length === 12,
+    `formula=${JSON.stringify(P.formula)} rows=${P.distanceMatrix.length}`);
+  check('灌进去的样本表列名与列数对得上（Group 三水平 / Age 数值）',
+    [...new Set(P.sampleData.Group)].length === 3 && P.sampleData.Age.length === 12,
+    [...new Set(P.sampleData.Group || [])].join('/'));
+  check('选中的模板 id 被记住（界面顶部那张卡要显示它）',
+    P.selectedTemplate === 'factorFormula', P.selectedTemplate);
+
+  // 主引擎的已知答案（用文件里这份夹具实测得到，不是从代码推的）
+  const main = runEngine('r-scripts/permanova.R', { distanceMatrix: P.distanceMatrix,
+    sampleData: P.sampleData, formula: P.formula, permutations: 499, seed: 7 }, 'main');
+  check('主管道跑通，R²=0.5898 / F=3.8345 / p=0.006（as.factor 与裸列名同解）',
+    main.code === 0 && Math.abs(main.r.R2 - 0.5898) < 1e-3 &&
+      Math.abs(main.r.F_model - 3.8345) < 1e-3 && Math.abs(main.r.p_value - 0.006) < 1e-9,
+    main.code ? main.msg : `R2=${main.r.R2} F=${main.r.F_model} p=${main.r.p_value}`);
+  // auto_unbox=TRUE 把长度 1 的 Df 拍成标量（引擎里 Df = as.numeric(row$Df)），
+  // 所以 .Df[0] 是 undefined —— 判据得两种形状都吃，否则哪天引擎改成数组它又假红。
+  const dfAt = (x) => Number(Array.isArray(x.Df) ? x.Df[0] : x.Df);
+  check('模型 Df=3（Group 2 + Age 1），残差 Df=8 —— 12 样本 3 水平',
+    main.code === 0 && dfAt(main.r.permanova_result[0]) === 3 &&
+      dfAt(main.r.permanova_result[1]) === 8,
+    `${main.r.permanova_result && main.r.permanova_result[0] && main.r.permanova_result[0].Df} / ` +
+    `${main.r.permanova_result && main.r.permanova_result[1] && main.r.permanova_result[1].Df}`);
+
+  // 事后检验按视图现在真正发送的形状跑（sampleData + formula + primary，不再传 groups）
+  const ph = runEngine('r-scripts/permanova_posthoc.R', { distanceMatrix: P.distanceMatrix,
+    sampleData: P.sampleData, formula: P.formula, permutations: 999, seed: 12345, primary: 'bh' }, 'ph');
+  check('事后检验从公式推出分组项 Group（不报"as.factor(Group) 不存在"）',
+    ph.code === 0 && ph.r.group_variable === 'Group', ph.code ? ph.msg : ph.r.group_variable);
+  const pr = (ph.r.p_raw || []).map(Number);
+  check('三对子的精确 p 分别 = 20/70、12/70、2/70（C(8,4)=70 个划分，可手核）',
+    ph.code === 0 && Math.abs(pr[0] - 20 / 70) < 1e-9 && Math.abs(pr[1] - 12 / 70) < 1e-9 &&
+      Math.abs(pr[2] - 2 / 70) < 1e-9, pr.join(', '));
+  check('三对子都走穷举精确（n_space = 70 = C(8,4)）',
+    ph.code === 0 && (ph.r.exact_permutation || []).every((x) => String(x) === 'TRUE') &&
+      (ph.r.n_space || []).every((x) => Number(x) === 70), '');
+
+  // 默认值必须是选项之一（上一版默认 'fdr' 不在三个选项里，下拉框显示为空）
+  const defMethod = /posthocParams:\s*\{[\s\S]{0,400}?method:\s*'([^']+)'/.exec(pmViewSource);
+  const optVals = [...pmViewSource.matchAll(/v-model="posthocParams\.method"[\s\S]*?<\/el-select>/g)]
+    .flatMap((m) => [...m[0].matchAll(/value="([^"]+)"/g)].map((x) => x[1]));
+  check('口径默认值存在于下拉选项里（选项:' + optVals.join('/') + '）',
+    !!defMethod && optVals.includes(defMethod[1]), `默认=${defMethod && defMethod[1]}`);
+  check('不再有 ' + "'fdr'" + ' 这种选项里没有的默认值', !/method:\s*'fdr'/.test(pmViewSource), '');
+
+  // loading：v-loading 是指令不是组件，写成 <el-loading> 就是零宽高的未知元素 —— 用户报的竖窄条
+  // 又踩同一个坑：这句 <el-loading> 是我写在 HTML 注释里解释病根的，
+  // 判据打在注释上就永远红。注释要单独剥（stripComments 只管 JS 的 // 和 /* */，
+  // 管不到 <!-- --> —— 这是本项目第五次为错理由而红）。
+  const tmplCode = pmViewSource.replace(/<!--[\s\S]*?-->/g, '');
+  check('不存在 <el-loading> 这个假组件标签（它是指令，渲染成零尺寸元素）',
+    !/<el-loading/.test(tmplCode), '');
+  check('v-loading 挂在有尺寸的容器上（class 与 element-loading-text 同处一元素）',
+    /v-loading="posthocLoading"[^>]*class="posthoc-loading"|class="posthoc-loading"[^>]*v-loading="posthocLoading"/.test(pmViewSource) ||
+      /<div[^>]*v-loading="posthocLoading"[^>]*element-loading-text=/.test(pmViewSource), '');
+  const cssBlock = /\.posthoc-loading\s*\{([^}]*)\}/.exec(pmViewSource);
+  check('.posthoc-loading 有宽高约束（否则遮罩只会是一条竖窄）',
+    !!cssBlock && /width:\s*100%/.test(cssBlock[1]) && /min-height:/.test(cssBlock[1]),
+    cssBlock ? cssBlock[1].replace(/\s+/g, ' ').trim() : '找不到样式');
+}
+
 // 计数锁：上一轮我把「通道契约」整节插进了 catch 里，于是它一次都没跑，
 // 而汇总照样报 0 失败 —— 把它露出来的不是逻辑，是"打印的勾比计到的多 9"这个不一致。
 // 那就把这个信号变成硬条件：跑到的判据数必须等于写死的期望，多一条少一条都算失败。
 // （加/删判据时必须同时改这里 —— 这正是我要的那种"想起来就疼"）
-const EXPECT_TOTAL = 112;
+const EXPECT_TOTAL = 128;
 
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }

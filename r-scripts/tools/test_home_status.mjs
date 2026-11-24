@@ -198,7 +198,15 @@ console.log('\n=== 3e) 卡片上的能力标签必须真有其事 ===');
   // 只把文案补齐不够——这些标签里含**可验的数字与锦点**（25/26/6 套模板、对齐 vegan::adonis2/rda），
   // 它们会腐烂：GMR⁴ 的 rank1 模板就写着“80 样本”而 spec 其实是 40。所以标签必须能被对账。
   const counts = await loadFrontendUtils(['medTemplates', 'nonrandomTemplates', 'gmr4SheetSpec', 'eraSheetSpec']);
+  // PERMANOVA 的模板住在 JSON 里（不在 utils/*Templates.js），所以直接数 JSON。
+  // 这个数量以前无人对账：视图里是 32 个硬编码 loadTemplate('...') 按钮，
+  // JSON 里 33 套 —— 两边靠人记，加一套漏一边都不会有人发现。
+  const PM_JSON = JSON.parse(fs.readFileSync(path.join(ROOT, 'frontend/src/data/permanova-templates.json'), 'utf8'));
+  globalThis.__PM_IDS = null;
+  const PM_IDS = PM_JSON.categories.flatMap((c) => c.templates.map((t) => t.id));
+  globalThis.__PM_IDS = PM_IDS;
   const REAL_COUNT = {
+    'PERMANOVA': PM_IDS.length,
     'PERMANOVA-med': counts.medTemplates.MED_TEMPLATE_COUNT,
     'Non-random PERMANOVA': counts.nonrandomTemplates.NR_TEMPLATE_COUNT,
     'GMR⁴': counts.gmr4SheetSpec.GMR4_TEMPLATE_COUNT,
@@ -298,11 +306,54 @@ console.log('\n=== 3e) 卡片上的能力标签必须真有其事 ===');
         file ? `只能找到 ${found.length}/${toks.length} 个：${toks.join(' , ')}` : '没有登记的验收脚本');
     }
   }
-  // PERMANOVA 本身没有模板体系，所以它只能写定性描述，不许蹭“N 套设计模板”
+  // 以前这条是"PERMANOVA 没有模板体系就不许写数量"。现在它确实有：
+  // frontend/src/data/permanova-templates.json 里 33 套，视图里 33 个**硬编码**
+  // loadTemplate('...') 按钮（没有 v-for）。两边靠人记迟早漂移，所以改成双向对账。
   const pm = parsed.find((x) => x.name === 'PERMANOVA');
-  check('PERMANOVA：没有设计模板体系就不许写“N 套设计模板”（免得数字无人可校）',
-    !!pm && !pm.plainTags.some((t) => /套设计模板/.test(t)), pm && pm.plainTags.join(' | '));
+  const pmTplTag = pm && pm.plainTags.find((t) => /(\d+)\s*套设计模板/.test(t));
+  check('PERMANOVA 卡片现在必须写数量标签（有体系却不写 = 数字无人对账）',
+    !!pmTplTag, pm ? pm.plainTags.join(' | ') : '找不到卡片');
+  if (pmTplTag) {
+    const n = Number(/(\d+)/.exec(pmTplTag)[1]);
+    check(`PERMANOVA：「${pmTplTag}」必须等于 JSON 里的真实模板数`,
+      n === PM_IDS.length, `卡片写 ${n}，JSON 有 ${PM_IDS.length}`);
+  }
+  const viewSrc = read('frontend/src/views/r-analysis/PERMANOVA.vue');
+  const btnIds = [...viewSrc.matchAll(/loadTemplate\('([^']+)'\)/g)].map((m) => m[1]);
+  const noButton = PM_IDS.filter((id) => !btnIds.includes(id));
+  const ghostBtn = [...new Set(btnIds)].filter((id) => !PM_IDS.includes(id));
+  check('JSON 里每套模板都有对应按钮（加了数据忘了加按钮 = 界面上永远点不到）',
+    noButton.length === 0, `缺按钮：${noButton.join(', ')}`);
+  check('按钮引用的 id 必须在 JSON 里（写了按钮没数据 = 点了填不出任何东西）',
+    ghostBtn.length === 0, `野按钮：${ghostBtn.join(', ')}`);
+  // 每套模板都得能真用：三要素齐全 + 距离矩阵自洽 + 矩阵行数 == 样本数
+  const all = PM_JSON.categories.flatMap((cat) => cat.templates);
+  const badShape = [];
+  for (const t of all) {
+    const M = t.distanceMatrix, S = t.sampleData;
+    if (!Array.isArray(M) || !M.length) { badShape.push(`${t.id}: 矩阵缺失`); continue; }
+    if (!S || !Object.keys(S).length) { badShape.push(`${t.id}: 无样本表`); continue; }
+    if (!String(t.formula || '').trim()) { badShape.push(`${t.id}: 无公式`); continue; }
+    if (M.length !== M[0].length) { badShape.push(`${t.id}: 非方阵`); continue; }
+    const nn = Math.max(...Object.values(S).map((v) => (v || []).length));
+    if (nn !== M.length) { badShape.push(`${t.id}: 样本 ${nn} 行但矩阵 ${M.length}`); continue; }
+    let asym = 0, diag = 0, neg = 0;
+    for (let r = 0; r < M.length; r++) {
+      if (Math.abs(M[r][r]) > 1e-9) diag++;
+      for (let cc = 0; cc < M.length; cc++) {
+        if (M[r][cc] == null || Number.isNaN(Number(M[r][cc]))) { asym = Infinity; break; }
+        if (Math.abs(Number(M[r][cc]) - Number(M[cc][r])) > 1e-6) asym++;
+        if (Number(M[r][cc]) < 0) neg++;
+      }
+    }
+    if (asym) badShape.push(`${t.id}: 矩阵不对称/有洞`);
+    if (diag) badShape.push(`${t.id}: 对角线非 0`);
+    if (neg) badShape.push(`${t.id}: 有负距离`);
+  }
+  check('33 套模板逐个自洽（三要素齐全 + 方阵对称 + 对角为 0 + 行数与样本数一致）',
+    badShape.length === 0, badShape.slice(0, 6).join(' ; '));
 }
+
 
 console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1); }
