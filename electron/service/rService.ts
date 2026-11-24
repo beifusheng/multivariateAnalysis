@@ -3,6 +3,7 @@
  */
 import { spawn, ChildProcess } from 'child_process';
 import { join, normalize } from 'path';
+import { rScriptsCandidates, pickFirst } from './rPaths';
 import { app } from 'electron';
 import treeKill from 'tree-kill';
 import { logger } from 'ee-core/log';
@@ -30,7 +31,15 @@ class RService {
 
   constructor() {
     // R 脚本目录
-    this.rScriptsDir = join(app.getAppPath(), 'r-scripts');
+    // 脚本目录：dev 直接在项目根下；打包后 appPath 指向 app.asar，
+    // 而 R 进程看不见 asar 内部（只有 Node 的 fs 认它）—— 必须取 app.asar.unpacked
+    // 下的真实路径，或随 extraResources 分发。候选全在纯函数 rPaths.rScriptsCandidates 里。
+    const scriptsCandidates = rScriptsCandidates({
+      appPath: app.getAppPath(),
+      resourcesPath: process.resourcesPath,
+      cwd: process.cwd()
+    });
+    this.rScriptsDir = pickFirst(scriptsCandidates, (p) => existsSync(p)) || scriptsCandidates[0];
     
     // 临时目录（用于传递数据和接收结果）
     this.tempDir = join(app.getPath('temp'), 'electron-egg-r');

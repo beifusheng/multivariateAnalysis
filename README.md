@@ -186,6 +186,9 @@ npm run verify:one era    # 名字含 era 的都跑
 | `verify_era_engine.R` | 64 | 与闭式 OLS / 岭解逐位；后验均值与 MLE 对齐；恒等式 Σ 分中介通路 = 合计间接效应 |
 | `verify_gmr4_engine.R` | 27 | 满秩 λ→0 = OLS；满秩 = 岭解；RSS 随秩单调 |
 
+另有两类不靠 R 的套件：`test_ipc_chain.mjs`（30 项）逐个验证 6 个通道的运行时链路；
+`test_packaging.mjs`（26 项）验证打包链路的三个环节（见 §5）。
+
 四条纪律（写代码时必须守，都是踩坑换来的）：
 
 1. **已知答案不许从被验代码推。** 锚点必须是独立实现（`vegan::adonis2`、`p.adjust`、闭式解）。
@@ -238,7 +241,22 @@ npm run build-m-x86    # macOS x86_64
 npm run build-l        # Linux
 ```
 
-打包产物需要 `r-portable/` 就位（先 `npm run setup:r`），否则用户装上后一跑分析就报缺 R。
+打包不只是一条命令，有三个环节必须同时对上，否则**装得上、跑不了**：
+
+| 环节 | 现在怎么做的 | 谁来守 |
+| --- | --- | --- |
+| R 脚本随包分发 | 四个平台的 builder 配置都声明 `asarUnpack: ["r-scripts/**/*"]`；主进程解析到 `app.asar.unpacked/r-scripts` | `test_packaging.mjs` |
+| 为什么不能只放 asar 里 | R 进程走真实文件系统，**不认识 asar**；传归档内路径只会得到一句没有上下文的 cannot open file | 同上 |
+| R 运行时随包分发 | 把 `r-portable/` 放进 `build/extraResources/`，electron-builder 会拷到 `<安装目录>/resources/extraResources/r-portable`；主进程的候选列表已包含该位置 | 同上 |
+| 没带运行时时的傅底 | 继续找用户目录下的 R-Portable 与 PATH 里的 Rscript；都找不到时日志把**搜过的位置全列出来** | 同上 |
+
+> ⚠️ **现状**：`build/extraResources/` 里目前只有 `dll/`，**没有 r-portable**。
+> 也就是说：现在直接 `npm run build-w` 打出来的安装包，用户装好后一跑分析就找不到 R。
+> 发布前必须先把运行时拷进 `build/extraResources/r-portable`（本机已有，约 603MB），
+> 或者接受"用户自己装 R + 加入 PATH"。
+
+> 上一轮之前更糟：主进程里把搜索根**写成了开发机的绝对路径**，且 `r-scripts` 根本没进打包清单
+> —— 开发机上两者恰好都能命中，所以从来没人发现。
 
 ---
 
@@ -246,7 +264,11 @@ npm run build-l        # Linux
 
 诚实清单（都有 grep 依据，不是免责套话）：
 
-- `r-runtime.lock.json` 的 `release.url` / `sha256` 仍为 `null` → 整包下载装配这条路暂不可用。
+- 导出已全部走 spec（五个视图都是 `writeWorkbook(...)`，视图里不再有 `json_to_sheet` /
+  `book_append_sheet`）—— 这条原本在待办里，本轮做完并从清单移除了。
+- **安装包里的 R 运行时尚未就位**（见上面 §5 的 ⚠）：这是目前真正挡住"发给别人用"的那一项。
+- `r-runtime.lock.json` 的 `release.url` / `sha256` 仍为 `null` → 新开发者 clone 后只能用
+  `-Mode fromLocal` 或 `-Mode fromRepos` 装配 R。
 - 导出已全部走 spec（五个视图都是 `writeWorkbook(...)`，视图里不再有 `json_to_sheet` /
   `book_append_sheet`）—— 这条原本在待办里，本轮做完并从清单移除了。仍然缺的是：
   **导出内容与界面显示的一致性**只有源码级断言，没有"打开 xlsx 逐格核对"的运行时测试。

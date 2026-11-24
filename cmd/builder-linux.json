@@ -6,6 +6,10 @@
     "output": "out"
   },
   "asar": true,
+  "asarUnpack": [
+    "r-scripts/**/*"
+  ],
+  
   "electronLanguages": ["en-US", "zh-CN"],
   "files": [
     "public",

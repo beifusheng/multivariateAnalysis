@@ -5,6 +5,7 @@ import { join, normalize, dirname } from 'path';
 import { app } from 'electron';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { logger } from 'ee-core/log';
+import { rPortableCandidates } from './rPaths';
 
 export interface RPortableConfig {
   rPath: string;
@@ -26,22 +27,20 @@ class RPortableService {
    * 初始化 - 检测便携版 R
    */
   private init(): void {
-    const appPath = app.getAppPath();
-    const projectRoot = 'C:\\Custom\\CodeRepository\\Demo\\electron-egg';
-    
-    // 可能的 R 便携版位置
-    const possiblePaths = [
-      join(projectRoot, this.R_PORTABLE_DIR),
-      join(appPath, this.R_PORTABLE_DIR),
-      join(appPath, 'r'),
-      join(appPath, 'resources', this.R_PORTABLE_DIR),
-      join(process.env.LOCALAPPDATA || '', 'R-Portable'),
-      join(process.env.USERPROFILE || '', 'R-Portable'),
-    ];
-
+    // 候选路径全部由纯函数 rPaths.rPortableCandidates() 给（可被测试直接调用）。
+    // 原来这里写死了开发机的绝对路径 —— 换台机器那条候选永远命中不了，
+    // 而打包后的真实落点（resources/extraResources/r-portable）反而没在搜。
+    const ctx = {
+      appPath: app.getAppPath(),
+      resourcesPath: process.resourcesPath,
+      cwd: process.cwd(),
+      env: process.env as Record<string, string | undefined>
+    };
+    const possiblePaths = rPortableCandidates(ctx);
+    const appPath = ctx.appPath;
     logger.info('[RPortableService] Searching for portable R...');
     logger.info('[RPortableService] App path:', appPath);
-    logger.info('[RPortableService] Project root:', projectRoot);
+  
 
     for (const rPath of possiblePaths) {
       logger.info('[RPortableService] Checking:', rPath);
@@ -52,6 +51,7 @@ class RPortableService {
       }
     }
 
+    logger.warn('[RPortableService] Searched but found nothing:', possiblePaths.join(' | '));
     logger.warn('[RPortableService] ❌ No portable R found, will use system PATH');
   }
 
