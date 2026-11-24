@@ -290,9 +290,44 @@ tryCatch({
   }
   
   # 构建输出对象
+  # ---------------- 分项（边际）检验 ----------------
+  # adonis2 默认 by = NULL：多因子公式只给「整模型」一行。用户最想知道的其实是
+  # 「哪个变量在起作用」，而这一行很容易被读成「第一个变量的结果」。
+  # 所以项数 > 1 时额外跑一次 by = "terms"（单因子时 Model 就等于那一项，不重复浪费置换）。
+  per_term_list <- list()
+  if (!is.null(params$sampleData) && !is.null(params$formula) && length(used_terms) > 1L) {
+    m2 <- tryCatch(vegan::adonis2(
+      as.formula(paste("dist_obj ~", formula_str)),
+      data = sample_data, permutations = permutations, by = "terms"
+    ), error = function(e) NULL)
+    if (!is.null(m2)) {
+      df2 <- as.data.frame(m2)
+      keep <- setdiff(rownames(df2), c("Residual", "Total"))
+      p_col2 <- grep("^Pr", names(df2), value = TRUE)[1]
+      f_col2 <- if ("F.Model" %in% names(df2)) "F.Model" else if ("F" %in% names(df2)) "F" else NULL
+      for (rn in keep) {
+        e <- list(term = rn, Df = as.numeric(df2[rn, "Df"]), R2 = as.numeric(df2[rn, "R2"]))
+        if (!is.null(f_col2)) {
+          fv <- as.numeric(df2[rn, f_col2])
+          if (!is.na(fv)) e$F <- fv          # NA 不输出：jsonlite 会把 NA 写成字符串 "NA"
+        }
+        if (!is.null(p_col2)) {
+          pv <- as.numeric(df2[rn, p_col2])
+          if (!is.na(pv)) e$p_value <- pv
+        }
+        per_term_list[[length(per_term_list) + 1L]] <- e
+      }
+    } else {
+      output_note <- c(output_note, paste0(
+        "分项检验（by = \"terms\"）没跑成，本次只有整模型一行：",
+        "多因子公式下看不出哪个变量显著。别把 Model 行当成分组变量的结果。"))
+    }
+  }
+
   output <- list()
   output$success <- TRUE
   output$permanova_result <- permanova_result_list
+  output$per_term <- per_term_list   # 单因子时为空数组（Model 行就是那一项）
   output$R2 <- as.numeric(result$R2[1])
   
   # 检查并添加 F_model（同样兼容 F / F.Model 两种列名；NA 则不输出，避免 jsonlite 写成字符串 "NA"）

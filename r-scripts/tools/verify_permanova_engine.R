@@ -23,6 +23,12 @@ ok <- function(label, cond, detail = "") {
   }
 }
 `%||%` <- function(a, b) if (is.null(a)) b else a
+
+# 两份尺子的 ok() 参数序**是相反的**：本文件 ok(label, cond, detail)，
+# verify_posthoc_engine.R 是 ok(cond, label, detail)。我用后者的习惯写新节时，
+# 结果判据全部"红成 TRUE"（label 被当成条件）。别名把这层差异显式命名，
+# 新写判据一律用 okc(cond, label, detail)，读代码时不必再猜顺序。
+okc <- function(cond, label, detail = "") ok(label, cond, detail)
 RS <- file.path("r-portable", "bin", "Rscript.exe")
 ENG <- if (length(commandArgs(TRUE))) commandArgs(TRUE)[1] else "r-scripts/permanova.R"
 TMP <- file.path(tempdir(), "pmverify"); dir.create(TMP, showWarnings = FALSE, recursive = TRUE)
@@ -72,6 +78,50 @@ if (r1$code == 0L) {
      sprintf("引擎 %.8f / adonis2 %.8f", as.numeric(r1$out$F_model), f_ref))
   ok("p 有定义（不是 N/A）",
      !is.null(r1$out$p_value) && !is.na(as.numeric(r1$out$p_value[1])), as.character(r1$out$p_value))
+}
+
+cat("\n── 7. 分项（边际）检验：多因子公式必须说清是哪个变量 ──\n")
+{
+  d <- jsonlite::fromJSON("frontend/src/data/permanova-templates.json", simplifyVector = FALSE)
+  t7 <- Filter(function(x) identical(x$id, "factorFormula"), d$categories[[1]]$templates)[[1]]
+  r7 <- run(list(distanceMatrix = t7$distanceMatrix, sampleData = t7$sampleData,
+                    formula = t7$formula, permutations = 499L, seed = 7L), "perterm")
+  okc(r7$code == 0L, "带 as.factor 的多因子模板能跑通", r7$err)
+  if (r7$code == 0L) {
+    pt <- r7$out$per_term
+    okc(length(pt) == 2L, sprintf("公式两项 => per_term 两行（实际 %d）", length(pt)), "")
+    okc(identical(vapply(pt, function(x) as.character(x$term), character(1)),
+                 c("as.factor(Group)", "Age")),
+       "项名按拟合原样回显（as.factor(Group) 不改写成 Group，用户看到的就该是被拟合的东西）",
+       paste(vapply(pt, function(x) as.character(x$term), character(1)), collapse = ", "))
+    Df <- vapply(pt, function(x) as.numeric(x$Df), numeric(1))
+    R2 <- vapply(pt, function(x) as.numeric(x$R2), numeric(1))
+    Fv <- vapply(pt, function(x) as.numeric(x$F), numeric(1))
+    okc(all(Df == c(2, 1)), sprintf("Df 逐项 = 2, 1（Group 三水平 / Age 连续）；实得 %s",
+       paste(Df, collapse = ",")), "")
+    # 独立锚点：直接问 vegan 要 by = "terms"
+    M <- as.matrix(do.call(rbind, lapply(t7$distanceMatrix, as.numeric)))
+    av2 <- vegan::adonis2(stats::as.dist(M) ~ factor(unlist(t7$sampleData$Group)) +
+      as.numeric(unlist(t7$sampleData$Age)), permutations = 99L, by = "terms")
+    okc(abs(R2[1] - av2$R2[1]) < 1e-4, sprintf("Group 的 R² 与 vegan by=terms 一致（引擎 %.5f / vegan %.5f）",
+                                              R2[1], av2$R2[1]), "")
+    okc(abs(Fv[1] - av2$F[1]) < 1e-3, sprintf("Group 的 F 与 vegan 一致（引擎 %.4f / vegan %.4f）",
+                                             Fv[1], av2$F[1]), "")
+    # 恒等式：逐项 R² 相加 = 整模型 R²（SS 分解是精确的，与置换无关 => 可硬核对）
+    total <- sum(R2)
+    okc(abs(total - as.numeric(r7$out$R2)) < 1e-9,
+       sprintf("分项 R² 之和 %.6f 必须等于整模型 R² %.6f", total, as.numeric(r7$out$R2)), "")
+    okc(all(vapply(pt, function(x) !is.null(x$p_value) && as.numeric(x$p_value) > 0, logical(1))),
+       "每项都有定义良好的 p（> 0）", paste(vapply(pt, function(x) as.character(x$p_value), character(1)), collapse = " "))
+    okc(!any(vapply(pt, function(x) is.character(x$p_value) && identical(x$p_value, "NA"), logical(1))),
+       "p 不许是字符串 \"NA\"（前端拿它做数值比较会静默出错）", "")
+  }
+  # 单因子：Model 行就等于那一项，不该再跑一遍浪费置换
+  r8 <- run(list(distanceMatrix = t7$distanceMatrix, sampleData = t7$sampleData,
+                    formula = "Group", permutations = 99L, seed = 5L), "single_term")
+  okc(r8$code == 0L && length(r8$out$per_term) == 0L,
+     "单因子公式不产出 per_term（避免与 Model 行重复、也不白跑一次置换）",
+     if (r8$code == 0L) paste("per_term 长度", length(r8$out$per_term)) else r8$err)
 }
 
 cat("\n── 2. 逐样本唯一的首列仍然是 ID，写进公式必须拒 ──\n")

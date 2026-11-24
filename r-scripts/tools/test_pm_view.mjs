@@ -526,8 +526,10 @@ console.log('\n=== 7. 编码语义：整数分组被当趋势拟合时必须开�
   check('整数编码列没进公式时不该报（上一版扫全部列，骂错了对象）',
     (unused.diagnostics || []).every((d) => !/Group/.test(d)), JSON.stringify(unused.diagnostics));
 
-  check('视图按引擎的 _row 给行起名，不再显示"项 1/项 2"',
-    vm.resultTerms.map((t) => t.term).join(',') === '模型（公式项）,残差,总计',
+  // 标签从「模型（公式项）」改成「整模型（所有项合起来）」：前者在多因子公式下
+  // 会被读成"第一个变量的结果"，正是这轮加 per_term 要消除的误读。
+  check('视图按引擎的 _row 给行起名，且 Model 行说的是"整模型"',
+    vm.resultTerms.map((t) => t.term).join(',') === '整模型（所有项合起来）,残差,总计',
     vm.resultTerms.map((t) => t.term).join(','));
   // 实机反馈的形状：上面绿框 0.0070，下面一句“你检验的不是组间差异”——颜色先替用户下了结论
   check('引擎带提醒时头部不再是绿色"显著"，而是 caveat', vm.headlineState === 'caveat', vm.headlineState);
@@ -711,6 +713,49 @@ console.log('\n=== 8. 新模板 factorFormula：从按钮一路跑到两个引�
     classList: { add() {}, remove() {}, contains: () => false },
     appendChild() {}, removeChild() {}, remove() {}, querySelector: () => null
   });
+  // 引擎给的分项结果，界面必须真渲染出来（算了不显示 = 等于没算）
+  check('引擎的 per_term 在视图里有对应 computed（perTermRows）',
+    /perTermRows\(\)/.test(pmViewSource) && /analysisResult\.per_term/.test(pmViewSource), '');
+  check('分项表标题与"整模型不是第一个变量"的提醒都在文案里',
+    /分项（边际）检验/.test(pmViewSource) &&
+      /不是第一个变量的结果/.test(pmViewSource), '');
+  check('多因子却没拿到分项时要出警告（不能静默只给整模型一行）',
+    /multiTermFormula/.test(pmViewSource) && /但没拿到分项结果/.test(pmViewSource), '');
+  check('Model 行的标签不写「模型（公式项）」这种会被读成第一个变量的措辞',
+    !/Model:\s*'模型（公式项）'/.test(pmViewSource) &&
+      /Model:\s*'整模型（所有项合起来）'/.test(pmViewSource), '');
+
+  // 导出表：列名不再是 R 字段原名（_row / F_model），且说明里写明 by=NULL 的坑
+  const specX = await server.ssrLoadModule('/src/utils/permanovaSheetSpec.js');
+  const fakeR = {
+    R2: 0.58982, F_model: 3.8345, p_value: 0.006, permutations: 499,
+    permanova_result: [{ _row: 'Model', Df: 3, SumOfSqs: 5.9, R2: 0.58982, F_model: 3.8345, p_value: 0.006 }],
+    per_term: [
+      { term: 'as.factor(Group)', Df: 2, SumOfSqs: 4.3, R2: 0.43057, F: 4.1989, p_value: 0.01 },
+      { term: 'Age', Df: 1, SumOfSqs: 1.6, R2: 0.15925, F: 3.1059, p_value: 0.036 }
+    ]
+  };
+  const sh = specX.pmResultSheets(fakeR, { stampText: 'x', formula: 'as.factor(Group) + Age' });
+  check('有分项时导出三张表（PERMANOVA / 分项检验 / 说明）',
+    sh.length === 3 && sh[1].name === '分项检验' && sh[2].name === '说明',
+    sh.map((x) => x.name).join(','));
+  check('分项表两行且列序固定（项/Df/SumOfSqs/R²/F/p）',
+    sh[1].aoa.length === 3 && sh[1].aoa[1][0] === 'as.factor(Group)' &&
+      sh[1].aoa[0].join('|') === '公式项|Df|SumOfSqs|R²|F|p 值',
+    JSON.stringify(sh[1].aoa[1]));
+  check('主表列名是中文口径而不是 R 字段原名（_row / F_model 不许出现在表头）',
+    !/_row|F_model/.test(sh[0].aoa[0].join(',')) && sh[0].aoa[0][0] === '项',
+    sh[0].aoa[0].join(','));
+  const infoX = sh[2].aoa.map((r) => r.join(' ')).join('\n');
+  check('说明表写明 Model 行是所有项合起来（拿到 xlsx 的人不在界面前）',
+    /所有项合起来/.test(infoX) && /per_term/.test(infoX), '');
+  const sh2 = specX.pmResultSheets({ ...fakeR, per_term: [] }, {});
+  check('无分项时不造假表，但说明里要写明这次看不出哪个变量',
+    sh2.length === 2 && /看不出来|别把它当分组变量/.test(
+      sh2[1].aoa.map((r) => r.join(' ')).join('\n')), sh2.map((x) => x.name).join(','));
+  check('视图不再手工拼 workbook（json_to_sheet / book_new 应为 0）',
+    !/json_to_sheet|book_new/.test(pmViewSource), '');
+
   const docSeen = [];
   globalThis.document = {
     createElement: (t) => { docSeen.push(t); return fakeEl(); },
@@ -804,7 +849,7 @@ console.log('\n=== 8. 新模板 factorFormula：从按钮一路跑到两个引�
 // 而汇总照样报 0 失败 —— 把它露出来的不是逻辑，是"打印的勾比计到的多 9"这个不一致。
 // 那就把这个信号变成硬条件：跑到的判据数必须等于写死的期望，多一条少一条都算失败。
 // （加/删判据时必须同时改这里 —— 这正是我要的那种"想起来就疼"）
-const EXPECT_TOTAL = 128;
+const EXPECT_TOTAL = 138;
 
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }

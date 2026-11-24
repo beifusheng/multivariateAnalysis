@@ -84,208 +84,22 @@
         <el-collapse-transition>
           <div v-show="!permanovaParams.templateCollapsed">
 
-            <!-- 生物/医学方向 -->
-            <div class="template-section-title">🔬 生物/医学方向</div>
-            <div class="template-buttons">
-              <el-tooltip content="公式首项写成 as.factor(Group)：验证因子包装与“首列取值有重复”两种写法主管道与事后检验都能接住" placement="top">
-                <button type="button" @click="loadTemplate('factorFormula')"
-                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'factorFormula' }]">
-                  🧬 显式因子 + 协变量
-                </button>
-              </el-tooltip>
-              <el-tooltip content="单因素 PERMANOVA，检验分组效应" placement="top">
-                <button type="button" @click="loadTemplate('singleFactor')"
-                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'singleFactor' }]">
-                  🧪 单因素分析
-                </button>
-              </el-tooltip>
-              <el-tooltip content="多因素 PERMANOVA，同时检验多个变量" placement="top">
-                <button type="button" @click="loadTemplate('multiFactor')"
-                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'multiFactor' }]">
-                  📊 多因素分析
-                </button>
-              </el-tooltip>
-              <el-tooltip content="检验两个变量的交互作用" placement="top">
-                <button type="button" @click="loadTemplate('interaction')"
-                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'interaction' }]">
-                  🔀 交互作用
-                </button>
-              </el-tooltip>
-              <el-tooltip content="控制协变量后检验处理效应" placement="top">
-                <button type="button" @click="loadTemplate('ancova')"
-                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'ancova' }]">
-                  📈 协变量分析
-                </button>
-              </el-tooltip>
-              <el-tooltip content="嵌套设计，Site 内的 Treatment 效应" placement="top">
-                <button type="button" @click="loadTemplate('nested')"
-                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'nested' }]">
-                  🗂️ 嵌套设计
-                </button>
-              </el-tooltip>
-              <el-tooltip content="完全模型：主效应 + 交互 + 区组" placement="top">
-                <button type="button" @click="loadTemplate('fullModel')"
-                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'fullModel' }]">
-                  🎯 完全模型
-                </button>
-              </el-tooltip>
-              <el-tooltip content="微生物组研究常用设计" placement="top">
-                <button type="button" @click="loadTemplate('microbiome')"
-                  :class="['btn-template', { selected: permanovaParams.selectedTemplate === 'microbiome' }]">
-                  🦠 微生物组
-                </button>
-              </el-tooltip>
-            </div>
-
-            <!-- 物理/环境科学方向 -->
-            <div class="template-section-title">🌍 物理/环境科学方向</div>
-            <div class="template-buttons">
-              <el-tooltip content="时间序列分析，纵向数据" placement="top">
-                <button type="button" @click="loadTemplate('timeSeries')" class="btn-template">
-                  ⏱️ 时间序列
-                </button>
-              </el-tooltip>
-              <el-tooltip content="空间分布分析" placement="top">
-                <button type="button" @click="loadTemplate('spatial')" class="btn-template">
-                  🌍 空间分析
-                </button>
-              </el-tooltip>
-              <el-tooltip content="温度梯度分析" placement="top">
-                <button type="button" @click="loadTemplate('temperatureGradient')" class="btn-template">
-                  🌡️ 温度梯度
-                </button>
-              </el-tooltip>
-              <el-tooltip content="剂量反应分析" placement="top">
-                <button type="button" @click="loadTemplate('doseResponse')" class="btn-template">
-                  💊 剂量反应
-                </button>
-              </el-tooltip>
-              <el-tooltip content="重复测量设计" placement="top">
-                <button type="button" @click="loadTemplate('repeatedMeasures')" class="btn-template">
-                  🔄 重复测量
-                </button>
-              </el-tooltip>
-              <el-tooltip content="区组设计，控制批次效应" placement="top">
-                <button type="button" @click="loadTemplate('blockDesign')" class="btn-template">
-                  📦 区组设计
-                </button>
-              </el-tooltip>
-              <el-tooltip content="多环境因子综合分析" placement="top">
-                <button type="button" @click="loadTemplate('environmental')" class="btn-template">
-                  🌊 环境因子
-                </button>
-              </el-tooltip>
-            </div>
-
-            <!-- 农业/林业/生态方向 -->
-            <div class="template-section-title">🌾 农业/林业/生态方向</div>
-            <div class="template-buttons">
-              <el-tooltip content="作物品种与栽培管理" placement="top">
-                <button type="button" @click="loadTemplate('cropVariety')" class="btn-template">
-                  🌾 作物品种
-                </button>
-              </el-tooltip>
-              <el-tooltip content="土壤类型与理化性质" placement="top">
-                <button type="button" @click="loadTemplate('soilType')" class="btn-template">
-                  🟤 土壤分析
-                </button>
-              </el-tooltip>
-              <el-tooltip content="植物群落调查" placement="top">
-                <button type="button" @click="loadTemplate('plantCommunity')" class="btn-template">
-                  🌿 植物群落
-                </button>
-              </el-tooltip>
-              <el-tooltip content="入侵物种影响评估" placement="top">
-                <button type="button" @click="loadTemplate('invasiveSpecies')" class="btn-template">
-                  🌾 入侵物种
-                </button>
-              </el-tooltip>
-              <el-tooltip content="森林群落结构" placement="top">
-                <button type="button" @click="loadTemplate('forestCommunity')" class="btn-template">
-                  🌲 森林群落
-                </button>
-              </el-tooltip>
-              <el-tooltip content="土地利用变化" placement="top">
-                <button type="button" @click="loadTemplate('landUse')" class="btn-template">
-                  🏞️ 土地利用
-                </button>
-              </el-tooltip>
-              <el-tooltip content="保护区评估" placement="top">
-                <button type="button" @click="loadTemplate('protectedArea')" class="btn-template">
-                  🛡️ 保护区
-                </button>
-              </el-tooltip>
-              <el-tooltip content="气候变化响应" placement="top">
-                <button type="button" @click="loadTemplate('climateChange')" class="btn-template">
-                  🌡️ 气候变化
-                </button>
-              </el-tooltip>
-            </div>
-
-            <!-- 海洋/昆虫方向 -->
-            <div class="template-section-title">🐟 海洋/昆虫方向</div>
-            <div class="template-buttons">
-              <el-tooltip content="鱼类群落分析" placement="top">
-                <button type="button" @click="loadTemplate('fishCommunity')" class="btn-template">
-                  🐟 鱼类群落
-                </button>
-              </el-tooltip>
-              <el-tooltip content="浮游生物研究" placement="top">
-                <button type="button" @click="loadTemplate('plankton')" class="btn-template">
-                  🦠 浮游生物
-                </button>
-              </el-tooltip>
-              <el-tooltip content="昆虫群落调查" placement="top">
-                <button type="button" @click="loadTemplate('insectCommunity')" class="btn-template">
-                  🦋 昆虫群落
-                </button>
-              </el-tooltip>
-            </div>
-
-            <!-- 基因组学/医学方向 -->
-            <div class="template-section-title">🧬 基因组学/医学方向</div>
-            <div class="template-buttons">
-              <el-tooltip content="基因表达谱分析" placement="top">
-                <button type="button" @click="loadTemplate('geneExpression')" class="btn-template">
-                  🧬 基因表达
-                </button>
-              </el-tooltip>
-              <el-tooltip content="单细胞转录组分析" placement="top">
-                <button type="button" @click="loadTemplate('singleCell')" class="btn-template">
-                  🔬 单细胞分析
-                </button>
-              </el-tooltip>
-              <el-tooltip content="疾病亚型分类" placement="top">
-                <button type="button" @click="loadTemplate('diseaseSubtype')" class="btn-template">
-                  🏥 疾病亚型
-                </button>
-              </el-tooltip>
-              <el-tooltip content="治疗效果评估" placement="top">
-                <button type="button" @click="loadTemplate('treatmentEffect')" class="btn-template">
-                  💊 治疗效果
-                </button>
-              </el-tooltip>
-              <el-tooltip content="脑区连接分析" placement="top">
-                <button type="button" @click="loadTemplate('brainConnectivity')" class="btn-template">
-                  🧠 脑连接
-                </button>
-              </el-tooltip>
-            </div>
-
-            <!-- 食品科学方向 -->
-            <div class="template-section-title">🍽️ 食品科学方向</div>
-            <div class="template-buttons">
-              <el-tooltip content="发酵过程监控" placement="top">
-                <button type="button" @click="loadTemplate('fermentation')" class="btn-template">
-                  🍶 发酵监控
-                </button>
-              </el-tooltip>
-              <el-tooltip content="食品产地溯源" placement="top">
-                <button type="button" @click="loadTemplate('foodOrigin')" class="btn-template">
-                  🍷 产地溯源
-                </button>
-              </el-tooltip>
-            </div>
+            <!-- 分类与按钮全部来自 permanova-templates.json。
+                 以前这里是 33 个手写 <button>（最后一批还漏了 selected 高亮绑定）：
+                 加一套模板要同时改 JSON 与视图两处，靠人记必然漂移。
+                 现在 JSON 是唯一来源，Home 上「N 套设计模板」也按它核对。 -->
+            <template v-for="cat in templateCats" :key="cat.id">
+              <div class="template-section-title">{{ cat.name }}</div>
+              <div class="template-buttons">
+                <el-tooltip v-for="t in cat.templates" :key="t.id"
+                  :content="t.tooltip || t.desc || t.name" placement="top">
+                  <button type="button" @click="loadTemplate(t.id)"
+                    :class="['btn-template', { selected: permanovaParams.selectedTemplate === t.id }]">
+                    {{ t.name }}
+                  </button>
+                </el-tooltip>
+              </div>
+            </template>
           </div>
         </el-collapse-transition>
       </div>
@@ -415,6 +229,38 @@
             </tr>
           </tbody>
         </table>
+
+        <!-- 分项（边际）检验：多因子公式下用户真正要的那张表。
+             adonis2 默认 by=NULL，主表只给整模型一行 —— 不分开写，
+             很多人会把那行读成“第一个变量的结果”。 -->
+        <template v-if="perTermRows.length">
+          <h4 class="rs-subtitle">分项（边际）检验</h4>
+          <table class="rs-table">
+            <thead>
+              <tr><th>公式项</th><th>Df</th><th>SumOfSqs</th><th>R²</th><th>F</th><th>p</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="t in perTermRows" :key="'pt-' + t.term">
+                <td>{{ t.term }}</td>
+                <td>{{ t.Df }}</td>
+                <td>{{ fmt(t.SumOfSqs, 4) }}</td>
+                <td>{{ fmt(t.R2, 4) }}</td>
+                <td>{{ fmt(t.F, 4) }}</td>
+                <td>{{ fmtP(t.p) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="rs-note">
+            逐项按“已有项基础上再加入该项”的顺序检验（adonis2 <code>by = "terms"</code>），
+            各分项 R² 相加等于整模型 R²。上表的“整模型”行是**所有项合起来**的检验，
+            不是第一个变量的结果 —— 想知道哪个变量显著请看这张分项表。
+          </p>
+        </template>
+        <el-alert v-else-if="multiTermFormula && !perTermRows.length" type="warning"
+          :closable="false" show-icon style="margin-top: 12px;">
+          <template #title>本次公式有多项，但没拿到分项结果：上面只有整模型一行，
+            看不出哪个变量在起作用（别把 Model 行当成分组变量的结果）。</template>
+        </el-alert>
         <el-collapse class="rs-raw">
           <el-collapse-item title="原始输出（JSON，调试用）" name="raw">
             <pre>{{ JSON.stringify(analysisResult, null, 2) }}</pre>
@@ -623,7 +469,7 @@ import ImportDialog from '@/components/r-analysis/ImportDialog.vue';
 import ExportDialog from '@/components/r-analysis/ExportDialog.vue';
 import { readWorkbook, mapWorkbook, previewFromFields, writeWorkbook, templateFilename, fileStamp } from '@/utils/sheetIo';
 import { makeFormatters } from '@/utils/format';
-import { pmPosthocSheets, pmPosthocFilename } from '@/utils/permanovaSheetSpec';
+import { pmPosthocSheets, pmPosthocFilename, pmResultSheets, pmPcoaSheets, pmResultFilename, pmPcoaFilename } from '@/utils/permanovaSheetSpec';
 
 const FORMATTERS = makeFormatters();
 
@@ -766,6 +612,8 @@ export default {
   },
 
   computed: {
+    // 模板目录：JSON 是唯一来源（见 src/data/permanova-templates.json）
+    templateCats() { return templateData.categories; },
     // 口径回显取自 R 的结果（它自己把 fdr 归一为 bh）-- 视图不另推一套，
     // 否则引擎改了口径定义而这里还写着旧话，界面就开始说谎。
     posthocPrimaryLabel() {
@@ -817,11 +665,29 @@ export default {
 
     /** permanova_result 行 → 表格行（字段名跨 vegan 版本不一样，这里已做兼容） */
     /** permanova_result 行 -> 表格行 */
+    /** 分项（边际）检验行。引擎在公式项数 > 1 时才会给 per_term。 */
+    perTermRows() {
+      const rows = (this.analysisResult && this.analysisResult.per_term) || [];
+      return rows.map((r) => ({
+        term: r.term || '',
+        Df: r.Df,
+        SumOfSqs: r.SumOfSqs,
+        R2: r.R2,
+        F: r.F != null ? r.F : r.F_model,
+        p: r.p_value != null ? r.p_value : r['Pr(>F)']
+      }));
+    },
+    /** 公式是否真的有多项（用于“该有分项却没有”时的警告） */
+    multiTermFormula() {
+      const f = String((this.permanovaParams && this.permanovaParams.formula) || '');
+      const rhs = f.includes('~') ? f.split('~')[1] : f;
+      return /[+*:]/.test(rhs || '');
+    },
     resultTerms() {
       const rows = (this.analysisResult && this.analysisResult.permanova_result) || [];
       // 行名用引擎给的 _row（adonis2 单术语时是 Model / Residual / Total）。
       // 不读 _row 就只能显示“顼 1 / 顼 2 / 顼 3”，用户分不清哪行是检验、哪行是残差。
-      const NAME = { Model: '模型（公式项）', Residual: '残差', Total: '总计' };
+      const NAME = { Model: '整模型（所有项合起来）', Residual: '残差', Total: '总计' };
       return rows.map((r, i) => ({
         term: NAME[r._row] || r._row || r.term || r.Variable || `顼 ${i + 1}`,
         Df: r.Df,
@@ -1957,33 +1823,18 @@ export default {
           console.log('[Export] JSON exported');
         }
 
-        // 导出 PERMANOVA 表
+        // 导出 PERMANOVA 表：列与说明由 permanovaSheetSpec 给（视图不再手拼 workbook）
         if (this.exportOptions.includes('permanovaTable')) {
-          const permanovaData = this.analysisResult.permanova_result || [];
-          const ws = XLSX.utils.json_to_sheet(permanovaData);
-          const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, 'PERMANOVA');
-          const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-          const blob = new Blob([wbout], { type: 'application/octet-stream' });
-          saveAs(blob, `PERMANOVA 表_${timestamp}.xlsx`);
+          await writeWorkbook(XLSX, pmResultSheets(this.analysisResult, {
+            stampText: new Date().toLocaleString(),
+            formula: this.permanovaParams.formula
+          }), pmResultFilename(timestamp));
           console.log('[Export] PERMANOVA table exported');
         }
 
         // 导出 PCoA 坐标
         if (this.exportOptions.includes('pcoaCoords') && this.analysisResult.pcoa) {
-          const pcoaCoords = this.analysisResult.pcoa.samples.map(s => ({
-            '样本 ID': s.sample_id,
-            'PCoA1': s.coordinates?.PCoA1 || 0,
-            'PCoA2': s.coordinates?.PCoA2 || 0,
-            '分组': s.group || 'Unknown',
-            '分组变量': s.group_variable || ''
-          }));
-          const ws = XLSX.utils.json_to_sheet(pcoaCoords);
-          const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, 'PCoA 坐标');
-          const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-          const blob = new Blob([wbout], { type: 'application/octet-stream' });
-          saveAs(blob, `PCoA 坐标_${timestamp}.xlsx`);
+          await writeWorkbook(XLSX, pmPcoaSheets(this.analysisResult), pmPcoaFilename(timestamp));
           console.log('[Export] PCoA coordinates exported');
         }
 
@@ -3223,6 +3074,13 @@ export default {
   gap: 8px;
   color: #0369a1;
   font-size: 14px;
+}
+
+.rs-subtitle {
+  margin: 20px 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
 }
 
 .posthoc-loading {

@@ -1,4 +1,5 @@
 # PERMANOVA-med 中介分析脚本（修正版）
+# STATUS: implemented —— 统计口径自检见 r-scripts/tools/verify_med_templates.mjs
 # 基于 LDM::permanovaFL，test.mediation = TRUE
 #
 # ============ 两个关键坑（务必注意） ============

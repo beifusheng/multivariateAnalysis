@@ -285,3 +285,77 @@ export function pmPosthocSheets(posthocResult, ctx = {}) {
 export function pmPosthocFilename(stamp) {
   return `PERMANOVA 事后检验_${stamp}.xlsx`;
 }
+
+/**
+ * 主结果表与 PCoA 坐标表的列定义。
+ * 以前这两张表在视图里用 XLSX.utils.json_to_sheet 直接拍平对象数组：
+ * 列名由 R 的字段名决定（`_row`、F_model），顺序随 JSON 键序漂，也没人能对账。
+ * 搬到 spec 之后，列名、顺序、缺值处理都在这里定一次，测试可以直接读。
+ */
+export const PM_RESULT_COLUMNS = ['项', 'Df', 'SumOfSqs', 'R²', 'F', 'p 值'];
+
+export function pmResultAoA(result) {
+  const rows = (result && result.permanova_result) || [];
+  return [PM_RESULT_COLUMNS].concat(rows.map((r) => [
+    r._row || r.row || r.term || '',
+    r.Df, r.SumOfSqs, r.R2,
+    r.F_model != null ? r.F_model : r.F,
+    r.p_value != null ? r.p_value : ''
+  ]));
+}
+
+export function pmPcoaAoA(result) {
+  const samples = (result && result.pcoa && result.pcoa.samples) || [];
+  return [['样本 ID', 'PCoA1', 'PCoA2', '分组', '分组变量']].concat(samples.map((s) => [
+    s.sample_id || '',
+    (s.coordinates && s.coordinates.PCoA1) != null ? s.coordinates.PCoA1 : 0,
+    (s.coordinates && s.coordinates.PCoA2) != null ? s.coordinates.PCoA2 : 0,
+    s.group || 'Unknown',
+    s.group_variable || ''
+  ]));
+}
+
+/**
+ * 主结果工作簿。说明表里必须写明"这张表只有整模型一行"这件事 ——
+ * 多因子公式下用户最想知道的是"哪个变量显著"，而 by=NULL 的 adonis2 不给。
+ * 不说，用户会把 Model 那行读成"第一个变量的结果"。
+ */
+export function pmResultSheets(result, ctx = {}) {
+  const rows = (result && result.permanova_result) || [];
+  const terms = (result && result.per_term) || [];
+  const info = [
+    ['PERMANOVA 结果导出'],
+    ['导出时间', ctx.stampText || ''],
+    ['模型公式', ctx.formula || ''],
+    ['置换次数', result?.permutations ?? ''],
+    ['整模型', `R²=${result?.R2 ?? ''}，F=${result?.F_model ?? ''}，p=${result?.p_value ?? ''}`],
+    [],
+    ['怎么读这张表'],
+    ['Model / Residual / Total', '整模型的分解三行。Model 行是**所有项合起来**的检验，不是第一个变量的'],
+    [terms.length ? 'per_term' : '⚠ 本模块不分项', terms.length
+      ? '每个公式项的边际检验在 per_term 表里（各列独立置换）'
+      : '这次运行没有分项结果：多因子公式下"哪个变量显著"看不出来。若表里只有 Model 行，别把它当分组变量的结果'],
+    ['p 值下限', '随机置换的 p 不低于 1/(次数+1)；等于它只能说明"至少这么小"']
+  ];
+  const sheets = [
+    { name: 'PERMANOVA', aoa: pmResultAoA(result) },
+    { name: '说明', aoa: info }
+  ];
+  if (terms.length) {
+    sheets.splice(1, 0, {
+      name: '分项检验',
+      aoa: [['公式项', 'Df', 'SumOfSqs', 'R²', 'F', 'p 值']].concat(terms.map((t) => [
+        t.term || '', t.Df, t.SumOfSqs, t.R2, t.F != null ? t.F : t.F_model,
+        t.p_value != null ? t.p_value : ''
+      ]))
+    });
+  }
+  return sheets;
+}
+
+export function pmPcoaSheets(result) {
+  return [{ name: 'PCoA 坐标', aoa: pmPcoaAoA(result) }];
+}
+
+export function pmResultFilename(stamp) { return `PERMANOVA 表_${stamp}.xlsx`; }
+export function pmPcoaFilename(stamp) { return `PCoA 坐标_${stamp}.xlsx`; }

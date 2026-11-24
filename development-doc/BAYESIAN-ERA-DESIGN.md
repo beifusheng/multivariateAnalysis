@@ -974,3 +974,61 @@ const groups = sampleData[firstVar];
 `verify_posthoc_engine` 65 → **80**（新增 §7）；`verify_permanova_engine` 18；
 `verify_era_engine` 64；`verify_gmr4_engine` 27；`test_home_status` 61；
 21 个 node 套件无 FAIL；`npm run build` ✓；`build-electron` ✓。
+
+## 24. 收尾：主引擎开始给分项检验，PERMANOVA 模板改由 JSON 渲染
+
+用户说"接着改，别的模块没收尾的一起收"。扫出来的真问题按危害排序：
+
+### 主引擎多因子公式看不出"哪个变量显著"
+
+`adonis2` 默认 `by = NULL`，所以 `Group + Age` 的结果表只有 **Model / Residual / Total** 三行 ——
+用户极容易把 Model 行读成"第一个变量的结果"（旧标签「模型（公式项）」还在鼓励这个误读）。
+现在：项数 > 1 时额外跑 `by = "terms"`，输出 `per_term`，界面加一张**分项（边际）检验**表，
+Model 行改叫「整模型（所有项合起来）」，并在"该有分项却没有"时出警告。
+
+用 `factorFormula` 模板实测（`verify_permanova_engine.R` §7，10 项已知答案）：
+
+| 项 | Df | R² | F | 锚点 |
+| --- | --- | --- | --- | --- |
+| as.factor(Group) | 2 | 0.43057 | 4.1989 | 与 vegan by=terms 逐位相同 |
+| Age | 1 | 0.15925 | 3.1059 | 同上 |
+
+外加一条与置换无关的**精确恒等式**：Σ分项 R² = 整模型 R²（0.589820 = 0.589820，偏差 < 1e-9）。
+单因子公式不产出 `per_term`（Model 行就是那一项，重复跑只是白烧置换）。
+
+### 33 个手写模板按钮 → 由 JSON 渲染
+
+`loadTemplate('...')` 在视图里硬编码了 33 个，其中最后一批还**漏了选中高亮绑定**。
+现在改成 `v-for` 遍历 `templateData.categories`，JSON 成唯一来源；
+判据方向也随之反转：从"每个 id 都得有按钮"改成"**视图里不许再出现硬编码模板 id**"。
+顺带给 PERMANOVA-med 补了同样的双向锁。
+
+### 三个引擎补齐 STATUS 声明
+
+`permanova_med.R`、`nonrandom_permanova.R` → `STATUS: implemented`（两者本就有 harness：6/8 处引用，
+缺的是声明不是验证）；`mcmc_diagnostics.R` → `STATUS: library`（共用实现，不单独交付）。
+新增全局锁：每个 `r-scripts/*.R` 都必须有 STATUS 行、取值限白名单、
+声明 implemented 的必须被某个 harness 引用 —— "可用"两个字从此必须有依据。
+
+### 主结果与 PCoA 导出改 spec 驱动
+
+视图里最后两处 `json_to_sheet` 搬到 `permanovaSheetSpec`（`pmResultSheets` / `pmPcoaSheets`）。
+表头不再是 R 字段原名（`_row` / `F_model`），说明表里写明"Model 行是所有项合起来"
+以及这次有没有分项结果 —— 拿到 xlsx 的人不在界面前。
+
+### 两个"判据自己错"的现场（值得记）
+
+- 两份 R 尺子的 `ok()` 参数序**是相反的**（posthoc 是 `(cond,label,detail)`，
+  permanova 是 `(label,cond,detail)`）。我按后者的习惯写前者风格的节，结果所有判据
+  "红成 TRUE"。修法不是继续猜：加显式别名 `okc(cond,label,detail)` 并把差异写进注释。
+- 新节里的运行器我叫成 `run_pm`，实际叫 `run`；说明表判据的正则我按自己写的措辞猜
+  （`看不出哪个变量` vs 实际 `看不出来`）。两处都是"凭记忆写锚点"，本项目第八次左右。
+
+计数锁第二次发挥作用：加完判据它报 `138 vs 139`，逼我逐条数清——
+原来我以为加了 11 条，实际是 10 条。
+
+### 数字
+
+`verify_permanova_engine` 18 → **28**；`test_pm_view` 128 → **138**；`test_home_status` 66 → **71**（新锁是给既有"逐节点名"那条判据加一个关键词，不另计一条）；
+`verify_posthoc_engine` 80；`verify_era_engine` 64；`verify_gmr4_engine` 27；
+21 个 node 套件无 FAIL；`npm run build` ✓。

@@ -235,7 +235,8 @@ console.log('\n=== 3e) 卡片上的能力标签必须真有其事 ===');
     'adonis2 锚点（R² 与 F 独立算一遗）': /adonis2/,
     '演示模式虚构分组必须出声': /\u865a\u6784/,
     '行数与矩阵不符必须拒': /12 \u4e2a\u6837\u672c.*9 \u884c|9 \u884c/,
-    '固定种子逐字节复现': /\u540c\u8f93\u5165\u540c\u8f93\u51fa/
+    '固定种子逐字节复现': /\u540c\u8f93\u5165\u540c\u8f93\u51fa/,
+    '分项（边际）检验与 R² 相加恒等式': /per_term|\u5206\u9879/
   };
   const pmLost = Object.keys(PM_LOCKS).filter((kk) => !PM_LOCKS[kk].test(pmRuler));
   check('主引擎尺子五个章节逐点名都在（丢哪节红哪条）',
@@ -318,14 +319,30 @@ console.log('\n=== 3e) 卡片上的能力标签必须真有其事 ===');
     check(`PERMANOVA：「${pmTplTag}」必须等于 JSON 里的真实模板数`,
       n === PM_IDS.length, `卡片写 ${n}，JSON 有 ${PM_IDS.length}`);
   }
+  // 这一节本来钉的是"两边都得有"：JSON 加了模板而视图没按钮 = 界面上点不到。
+  // 后来把 33 个手写按钮换成了 v-for（JSON 成唯一来源），于是判据也要跟着换方向 ——
+  // 现在钉的是**不许再出现硬编码 id**，否则漂移的可能又回来了。
   const viewSrc = read('frontend/src/views/r-analysis/PERMANOVA.vue');
-  const btnIds = [...viewSrc.matchAll(/loadTemplate\('([^']+)'\)/g)].map((m) => m[1]);
-  const noButton = PM_IDS.filter((id) => !btnIds.includes(id));
-  const ghostBtn = [...new Set(btnIds)].filter((id) => !PM_IDS.includes(id));
-  check('JSON 里每套模板都有对应按钮（加了数据忘了加按钮 = 界面上永远点不到）',
-    noButton.length === 0, `缺按钮：${noButton.join(', ')}`);
-  check('按钮引用的 id 必须在 JSON 里（写了按钮没数据 = 点了填不出任何东西）',
-    ghostBtn.length === 0, `野按钮：${ghostBtn.join(', ')}`);
+  const hardIds = [...viewSrc.matchAll(/loadTemplate\(['"]([^'"]+)['"]\)/g)].map((m) => m[1]);
+  check('PERMANOVA 模板按钮由 JSON 渲染，视图里不许再出现硬编码模板 id',
+    hardIds.length === 0 && /v-for="t in cat.templates"/.test(viewSrc) &&
+      /templateCats\(\)/.test(viewSrc), `硬编码 ${hardIds.length} 个：${hardIds.slice(0, 4).join(',')}`);
+  check('每套模板都得有 tooltip 或 desc（悬停空白 = 用户不知道这点下去会发生什么）',
+    PM_JSON.categories.flatMap((c) => c.templates)
+      .every((t) => (t.tooltip && t.tooltip.length > 8) || (t.desc && t.desc.length > 8)),
+    PM_JSON.categories.flatMap((c) => c.templates).filter((t) =>
+      !(t.tooltip && t.tooltip.length > 8) && !(t.desc && t.desc.length > 8)).map((t) => t.id).join(','));
+  // med 的 10 套是另一份 JSON（公式模板目录），同样得双向对上
+  const medJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'frontend/src/data/permanova-med-templates.json'), 'utf8'));
+  const medIds = medJson.categories.flatMap((c) => c.templates.map((t) => t.id));
+  const medSrc = read('frontend/src/views/r-analysis/PERMANOVA_Med.vue');
+  const medHard = [...medSrc.matchAll(/(?:applyTemplate|loadTemplate|selectTemplate)\(['"]([^'"]+)['"]\)/g)].map((m) => m[1]);
+  const medNoBtn = medIds.filter((id) => !medHard.includes(id) && !new RegExp(`v-for[^>]*templates`).test(medSrc));
+  check('PERMANOVA-med：JSON 里的模板在视图里可达（硬编码点名或 v-for 渲染，二选一）',
+    medHard.length > 0 || /v-for[^>]*templates/.test(medSrc), `点名 ${medHard.length} 个，JSON ${medIds.length} 套`);
+  check('PERMANOVA-med：点名引用的 id 必须在 JSON 里（野按钮点了填不出东西）',
+    medHard.filter((id) => !medIds.includes(id)).length === 0,
+    medHard.filter((id) => !medIds.includes(id)).join(','));
   // 每套模板都得能真用：三要素齐全 + 距离矩阵自洽 + 矩阵行数 == 样本数
   const all = PM_JSON.categories.flatMap((cat) => cat.templates);
   const badShape = [];
@@ -355,5 +372,28 @@ console.log('\n=== 3e) 卡片上的能力标签必须真有其事 ===');
 }
 
 
+
+// ---------- 全局：每个 R 脚本都必须公开自己的状态 ----------
+{
+  const ALLOWED = ['implemented', 'library', 'partial', 'placeholder'];
+  const scripts = fs.readdirSync(path.join(ROOT, 'r-scripts')).filter((f) => f.endsWith('.R'));
+  const noStatus = [];
+  const badStatus = [];
+  for (const f of scripts) {
+    const head = read(`r-scripts/${f}`).split('\n').slice(0, 8).join('\n');
+    const m = /STATUS:\s*([a-z]+)/.exec(head);
+    if (!m) noStatus.push(f);
+    else if (!ALLOWED.includes(m[1])) badStatus.push(`${f}(${m[1]})`);
+  }
+  check(`每个 r-scripts/*.R 都在头部声明 STATUS（现在 ${scripts.length} 个脚本）`,
+    noStatus.length === 0, `缺声明：${noStatus.join(', ')}`);
+  check('STATUS 的取值只能来自白名单（自创词汇机器读不懂）',
+    badStatus.length === 0, `非法取值：${badStatus.join(', ')}`);
+  // 声明 implemented 就必须有尺子：这就是"可用"两个字的全部依据
+  const implemented = scripts.filter((f) => /STATUS:\s*implemented/.test(read(`r-scripts/${f}`).split('\n').slice(0, 8).join('\n')));
+  const unharness = implemented.filter((f) => !validatedEngines.has(f));
+  check('每个声明 implemented 的引擎都被某个 harness 引用（否则"可用"没有依据）',
+    unharness.length === 0, `无尺子的 implemented 引擎：${unharness.join(', ')}`);
+}
 console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1); }
