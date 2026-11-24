@@ -845,11 +845,111 @@ console.log('\n=== 8. 新模板 factorFormula：从按钮一路跑到两个引�
     cssBlock ? cssBlock[1].replace(/\s+/g, ' ').trim() : '找不到样式');
 }
 
+console.log('\n=== 9. 运行时链路：api 白名单 -> ipc 桩 -> 真 R 引擎 -> 视图映射 ===');
+{
+  // 前面那些判据都是"读源码看键在不在"。可 primary 那次丢字段，源码里明明写了、
+  // 只是白名单没列 —— 只有真跑一次才知道数据到没到 R。这里把 ipc 桩成"直接调引擎"，
+  // 于是链路变成：视图方法 -> api 白名单 -> (桩) -> 真 R -> 回视图 -> 表格行。
+  const captured = [];
+  const ipcStub = {
+    invoke: async (chan, payload) => {
+      captured.push({ chan, payload });
+      const script = String(chan).includes('Posthoc')
+        ? 'r-scripts/permanova_posthoc.R' : 'r-scripts/permanova.R';
+      const f = path.join(TMP, `ipc${captured.length}.json`);
+      fs.writeFileSync(f, JSON.stringify(payload));
+      execFileSync(RSCRIPT, [path.join(ROOT, script), f, f + '.out', f + '.err'],
+        { cwd: ROOT, stdio: 'pipe', timeout: 600000 });
+      if (fs.existsSync(f + '.err') && fs.readFileSync(f + '.err', 'utf8').trim()
+        && !fs.existsSync(f + '.out')) {
+        throw new Error(fs.readFileSync(f + '.err', 'utf8'));
+      }
+      return JSON.parse(fs.readFileSync(f + '.out', 'utf8'));
+    }
+  };
+  globalThis.window = { electron: { ipcRenderer: ipcStub } };
+
+  const api = await server.ssrLoadModule('/src/api/r.js');
+  const route = (await server.ssrLoadModule('/src/api/index.js')).ipcApiRoute;
+  const tpl = JSON.parse(fs.readFileSync(path.join(FRONTEND, 'src/data/permanova-templates.json'), 'utf8'))
+    .categories.flatMap((c) => c.templates).find((t) => t.id === 'factorFormula');
+
+  const r1 = await api.runPERMANOVA({
+    distanceMatrix: tpl.distanceMatrix, sampleData: tpl.sampleData,
+    formula: tpl.formula, permutations: 499, seed: 7
+  });
+  check('主分析走的是登记的 ipc 通道',
+    captured.length === 1 && captured[0].chan === route.rRunPERMANOVA,
+    captured[0] && captured[0].chan);
+  check('seed 真的穿过 api 白名单到了 R（丢字段就是"改了种子毫无反应"）',
+    captured[0].payload.seed === 7, JSON.stringify(Object.keys(captured[0].payload)));
+  check('sampleData 与 formula 也原样到达（不是被前端拆过的碎片）',
+    !!captured[0].payload.sampleData && captured[0].payload.formula === tpl.formula, '');
+  check('链路跑通并给出已知答案 R²=0.58982 / F=3.8345',
+    Math.abs(r1.R2 - 0.58982) < 1e-4 && Math.abs(r1.F_model - 3.8345) < 1e-3,
+    `R2=${r1.R2} F=${r1.F_model}`);
+  check('per_term 穿过整条链路到达前端（两行）',
+    Array.isArray(r1.per_term) && r1.per_term.length === 2, JSON.stringify(r1.per_term));
+
+  // 换种子：R²/F 必须不变（那是同一份数据的分解），p 允许在 MC 分辨率内抖。
+  // 这条判据的含义是"seed 真的生效"，而不生效时 p 会逐位相同 -> 红。
+  const r2 = await api.runPERMANOVA({
+    distanceMatrix: tpl.distanceMatrix, sampleData: tpl.sampleData,
+    formula: tpl.formula, permutations: 499, seed: 8888
+  });
+  check('不同 seed 下 R² 完全一致（分解与置换无关）',
+    Math.abs(r2.R2 - r1.R2) < 1e-12, `${r1.R2} vs ${r2.R2}`);
+  check('不同 seed 至少让某个 p 动了（说明 seed 确实进了 RNG，不是摆设）',
+    String(r2.p_value) !== String(r1.p_value) ||
+      JSON.stringify(r2.per_term) !== JSON.stringify(r1.per_term),
+    `p ${r1.p_value} -> ${r2.p_value}`);
+
+  // 事后检验跑完整视图方法（它不碰 ElLoading，能在 node 里活）
+  const vm3 = makeVm();
+  vm3.permanovaParams.distanceMatrix = tpl.distanceMatrix;
+  vm3.permanovaParams.sampleData = tpl.sampleData;
+  vm3.permanovaParams.formula = tpl.formula;
+  vm3.permanovaParams.distanceMatrixStr = JSON.stringify(tpl.distanceMatrix);
+  vm3.permanovaParams.sampleDataStr = JSON.stringify(tpl.sampleData);
+  vm3.permanovaParams.matrixValid = true;
+  vm3.permanovaParams.sampleDataValid = true;
+  vm3.permanovaParams.seed = 12345;
+  vm3.analysisResult = { p_value: 0.006 };
+  await vm3.runPosthocTest();
+  const phSent = captured[captured.length - 1];
+  check('事后检验走的是 Posthoc 通道', /Posthoc/.test(phSent.chan), phSent.chan);
+  check('发给引擎的载荷里没有 groups（分组项已交给 R 从公式推）',
+    !('groups' in phSent.payload), Object.keys(phSent.payload).join(','));
+  check('载荷带着 formula 与 primary（这两处以前都丢过）',
+    phSent.payload.formula === tpl.formula && phSent.payload.primary === 'bh',
+    `formula=${phSent.payload.formula} primary=${phSent.payload.primary}`);
+  const rows = (vm3.posthocResult && vm3.posthocResult.comparisons) || [];
+  check('视图把数组映射成 3 行表格（不是把标量当数组崩掉）',
+    rows.length === 3 && rows.every((x) => x.group1 && x.group2),
+    `${rows.length} 行`);
+  check('表格里 p_bh / p_bonferroni / F / R² 都是数字（不是 undefined）',
+    rows.every((x) => Number.isFinite(x.p_bh) && Number.isFinite(x.p_bonferroni) &&
+      Number.isFinite(x.F) && Number.isFinite(x.R2)),
+    rows.length ? JSON.stringify(Object.keys(rows[0])) : 'n/a');
+  check('映射后仍是那三个已知答案（20/70、12/70、2/70）',
+    rows.length === 3 && Math.abs(rows[0].p - 20 / 70) < 1e-9 &&
+      Math.abs(rows[1].p - 12 / 70) < 1e-9 && Math.abs(rows[2].p - 2 / 70) < 1e-9,
+    rows.map((x) => x.p).join(', '));
+  check('回显的分组列进了 posthocResult（界面顶部那句话有依据）',
+    vm3.posthocResult && vm3.posthocResult.groupVariable === 'Group',
+    vm3.posthocResult && vm3.posthocResult.groupVariable);
+  check('跑完打开了结果对话框并给出条数摘要',
+    vm3.showPosthocResultDialog === true &&
+      vm3.notices.some((n) => n[0] === 'success' && /3 个两两比较/.test(String(n[1]))),
+    JSON.stringify(vm3.notices.map((n) => String(n[1]).slice(0, 40))));
+  delete globalThis.window;
+}
+
 // 计数锁：上一轮我把「通道契约」整节插进了 catch 里，于是它一次都没跑，
 // 而汇总照样报 0 失败 —— 把它露出来的不是逻辑，是"打印的勾比计到的多 9"这个不一致。
 // 那就把这个信号变成硬条件：跑到的判据数必须等于写死的期望，多一条少一条都算失败。
 // （加/删判据时必须同时改这里 —— 这正是我要的那种"想起来就疼"）
-const EXPECT_TOTAL = 138;
+const EXPECT_TOTAL = 153;
 
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }

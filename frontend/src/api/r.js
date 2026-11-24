@@ -48,7 +48,10 @@ export async function runPERMANOVA(params) {
   // 清理参数，确保可序列化
   const cleanParams = {
     distanceMatrix: JSON.parse(JSON.stringify(params.distanceMatrix)),
-    permutations: params.permutations || 999
+    permutations: params.permutations || 999,
+    // seed 以前不在白名单里：引擎支持 params$seed，视图也终于提供了输入框，
+    // 漏在这里就等于"用户改了种子、结果纹丝不动"—— 比没有该功能更糟。
+    seed: params.seed || 12345
   };
   if (params.sampleData) {
     cleanParams.sampleData = JSON.parse(JSON.stringify(params.sampleData));

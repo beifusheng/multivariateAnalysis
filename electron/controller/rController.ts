@@ -138,7 +138,9 @@ export default class RController {
     // 清理参数，确保是纯 JSON
     const cleanParams: any = {
       distanceMatrix: params.distanceMatrix,
-      permutations: params.permutations || 999
+      permutations: params.permutations || 999,
+      // 与前端 api/r.js 同一份键集：两层白名单任一处漏 seed，用户改种子就毫无反应
+      seed: params.seed || 12345
     };
     
     if (params.sampleData) {

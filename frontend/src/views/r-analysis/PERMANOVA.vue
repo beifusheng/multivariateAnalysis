@@ -170,6 +170,15 @@
             <p class="formula-hint">
               💡 建议 ≥ 999 以获得稳定的 p 值
             </p>
+            <div class="seed-row">
+              <span class="seed-label">随机种子</span>
+              <el-input-number v-model="permanovaParams.seed" :min="1" :max="999999" :step="1"
+                controls-position="right" class="seed-input" />
+            </div>
+            <p class="formula-hint">
+              💡 同一份数据换个种子，p 会在 1/(次数+1) 量级上抖动 —— 这不是 bug，
+              是置换检验的分辨率。若结论随种子翻转，说明它本来就悬在阈值上，请增加置换次数。
+            </p>
           </div>
         </div>
       </div>
@@ -598,6 +607,10 @@ export default {
         sampleData: null,
         formula: '',
         permutations: 999,
+        // 随机种子：permanova.R 里 set.seed(params$seed)，默认 12345。
+        // 以前视图根本没这个字段，事后检验却写着 params.seed || 12345 —— 读的是个不存在的键。
+        // 把它暴露出来的真正理由不是省事：换种子 p 会抖，而「抖多少」正是 MC 分辨率的教学点。
+        seed: 12345,
         matrixValid: false,
         matrixSize: 0,
         matrixError: '',
@@ -971,7 +984,8 @@ export default {
     /** 送给 R 的参数就一个来源：按钮可用性、运行、下载输入都用它，不再各拼一遍 */
     buildRunParams() {
       const p = this.permanovaParams;
-      const params = { distanceMatrix: p.distanceMatrix, permutations: p.permutations };
+      const params = { distanceMatrix: p.distanceMatrix, permutations: p.permutations,
+        seed: p.seed };
       if (p.sampleDataValid && p.sampleData && p.formula) {
         params.sampleData = p.sampleData;
         params.formula = p.formula;
@@ -3074,6 +3088,23 @@ export default {
   gap: 8px;
   color: #0369a1;
   font-size: 14px;
+}
+
+.seed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.seed-label {
+  font-size: 13px;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.seed-input {
+  width: 150px;
 }
 
 .rs-subtitle {
