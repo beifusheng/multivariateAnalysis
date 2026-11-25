@@ -260,10 +260,28 @@ npm run build-w           # 正常打包（需联网下 electron 发行包）
 npm run build-w:offline   # 离线：复用 node_modules/electron/dist，不下那 97MB
 ```
 
-产物验证结果：`out/win-unpacked/resources/app.asar.unpacked/r-scripts/` 与
-`out/win-unpacked/resources/extraResources/r-portable/bin/Rscript.exe` 都在；
-**用包里的 R 跑包里的脚本**，得 `R²=0.58982 / F=3.8345 / p=0.006 / 分项 2 行` ——
-与开发态已知答案逐位一致（这条由 `test_packaging.mjs` §6 在有 `out/` 时自动重验）。
+两个命令现在都会**先跑 `npm run build`**（前端 + 主进程 + encrypt）再打包。
+这不是凑数：`ee-bin build --cmds=win64` 就只是 `electron-builder --config=./cmd/builder.json -w=nsis --x64`，
+本身不构建任何东西 —— 所以它会**静默地把 `public/` 里现有的旧产物打进去**。
+有一次打出来的安装包里根本是脚手架页面（bundle 只有 139KB、里面连 `PERMANOVA` 三个字都没有），
+而配置与代码全是新的 —— 光看 builder.json 完全看不出来。这条现在由
+`test_packaging.mjs` §5.5 钉住（脚本里必须含 `npm run build`✓ bundle 体积与五个方法名✓）。
+
+产品身份也已从上游框架改成本项目：`productName / 可执行文件名 / 快捷方式`
+均为 **`multivariateAnalysis`**（不再是 `ee.exe`），`appId` 为 `com.beifusheng.multivariateAnalysis`，
+`publish.url` 不再指向别人的仓库。
+
+独立目录实测结果（`-c.directories.output=out-proof`）：
+
+```
+out-proof/win-unpacked/multivariateAnalysis.exe                              ← 名字对了
+  resources/app.asar (31MB) 内含 PERMANOVA / Bayesian ERA          ← 前端是新的
+  resources/app.asar.unpacked/r-scripts/permanova.R                       ← 脚本解包成功
+  resources/extraResources/r-portable/bin/Rscript.exe → R 4.6.1            ← 运行时可用
+```
+
+再叠加之前那次“用包里的 R 跑包里的脚本”：`R²=0.58982 / F=3.8345 / p=0.006 / 分项 2 行`
+与开发态已知答案逐位一致。§6 会在 `out/win-unpacked` 比配置新时自动重验这套布局。
 
 > 为何需要 `build-w:offline`：本机 electron-builder 缓存里只有 v22 的发行包，
 > 而项目用 39.8.10；无外网时它会卡在 `connect ETIMEDOUT`（下载与镜像都试过来）。

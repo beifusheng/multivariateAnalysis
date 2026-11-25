@@ -42,15 +42,31 @@ console.log('\n=== 尺子（mcmc_diagnostics.R）的自动运行入口 ===');
     fs.existsSync(path.join(ROOT, 'r-scripts/mcmc_diagnostics.R')), '');
   check('Rscript 可用', fs.existsSync(RSCRIPT), RSCRIPT);
 
-  let out = '', code = 0;
+  // 本来限 600s：空闲时尺子跑 ~185s，但机器上一忙（多个旧版 exe 在跑、它们自己还会起 Rscript）
+  // 就会超过 600s —— 于是 5 条依赖 R 输出的判据一起红，报的是「R 侧失败」，
+  // 真相是「机器不够用」。错误归因比红更坑：会让人去查根本不存在的统计 bug。
+  const LIMIT = Number(process.env.ERA_VERIFY_TIMEOUT_MS || 1800000);
+  let out = '', code = 0, timedOut = false, secs = 0;
+  const t0 = Date.now();
   try {
-    out = execFileSync(RSCRIPT, [VERIFY], { cwd: ROOT, encoding: 'utf8', stdio: 'pipe', timeout: 600000 });
+    out = execFileSync(RSCRIPT, [VERIFY], { cwd: ROOT, encoding: 'utf8', stdio: 'pipe', timeout: LIMIT });
   } catch (e) {
-    code = (e && e.status) || 1;
+    timedOut = String((e && e.code) || '') === 'ETIMEDOUT' || /ETIMEDOUT/.test(String((e && e.message) || ''));
+    code = timedOut ? 124 : ((e && e.status) || 1);
     out = String((e && e.stdout) || '') + String((e && e.stderr) || '') + String((e && e.message) || '');
   }
-  check('R 侧 verify_era_engine.R exit=0', code === 0, `exit=${code}\n${out.slice(-400)}`);
+  secs = ((Date.now() - t0) / 1000).toFixed(0);
 
+  if (timedOut) {
+    // 超时不是统计失败：后面的判据需要真跑过 R 才有意义，这里明说"未验证"而不是归零成红。
+    console.log(`  ! R 侧超时（${secs}s > ${LIMIT / 1000}s）：本轮不算统计失败，也不算通过`);
+    console.log('    下一步：关掉其他在跑的实例（尤其是旧版安装包）后重跑；或 ERA_VERIFY_TIMEOUT_MS=3600000 重跑');
+    fails.push(`R 侧超时未验证（${secs}s）`);
+  } else {
+    check(`R 侧 verify_era_engine.R exit=0（耗时 ${secs}s / 上限 ${LIMIT / 1000}s）`, code === 0, `exit=${code}\n${out.slice(-400)}`);
+  }
+
+  if (!timedOut) {  // 超时的那一轮：下面这些判据全要读 R 的真实输出，没输出就没资格判
   const m = /\[PASS\] (\d+) 项全过/.exec(out);
   check('R 侧自己报了 PASS 且带项数（"跑完了"不等于"跑对了"）', !!m, out.slice(-300));
   const n = m ? Number(m[1]) : 0;
@@ -78,21 +94,26 @@ console.log('\n=== 尺子（mcmc_diagnostics.R）的自动运行入口 ===');
   check('高维实测行在（默认迭代数必须有实测依据，不许口头保证）',
     /\u9ad8\u7ef4\u5b9e\u6d4b\uff1a\u7528\u65f6/.test(out), '');
 
+  }
   /* 引擎进度跟尺子分开报：上一版我把两件事塞进一条断言，结果 Rscript 语法报错时
      这条也跟着红 —— 一个报两件事的断言只会让人花时间去猜到底是哪件坏了。*/
   const eng = fs.readFileSync(path.join(ROOT, 'r-scripts/bayesian_era_mediation.R'), 'utf8');
   const engHead = eng.split('\n')[0] || '';
   const implemented = /STATUS: implemented/.test(engHead);
+  if (!timedOut) {  // 这两条也是读 R 输出的，前一轮抃进了源码级判据的组里，超时时就误报了
   check('R 侧必须打印引擎状态行（不许静默跳过还没验收的部分）',
     /\u5f15\u64ce\u72b6\u6001/.test(out), '输出里没有引擎状态');
   check('STATUS 与验收进度一致：标了 implemented 就必须有恒等式/锚点段',
     !implemented || /\u6052\u7b49\u5f0f/.test(out),
     `引擎首行是 implemented，但 R 侧只跑了尺子自检 —— 要么补上 §2，要么把 STATUS 改回 placeholder`);
   if (!implemented) {
+  }
     check('引擎仍是 placeholder（尺子先行的预期状态）', /placeholder/.test(engHead), engHead);
   }
 }
 
-console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
+console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }
-process.exit(fail ? 1 : 0);
+// 计数只认一个来源：曾因 check() 走 fail、超时走 fails[]，两者不一致导致
+// 超时被列进"失败项"却仍然退出码 0（静默通过）。
+process.exit(fails.length ? 1 : 0);

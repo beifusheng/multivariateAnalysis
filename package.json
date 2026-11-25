@@ -1,7 +1,7 @@
 {
   "name": "ee",
   "version": "5.0.0",
-  "description": "A fast, desktop software development framework",
+  "description": "多变量统计分析桌面端（PERMANOVA / 中介 / 受限置换 / GMR⁴ / Bayesian ERA）",
   "main": "./public/electron/main.js",
   "scripts": {
     "dev": "ee-bin dev",
@@ -25,13 +25,13 @@
     "build-electron": "ee-bin build --cmds=electron",
     "icon": "ee-bin icon",
     "re-sqlite": "electron-rebuild -f -w better-sqlite3",
-    "build-w": "ee-bin build --cmds=win64",
-    "build-w:offline": "electron-builder --win --x64 --dir -c cmd/builder.json -c.electronDist=node_modules/electron/dist",
+    "build-w": "npm run build && ee-bin build --cmds=win64",
+    "build-w:offline": "npm run build && electron-builder --win --x64 --dir -c cmd/builder.json -c.electronDist=node_modules/electron/dist",
     "build-we": "ee-bin build --cmds=win_e",
-    "build-m": "ee-bin build --cmds=mac_arm64",
-    "build-m-x86": "ee-bin build --cmds=mac",
+    "build-m": "npm run build && ee-bin build --cmds=mac_arm64",
+    "build-m-x86": "npm run build && ee-bin build --cmds=mac",
     "build-m-arm64": "ee-bin build --cmds=mac_arm64",
-    "build-l": "ee-bin build --cmds=linux"
+    "build-l": "npm run build && ee-bin build --cmds=linux"
   },
   "repository": "https://github.com/dromara/electron-egg.git",
   "keywords": [

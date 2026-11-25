@@ -1,7 +1,7 @@
 {
-  "productName": "ee",
-  "appId": "com.electron.ee",
-  "copyright": "© 2025 duola Technology Co., Ltd.",
+  "productName": "multivariateAnalysis",
+  "appId": "com.beifusheng.multivariateAnalysis",
+  "copyright": "© 2026 multivariateAnalysis",
   "directories": {
     "output": "out"
   },
@@ -38,12 +38,12 @@
     "installerHeaderIcon": "build/icons/icon.ico",
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
-    "shortcutName": "ee"
+    "shortcutName": "multivariateAnalysis"
   },
   "publish": [
     {
       "provider": "generic",
-      "url": "https://github.com/wallace5303/electron-egg"
+      "url": "https://github.com/beifusheng/multivariateAnalysis/releases/latest/download/"
     }
   ],
   "win": {
@@ -53,6 +53,7 @@
       {
         "target": "nsis"
       }
-    ]
+    ],
+    "executableName": "multivariateAnalysis"
   }
 }
