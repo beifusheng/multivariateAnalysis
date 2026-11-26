@@ -401,14 +401,13 @@ console.log('\n=== 标注一致性：design for（署名不得四处漂移）===
   const pkg = JSON.parse(read('package.json'));
   const who = String(pkg.designFor || '').trim();
   const phrase = 'design for ' + who;
-  check('package.json 的 designFor 非空（它是其余四处的唯一来源）', who.length > 0, JSON.stringify(pkg.designFor));
+  check('package.json 的 designFor 非空（它是其余三处的唯一来源）', who.length > 0, JSON.stringify(pkg.designFor));
 
   // 名字从 designFor 取，测试里不抄一逐 CJK 副本：拄了就会有两份事实，
   // 而两份事实早晚不一致（本项目已经为这个红过很多次）。
   const places = [
     ['README.md', read('README.md')],
     ['package.json description', String(pkg.description)],
-    ['electron/config/config.default.ts (title)', read('electron/config/config.default.ts')],
     ['frontend/src/views/Home.vue', read('frontend/src/views/Home.vue')]
   ];
   for (const [where, txt] of places) {
@@ -416,9 +415,11 @@ console.log('\n=== 标注一致性：design for（署名不得四处漂移）===
   }
 
   const titles = [...read('electron/config/config.default.ts').matchAll(/title: '([^']*)'/g)].map((m) => m[1]);
-  const titled = titles.find((t) => t.includes('design for')) || '';
-  check('窗口标题仍以主名开头（署名不能把产品名顶掉）',
-    titled.startsWith('\u7edf\u8ba1\u5206\u6790\u5e73\u53f0'), titled);
+  const titled = titles.find((t) => t.includes('\u7edf\u8ba1\u5206\u6790\u5e73\u53f0')) || '';
+  // 用户明确要求：窗口标题保持纯产品名，署名只放首页与元数据。
+  // 这条不是冗余限制 —— 不写下来，下次有人会把署名又塞回标题栏。
+  check('\u7a97\u53e3\u6807\u9898\u4fdd\u6301\u7eaf\u4ea7\u54c1\u540d\uff08\u7f72\u540d\u4e0d\u8fdb\u6807\u9898\u680f\uff09',
+    titled === '\u7edf\u8ba1\u5206\u6790\u5e73\u53f0' && !titled.includes('design for'), titled);
   check('Home 首页用 class 而不是内联样式',
     /class="app-design-note"/.test(read('frontend/src/views/Home.vue')) &&
       !/style="[^"]*design for/.test(read('frontend/src/views/Home.vue')), '');
