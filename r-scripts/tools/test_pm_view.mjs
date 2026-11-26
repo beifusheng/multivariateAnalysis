@@ -961,16 +961,28 @@ console.log('\n=== 9. 运行时链路：api 白名单 -> ipc 桩 -> 真 R 引擎
 // 而汇总照样报 0 失败 —— 把它露出来的不是逻辑，是"打印的勾比计到的多 9"这个不一致。
 // 那就把这个信号变成硬条件：跑到的判据数必须等于写死的期望，多一条少一条都算失败。
 // （加/删判据时必须同时改这里 —— 这正是我要的那种"想起来就疼"）
-const EXPECT_TOTAL = 153;
+// 上一轮加了 3 条 confirmExport 的判据却没同步这个数 —— 计数锁当场把退出码杽成 1，
+// 而它做的事正是宣布“有判据多出来/没跑到”。这就是我要的那种“想起来就疼”。
+const EXPECT_TOTAL = 156;
 
-console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
-if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }
+// 顺序要紧：汇总行必须最后打印。上一版它在计数锁之前，于是先喊“0 失败”
+// 再判失败 —— 汇总在骗人，靠 run_all_tests 的“退出码与汇总不一致”交叉检查才置住。
 if (pass + fail !== EXPECT_TOTAL) {
   console.log(' [计数锁] 期望跑到 ' + EXPECT_TOTAL + ' 条判据，实际 ' + (pass + fail) + ' 条 —— '
     + '有判据没被执行（多半是插入位置错了，或某节走进了不成立的分支）');
   fail++; fails.push('计数锁：判据执行数与期望不符（有节没跑到）');
 }
 
+console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);
+if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }
+console.log('RESULT pass=' + pass + ' fail=' + fails.length);
 
-await server.close();
+
+// 拆除失败不能伪装成测试失败：vite/esbuild 在 close() 时会抛 "The build was canceled"，
+// 不接住的话它会把退出码弄成 1 —— 而汇总明明是 0 失败（今天就被这个误导了一次）。
+try {
+  await server.close();
+} catch (e) {
+  console.log('  (收尾噪声，与结果无关：server.close 抛了 ' + String((e && e.message) || e) + ')');
+}
 process.exit(fails.length ? 1 : 0);
