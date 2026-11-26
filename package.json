@@ -40,6 +40,7 @@
     "ElectronEgg"
   ],
   "author": "北符生",
+  "designFor": "澜芸",
   "license": "Apache",
   "devDependencies": {
     "@electron/rebuild": "^3.7.1",

@@ -1,5 +1,7 @@
 # 多变量统计分析桌面端
 
+*design for 澜芸*
+
 离线运行的统计分析桌面应用（Electron + Vue + 便携版 R）。面向微生物组 / 生态 / 医学社科数据：
 距离矩阵置换检验、中介分析、受限置换、广义多响应回归、贝叶斯扩展冗余分析。
 
@@ -317,6 +319,7 @@ out-proof/win-unpacked/multivariateAnalysis.exe                              ←
 
 ## 7. 许可与作者
 
+- **design for 澜芸**（`package.json` 里也记了 `designFor` 字段）。
 - 作者 / 版权人：**北符生**（`package.json` 的 `author`、`LICENSE` 的
   `Copyright 2026 北符生`、以及四个平台打包配置的 `copyright` 字段已全部对齐，
   安装包属性里看到的也是这个）。
