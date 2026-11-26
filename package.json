@@ -1,6 +1,6 @@
 {
-  "name": "ee",
-  "version": "5.0.0",
+  "name": "multivariateAnalysis",
+  "version": "1.0.0",
   "description": "多变量统计分析桌面端（PERMANOVA / 中介 / 受限置换 / GMR⁴ / Bayesian ERA）",
   "main": "./public/electron/main.js",
   "scripts": {
@@ -39,7 +39,7 @@
     "electron-egg",
     "ElectronEgg"
   ],
-  "author": "哆啦好梦, Inc <530353222@qq.com>",
+  "author": "北符生",
   "license": "Apache",
   "devDependencies": {
     "@electron/rebuild": "^3.7.1",
