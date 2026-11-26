@@ -396,5 +396,51 @@ console.log('\n=== 3e) 卡片上的能力标签必须真有其事 ===');
   check('每个声明 implemented 的引擎都被某个 harness 引用（否则"可用"没有依据）',
     unharness.length === 0, `无尺子的 implemented 引擎：${unharness.join(', ')}`);
 }
+console.log('\n=== 标注一致性：design for（署名不得四处漂移）===');
+{
+  const pkg = JSON.parse(read('package.json'));
+  const who = String(pkg.designFor || '').trim();
+  const phrase = 'design for ' + who;
+  check('package.json 的 designFor 非空（它是其余四处的唯一来源）', who.length > 0, JSON.stringify(pkg.designFor));
+
+  // 名字从 designFor 取，测试里不抄一逐 CJK 副本：拄了就会有两份事实，
+  // 而两份事实早晚不一致（本项目已经为这个红过很多次）。
+  const places = [
+    ['README.md', read('README.md')],
+    ['package.json description', String(pkg.description)],
+    ['electron/config/config.default.ts (title)', read('electron/config/config.default.ts')],
+    ['frontend/src/views/Home.vue', read('frontend/src/views/Home.vue')]
+  ];
+  for (const [where, txt] of places) {
+    check(`${where} 含“${phrase}”`, txt.includes(phrase), txt.slice(0, 60));
+  }
+
+  const titles = [...read('electron/config/config.default.ts').matchAll(/title: '([^']*)'/g)].map((m) => m[1]);
+  const titled = titles.find((t) => t.includes('design for')) || '';
+  check('窗口标题仍以主名开头（署名不能把产品名顶掉）',
+    titled.startsWith('\u7edf\u8ba1\u5206\u6790\u5e73\u53f0'), titled);
+  check('Home 首页用 class 而不是内联样式',
+    /class="app-design-note"/.test(read('frontend/src/views/Home.vue')) &&
+      !/style="[^"]*design for/.test(read('frontend/src/views/Home.vue')), '');
+
+  // 法律字段不能被致谢污染：copyright 进的是安装包属性的 LegalCopyright ✓
+  // 把“design for X”塞那里等于声称版权属于 X ✓
+  const legal = ['cmd/builder.json', 'cmd/builder-linux.json', 'cmd/builder-mac.json', 'cmd/builder-mac-arm64.json']
+    .map((f) => JSON.parse(read(f)).copyright || '');
+  check('四个打包配置的 copyright 仍是版权人，没被致谢污染',
+    legal.length === 4 && legal.every((c) => c.includes(pkg.author) && !c.includes(who)),
+    legal.join(' | '));
+
+  // 构建产物里真的得有（写了源码但忘 build，界面上看不到也算投逐）
+  const adir = path.join(ROOT, 'public', 'dist', 'assets');
+  if (fs.existsSync(adir)) {
+    const home = fs.readdirSync(adir).filter((f) => f.startsWith('Home-') && f.endsWith('.js'))
+      .map((f) => fs.readFileSync(path.join(adir, f), 'utf8')).join('');
+    check('已构建的前端 bundle 里确实带着这句署名', home.includes(phrase), adir + ' 里没有 Home-*.js 或不含该串');
+  } else {
+    console.log('  - 跳过 bundle 校验：public/dist 不存在（先 npm run build-frontend）');
+  }
+}
+
 console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1); }

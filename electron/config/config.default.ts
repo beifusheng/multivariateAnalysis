@@ -10,7 +10,8 @@ export default (): Partial<Config> => {
     openDevTools: false,
     singleLock: true,
     windowsOption: {
-      title: '统计分析平台',
+      // 标题里带署名：任务栏与窗口框持续可见。README / package.json / Home 首页四处一致性由 test_home_status.mjs 钉住。
+      title: '统计分析平台 · design for 澜芸',
       width: 980,
       height: 850,
       minWidth: 400,

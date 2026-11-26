@@ -7,6 +7,9 @@
           <span class="gradient-text">🧬 统计分析平台</span>
         </h1>
         <p class="app-subtitle">基于 Electron + R 的本地统计分析桌面应用</p>
+        <!-- 署名标注：README / package.json(designFor 与 description) / 窗口标题 / 这里
+             四处要保持一致，由 test_home_status.mjs 的“标注一致性”一节钉住。 -->
+        <p class="app-design-note">design for 澜芸</p>
       </div>
     </header>
 
@@ -373,6 +376,16 @@ export default {
   font-size: 18px;
   color: rgba(255, 255, 255, 0.9);
   margin: 0;
+  font-weight: 300;
+}
+
+/* 署名标注：比副标题弱一档，不能抢主标题，但得看得见 */
+.app-design-note {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.62);
+  font-style: italic;
+  letter-spacing: 0.06em;
+  margin: 10px 0 0;
   font-weight: 300;
 }
 

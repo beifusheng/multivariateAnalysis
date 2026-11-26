@@ -1,7 +1,7 @@
 {
   "name": "multivariateAnalysis",
   "version": "1.0.0",
-  "description": "多变量统计分析桌面端（PERMANOVA / 中介 / 受限置换 / GMR⁴ / Bayesian ERA）",
+  "description": "多变量统计分析桌面端（PERMANOVA / 中介 / 受限置换 / GMR⁴ / Bayesian ERA） · design for 澜芸",
   "main": "./public/electron/main.js",
   "scripts": {
     "dev": "ee-bin dev",
