@@ -315,8 +315,12 @@ out-proof/win-unpacked/multivariateAnalysis.exe                              ←
 
 ---
 
-## 7. 许可与来源
+## 7. 许可与作者
 
-基于 [ElectronEgg V5](https://github.com/dromara/electron-egg)（Apache-2.0）构建。
-统计实现依赖 R 与 [vegan](https://cran.r-project.org/package=vegan)、
-[LDM](https://bioconductor.org/packages/LDM) 等上游包，各自遵循其许可证。
+- 作者 / 版权人：**北符生**（`package.json` 的 `author`、`LICENSE` 的
+  `Copyright 2026 北符生`、以及四个平台打包配置的 `copyright` 字段已全部对齐，
+  安装包属性里看到的也是这个）。
+- 许可证：Apache-2.0（见 `LICENSE`）。
+- 基于 [ElectronEgg V5](https://github.com/dromara/electron-egg)（Apache-2.0）框架构建。
+- 统计实现依赖 R 与 [vegan](https://cran.r-project.org/package=vegan)、
+  [LDM](https://bioconductor.org/packages/LDM) 等上游包，各自遵循其许可证。

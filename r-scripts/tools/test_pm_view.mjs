@@ -286,6 +286,18 @@ console.log('\n=== 4. 导出任务表 ===');
       jobs.map((j) => j.filename.split('_')[0]).join('|') === 'PERMANOVA 结果|PERMANOVA 表|PCoA 坐标|分析图表|PERMANOVA 输入',
       jobs.map((j) => j.filename).join(' , '));
     check('[新] 未知 key 不出空文件', vm.exportJobs(['nope']).length === 0);
+
+    // 今天那个“JSON 没导出来”的真因不是 spec，是 methods 里写了两个 confirmExport：
+    // 后一个（硬编码旧版）把前一个（走 spec 的）盖住了 —— 计划算得再对也没人执行。
+    // 所以光测 exportJobs 不够，得钉住“确实按那份计划写文件”这件事。
+    const src = fs.readFileSync(VIEW, 'utf8');
+    const ce = [...src.matchAll(/^ {4}async confirmExport\(/gm)];
+    check('[新] confirmExport 只有一个定义（重复键后者静默覆盖前者）', ce.length === 1, `实得 ${ce.length} 个`);
+    const body = src.slice(src.indexOf('async confirmExport('), src.indexOf('async downloadInput('));
+    check('[新] confirmExport 真的走 exportJobs 的清单，而不是自己重列一套',
+      /this\.exportJobs\(/.test(body) && /job\.type/.test(body), body.slice(0, 80));
+    check('[新] json 类型的 job 会调 saveJson（四个导出分支里 json 不得没下落）',
+      /type === 'json'[\s\S]{0,80}saveJson\(/.test(body), '');
   }
 }
 

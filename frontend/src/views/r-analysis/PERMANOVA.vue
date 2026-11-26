@@ -1812,71 +1812,9 @@ export default {
       return content;
     },
 
-    // 确认导出（主导出对话框）
-    async confirmExport() {
-      console.log('[Export] confirmExport called');
-
-      if (!this.analysisResult) {
-        this.$message.error('没有可导出的分析结果');
-        return;
-      }
-
-      try {
-        const XLSX = await import('xlsx');
-        const { saveAs } = await import('file-saver');
-
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-
-        console.log('[Export] exportOptions:', this.exportOptions);
-
-        // 导出 JSON
-        if (this.exportOptions.includes('json')) {
-          const jsonStr = JSON.stringify(this.analysisResult, null, 2);
-          const blob = new Blob([jsonStr], { type: 'application/json' });
-          saveAs(blob, `PERMANOVA 结果_${timestamp}.json`);
-          console.log('[Export] JSON exported');
-        }
-
-        // 导出 PERMANOVA 表：列与说明由 permanovaSheetSpec 给（视图不再手拼 workbook）
-        if (this.exportOptions.includes('permanovaTable')) {
-          await writeWorkbook(XLSX, pmResultSheets(this.analysisResult, {
-            stampText: new Date().toLocaleString(),
-            formula: this.permanovaParams.formula
-          }), pmResultFilename(timestamp));
-          console.log('[Export] PERMANOVA table exported');
-        }
-
-        // 导出 PCoA 坐标
-        if (this.exportOptions.includes('pcoaCoords') && this.analysisResult.pcoa) {
-          await writeWorkbook(XLSX, pmPcoaSheets(this.analysisResult), pmPcoaFilename(timestamp));
-          console.log('[Export] PCoA coordinates exported');
-        }
-
-        // 导出图表 PNG
-        if (this.exportOptions.includes('chartPNG')) {
-          const chartContainer = this.$refs.pcoaChart;
-          if (chartContainer) {
-            const echarts = await import('echarts');
-            const myChart = echarts.getInstanceByDom(chartContainer);
-            if (myChart) {
-              const url = myChart.getDataURL({
-                type: 'png',
-                pixelRatio: 2,
-                backgroundColor: '#ffffff'
-              });
-              saveAs(url, `分析图表_${timestamp}.png`);
-              console.log('[Export] Chart PNG exported');
-            }
-          }
-        }
-
-        this.showExportDialog = false;
-        this.$message.success('导出成功！');
-      } catch (error) {
-        console.error('[Export] Export error:', error);
-        this.$message.error('导出失败：' + error.message);
-      }
-    },
+    // 已删除：这里曾有第二个 confirmExport（硬编码版）。
+    // 同一个 methods 对象里重复键后者覆盖前者 —— 实际生效的是它，
+    // 于是 spec 驱动的那个永远不会被调用（JSON 导出就是这么没的）。
 
     // 导出事后检验结果：列与说明全部由 permanovaSheetSpec 给，视图不再手拼 workbook。
     // 以前这里把原始 p 写成「校正 p 值」导出 -- 拿到 xlsx 的人根本看不出那是假的。

@@ -129,15 +129,65 @@ console.log('\n=== 5. 文档类大文件要说明理由 ===');
   const big = tracked.map((f) => [f, (() => { try { return fs.statSync(path.join(ROOT, f)).size; } catch { return 0; } })()])
     .filter(([, s]) => s > 900 * 1024)
     .filter(([f]) => /\.(jsonl|zip|exe|dll|pdf)$/i.test(f));
-  if (big.length) {
-    const tot = big.reduce((a, [, s]) => a + s, 0);
-    warn(`仓库里有 ${big.length} 个会话/记录类大文件（共 ${(tot / 1048576).toFixed(1)} MB）`,
-      big.map(([f, s]) => `${f} ${(s / 1048576).toFixed(1)}MB`).join(', ') +
-      ' —— 若含本机绝对路径或对话内容，建议 git rm --cached 并加 ignore（注意：历史里仍然在，' +
-      '要真正缩小体积得改写历史或另起仓库）');
-  } else {
-    console.log('  ✓ 没有跟踪超过 900KB 的记录类文件');
+  // 用户已明确决定：development-doc 下的会话记录保留、不过滤、不删除。
+  // 那就写成白名单，而不是每次跑都提示一遍 —— 长期存在的提示等于没有提示，
+  // 它会把真正该看的新问题淹掉。要改这个决定，改这里并在提交说明里写原因。
+  const KEEP = ['2026-11-02T03-29-49-031Z_01a19a4e-5be5-7472-909a-cd373ef454eb.jsonl',
+    '2026-11-18T01-01-17-932Z_01a1ec2c-22ea-7781-a539-9c47845954c2.jsonl'];
+  const undeclared = big.filter(([f]) => !KEEP.some((k) => f.endsWith(k)));
+  check('没有未声明理由的大体积记录文件（已明确保留的两个除外）',
+    undeclared.length === 0,
+    undeclared.map(([f, s]) => `${f} ${(s / 1048576).toFixed(1)}MB`).join(', '),
+    '要么删掉，要么加进本文件的 KEEP 列表并写清为什么留');
+  console.log('  - 按你的决定保留：' + KEEP.length + ' 个会话记录（10.3MB，仍会在 git 历史里）');
+}
+
+console.log('\n=== 6. SFC 选项里不得有重复键（同名方法后者会静默覆盖前者）===');
+{
+  // 这就是今天那个"JSON 导不出"的真因：PERMANOVA.vue 的 methods 里有两个 confirmExport，
+  // 后面那个旧版把前面 spec 驱动的版本盖住了 —— 代码看着对，跑的却是死的那份。
+  // 这种错不会报错、不会红，只能结构上看出来。
+  const vues = [];
+  const walk = (d) => {
+    if (!fs.existsSync(d)) return;
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { if (e.name !== 'node_modules' && e.name !== 'dist') walk(p); }
+      else if (e.name.endsWith('.vue')) vues.push(p);
+    }
+  };
+  walk(path.join(ROOT, 'frontend', 'src'));
+  const bad = [];
+  // 上一版正则太宽：把 `rgba(`、`if (`、不同对象里同名的 `chartData: (` 都当成方法了。
+  // 方法定义的形状很窄：名字 + 参数表 + 行尾左花括号，且不是关键字。
+  const KW = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'else', 'do', 'try', 'new', 'await', 'typeof']);
+
+  for (const f of vues) {
+    const txt = fs.readFileSync(f, 'utf8');
+    // 必须按块分组：computed 里的 chartData 与 watch 里的 chartData 是两个不同的东西
+    // （后者在监听前者）—— 上一版不分块，把这种止常写法报成了重复键。
+    const seen = new Map(); const dup = new Set();
+    let blk = '';
+    let depth = 0;
+    for (const raw of txt.split(String.fromCharCode(10))) {
+      const bm = raw.match(/^ {2}([A-Za-z0-9_$]+)\s*:\s*[{[]/);
+      if (bm && depth === 0) { blk = bm[1]; depth = 1; continue; }
+      if (depth > 0 && /^ {2}\},?$/.test(raw)) { blk = ''; depth = 0; }
+      if (!blk) continue;
+      const mm = raw.match(/^ {4}(?:async )?([A-Za-z0-9_$]+)\s*\([^()]*\)\s*\{\s*$/)
+        || raw.match(/^ {4}([A-Za-z0-9_$]+):\s*(?:async\s+)?(?:function\s*)?\([^()]*\)\s*\{\s*$/);
+      if (!mm || KW.has(mm[1])) continue;
+      const key = blk + '.' + mm[1];
+      if (seen.has(key)) dup.add(key); else seen.set(key, true);
+    }
+    // 顶层选项重复（两个 methods: { ）另算
+    const tops = [...txt.matchAll(/^ {2}([A-Za-z0-9_$]+)\s*:\s*[{[]/gm)].map((m) => m[1]);
+    const tseen = new Set(); const tdup = new Set();
+    for (const t of tops) { if (tseen.has(t)) tdup.add(t + ' (顶层选项块重复)'); tseen.add(t); }
+    if (dup.size || tdup.size) bad.push(path.relative(ROOT, f) + ' [' + [...dup, ...tdup].join(',') + ']');
   }
+  check(vues.length + ' 个 .vue 都没有重复的方法/选项键', bad.length === 0, bad.join(' ; '),
+    '删掉旧的那份：重复键后者静默覆盖前者，留着的就是一份骗人死代码');
 }
 
 console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);
