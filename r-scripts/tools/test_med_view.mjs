@@ -246,6 +246,25 @@ console.log('\n=== 5. 外壳 props 契约 ===');
   check('不再用 Sheets[\'Outcome\'] 精确取表', !/Sheets\['Outcome'\]/.test(src));
 }
 
+console.log('\n=== 6. \u6837\u672c\u91cf\u529f\u6548\u63d0\u793a\uff08\u4e0d\u80fd\u7b49\u8dd1\u5b8c\u624d\u8bf4\uff09===');
+{
+  const vm = makeVm();
+  check('powerHint 存在于 computed', 'powerHint' in comp.computed, Object.keys(comp.computed).join(','));
+  vm.permanovaMedParams.mediatorN = 60;
+  check('n=60 不提示（够样本就不要碎碎念）', vm.powerHint === '', vm.powerHint);
+  vm.permanovaMedParams.mediatorN = 17;
+  check('n=17 提示“可以跑但功效偏低”', /n=17/.test(vm.powerHint) && /20/.test(vm.powerHint), vm.powerHint);
+  vm.permanovaMedParams.mediatorN = 10;
+  check('n=10 提示“很可能报不显著”并给出建议值',
+    /n<15/.test(vm.powerHint) && /n=10/.test(vm.powerHint) && /20/.test(vm.powerHint), vm.powerHint);
+  vm.permanovaMedParams.mediatorN = null;
+  vm.permanovaMedParams.outcomeDataStr = '';
+  check('\u6ca1\u586b\u6570\u636e\u65f6\u4e0d\u7f16\u9020\u63d0\u793a\uff08n \u672a\u77e5\u5c31\u95ed\u5634\uff09', vm.powerHint === '', vm.powerHint);
+  const src = fs.readFileSync(VIEW, 'utf8');
+  check('\u63d0\u793a\u786e\u5b9e\u6e32\u67d3\u5728\u8fd0\u884c\u6309\u94ae\u9644\u8fd1\uff08\u4e0d\u662f\u5199\u4e86\u6ca1\u7528\uff09',
+    /v-if="canRunAnalysis && powerHint"/.test(src), '');
+}
+
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }
 fs.writeFileSync(path.join(TMP, 'noop'), '');

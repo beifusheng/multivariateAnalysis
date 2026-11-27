@@ -31,7 +31,8 @@
     "build-m": "npm run build && ee-bin build --cmds=mac_arm64",
     "build-m-x86": "npm run build && ee-bin build --cmds=mac",
     "build-m-arm64": "ee-bin build --cmds=mac_arm64",
-    "build-l": "npm run build && ee-bin build --cmds=linux"
+    "build-l": "npm run build && ee-bin build --cmds=linux",
+    "verify:fast": "node r-scripts/tools/run_all_tests.mjs --fast"
   },
   "repository": "https://github.com/dromara/electron-egg.git",
   "keywords": [

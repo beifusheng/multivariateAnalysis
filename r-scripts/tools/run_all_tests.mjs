@@ -9,6 +9,7 @@
  *   node r-scripts/tools/run_all_tests.mjs --node     # 只跑 node（快，不起 R 分析）
  *   node r-scripts/tools/run_all_tests.mjs --r        # 只跑 R 尺子
  *   node r-scripts/tools/run_all_tests.mjs --only era # 名字含 era 的都跑
+ *   node r-scripts/tools/run_all_tests.mjs --fast     # 跳过 R 尺子与慢套件（约 3 分钟）
  *   node r-scripts/tools/run_all_tests.mjs --strict   # 把 stderr 也打出来（排错用）
  *
  * 退出码：0 全过；1 有套件失败
@@ -23,7 +24,12 @@ const TOOLS = path.join(ROOT, 'r-scripts', 'tools');
 const args = process.argv.slice(2);
 const onlyNode = args.includes('--node');
 const onlyR = args.includes('--r');
+// --fast：提交前的快跑档。跳过 R 尺子与实测耗时 >90s 的套件（数字是这台机器上
+// 连续跑出来的，不是估的：e2e 约 200s、era_view 121s、med_templates 99s）。
+// 它只用于"先确认没大面积改坏"，交付前的完整门槛仍然是不带 --fast 的那条。
+const SLOW = new Set(['test_e2e_gui.mjs', 'test_era_view.mjs', 'verify_med_templates.mjs']);
 const strict = args.includes('--strict');
+const fast = args.includes('--fast');
 const iOnly = args.indexOf('--only');
 const filter = iOnly >= 0 ? String(args[iOnly + 1] || '').toLowerCase() : '';
 
@@ -90,12 +96,13 @@ function run(kind, name, cmd, cargs, opts = {}) {
 }
 
 const wantNode = !onlyR;
-const wantR = !onlyNode;
+const wantR = !onlyNode && !fast;
 
 if (wantNode) {
   console.log('\n=== node 套件（视图渲染 / spec 对账 / 运行时链路）===');
   for (const f of nodeSuites) {
     if (filter && !f.toLowerCase().includes(filter)) continue;
+    if (fast && SLOW.has(f)) { console.log(`  - 跳过（--fast）${f}`); continue; }
     run('node', f, process.execPath, [path.join(TOOLS, f)]);
   }
 }

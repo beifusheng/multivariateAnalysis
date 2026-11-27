@@ -1014,7 +1014,9 @@ export default {
         for (const job of jobs) {
           if (job.type === 'xlsx') await writeWorkbook(await this.xlsx(), job.sheets, job.filename);
           else if (job.type === 'json') await this.saveJson(job.filename, job.data);
-          else await this.exportPng(job.filename);
+          // 勾一次导出把五张图都给：以前只导得出“当前正在看的那张”，
+          // 用户得手动切五次 tab —— 而界面看上去像是“只能导一张”。
+          else await this.exportAllCharts(job.filename);
         }
         this.showExportDialog = false;
         this.$message.success(`已导出 ${jobs.length} 项`);
@@ -1070,6 +1072,42 @@ export default {
     },
 
     /** 只导得出正在看的那张图：其它 tab 还没实例化 */
+    /**
+     * 把所有图表都导出来：同一个容器按 tab 重新渲染，逐张取实例、取 PNG。
+     * 细节：
+     *  - 导出完把 tab 恢复到用户原来看的那张，不能把人留在最后一张；
+     *  - 文件名用 id 不用标签：标签带 emoji，进到文件名对压缩与命令行工具不友好；
+     *  - 每张之间留一个短暂等待：echarts 有动画，下一帧才拿得到完整画面。
+     */
+    async exportAllCharts(baseFilename) {
+      const echarts = await import('echarts');
+      const { saveAs } = await import('file-saver');
+      const types = this.chartTypes || [];
+      if (!this.analysisResult) throw new Error('\u8fd8\u6ca1\u6709\u5206\u6790\u7ed3\u679c\uff0c\u56fe\u8868\u8fd8\u6ca1\u751f\u6210');
+      const prev = this.activeChartType;
+      const stamp = this.stamp();
+      const done = [];
+      for (const t of types) {
+        this.activeChartType = t.id;
+        this.handleChartTypeChange();
+        await this.$nextTick();
+        await new Promise((r) => setTimeout(r, 320));
+        const el = this.$refs.pcoaChart;
+        const chart = el && echarts.getInstanceByDom(el);
+        if (!chart) continue;
+        const url = chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#ffffff' });
+        const bytes = Uint8Array.from(atob(url.split(',')[1]), (c) => c.charCodeAt(0));
+        const safe = String(t.id || done.length).replace(/[^A-Za-z0-9_.-]/g, '');
+        saveAs(new Blob([bytes], { type: 'image/png' }), `\u5206\u6790\u56fe\u8868_${safe}_${stamp}.png`);
+        done.push(t.id);
+      }
+      // 恢复现场
+      this.activeChartType = prev;
+      this.handleChartTypeChange();
+      if (!done.length) throw new Error('\u6ca1\u6709\u4efb\u4f55\u56fe\u8868\u5b9e\u4f8b\u53ef\u5bfc\u51fa');
+      return done;
+    },
+
     async exportPng(filename) {
       const el = this.$refs.pcoaChart;
       if (!el) throw new Error('图表还没渲染');

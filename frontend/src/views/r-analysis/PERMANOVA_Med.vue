@@ -340,6 +340,14 @@
             </el-icon>
             <span>请确保所有数据有效</span>
           </span>
+          <!-- 功效提示：n<6 引擎会直接拒单（那边有报错），这里只管“能跑但功效不够”那段。
+               以前这句话只在跑完失败后才看得到 —— 用户白等一轮置换才知道自己样本不够。 -->
+          <span v-if="canRunAnalysis && powerHint" class="run-hint power-hint">
+            <el-icon>
+              <InfoFilled />
+            </el-icon>
+            <span>{{ powerHint }}</span>
+          </span>
         </div>
 
         <!-- 结果展示（与 PERMANOVA 一致：放在 config-section 内部，共用同一张白卡片） -->
@@ -617,6 +625,19 @@ export default defineComponent({
         this.permanovaMedParams.mediatorDataValid &&
         this.permanovaMedParams.predictorDataValid &&
         !this.permanovaMedParams.sampleMismatch;
+    },
+    /**
+     * 样本量功效提示（不阻断运行，只把人该知道的事提前说）：
+     * LDM 的多元置换在 n<=4 直接崩、n=5 随机崩，引擎那层会硬拒；
+     * 而 6<=n<20 这段是“能跑但很可能报不显著”，不说就等于埋着。
+     */
+    powerHint() {
+      const raw = this.permanovaMedParams.mediatorN ?? this.refSampleN('outcomeDataStr');
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n <= 0) return '';
+      if (n >= 20) return '';
+      if (n >= 15) return `当前样本数 n=${n}：可以跑，但中介检验功效仍偏低（建议 n\u226520）`;
+      return `当前样本数 n=${n}：能跑完，但 n<15 时即使真有效应也很可能报不显著（建议 n\u226520）`;
     }
   },
 

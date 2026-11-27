@@ -15,6 +15,11 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const readSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
+// 剔掉注释行：文本匹配命中注释是本项目的老毛病（判据打在文档/自身源码上假红假绿都有）。
+// 只要“行”层面的过滤就够：本仓库的代码不存在行内拼接注释的写法。
+const codeOnly = (txt) => txt.split(String.fromCharCode(10))
+  .filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*') && !l.trim().startsWith('/*'))
+  .join(String.fromCharCode(10));
 // 待查的模式用拼接构造：上一版我把字面量直接写在本文件里，
 // 结果这个套件**匹配到了自己的源码**，报了一个自指误报。
 const EXAMPLE_DIR = ['views', 'example'].join('/');
@@ -188,6 +193,36 @@ console.log('\n=== 6. SFC 选项里不得有重复键（同名方法后者会静
   }
   check(vues.length + ' 个 .vue 都没有重复的方法/选项键', bad.length === 0, bad.join(' ; '),
     '删掉旧的那份：重复键后者静默覆盖前者，留着的就是一份骗人死代码');
+}
+
+console.log('\n=== 7. 已定的决定要落在机器可见的地方\uff08防止后来人把它当漏接去补上）===');
+{
+  // 这一节存的不是代码质量，是人的决定。没有它们，下一个改代码的人
+  // 会把“空着的 publish”当漏接的功能去补，或者又把 lockfile 删了。
+  const main = readSafe(path.join(ROOT, 'electron/main.ts'));
+  const callers = [];
+  const walkDir = (d) => {
+    for (const e of fs.readdirSync(path.join(ROOT, d), { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walkDir(p);
+      else if (/\.(ts|js)$/.test(e.name) && /autoUpdater\s*\.\s*\w+|from 'electron-updater'|require\('electron-updater'\)/.test(codeOnly(readSafe(path.join(ROOT, p))))) callers.push(p);
+    }
+  };
+  walkDir('electron');
+  check('\u81ea\u52a8\u66f4\u65b0\uff1aelectron/ \u91cc\u786e\u5b9e\u6ca1\u6709\u63a5\u7ebf\uff08\u4ea7\u54c1\u51b3\u5b9a\uff1a\u4e0d\u505a\uff09',
+    callers.length === 0, callers.join(','));
+  check('\u4f46\u8fd9\u4e2a\u51b3\u5b9a\u5199\u8fdb\u4e86\u4ee3\u7801\u6ce8\u91ca\uff08\u5426\u5219\u770b\u8d77\u6765\u50cf\u6f0f\u63a5\uff09',
+    /publish[^"]{0,40}\u5360\u4f4d|\u4e0d\u505a/.test(main), 'main.ts \u91cc\u6ca1\u627e\u5230\u8bf4\u660e');
+
+  check('package-lock.json 在（npm run setup:js:frozen 依赖它）',
+    fs.existsSync(path.join(ROOT, 'package-lock.json')),
+    '\u8dd1 npm install --package-lock-only \u751f\u6210');
+  check('\u4ed3\u5e93\u91cc\u4e0d\u518d\u6709 yarn.lock\uff08\u53cc lockfile \u5df2\u5b9e\u6d4b\u6f02\u79fb 835/941 \u884c\uff09',
+    !fs.existsSync(path.join(ROOT, 'yarn.lock')) && !tracked.includes('yarn.lock'), '');
+
+  // 用户决定：public/dist 先入库（短期很少重新构建）—— 写住，别被当成失误删了
+  check('public/dist \u4ea7\u7269\u5165\u5e93\uff08\u7528\u6237\u51b3\u5b9a\uff0c\u4fbf\u4e8e\u65e0\u9700\u6784\u5efa\u5373\u53ef\u8dd1\uff09',
+    tracked.some((f) => f.startsWith('public/dist/')), '\u82e5\u8981\u6539\u4e3a\u4e0d\u5165\u5e93\uff0c\u540c\u6b65\u6539\u672c\u5224\u636e\u4e0e README');
 }
 
 console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);

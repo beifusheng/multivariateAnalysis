@@ -32,10 +32,16 @@ PowerShell 5.x 不支持 `&&`。这一步交给 `r-scripts/tools/install_deps.mj
 
 | 文件 | 作用 |
 | --- | --- |
-| `r-runtime.lock.json` | 177 个包的精确版本 + 每个模块需要哪些包 + R 最低版本 |
+| `r-runtime.lock.json` | **R 侧的 package-lock**：177 个包的精确版本 + 每个模块需要哪几个包 + R 最低版本 + 运行时从哪下载 |
 | `scripts/setup-r-runtime.ps1` | 唯一装配入口（4 种来源，自动校验） |
 | `r-scripts/tools/verify_r_runtime.R` | 校验运行时是否满足 lockfile（含两个真实冒烟分析） |
 | `r-scripts/tools/export_r_lockfile.R` | 从"这台跑通过的机器"重新导出 lockfile |
+
+为什么需要这份文件：`r-portable/` 有 600MB / 六十万个文件，**不能进 git**
+（进过一次，把 LFS 挤挂了）；但统计结果必须可复现，而 `vegan` 跨版本会改置换实现 ——
+“用户装的是哪个版本”直接决定他算出来的 p 值能不能对上。所以本项目把运行时
+当**依赖**而不当环境：版本写进 lockfile，装配走统一入口，验收走 R 尺子。
+一句话：它就是 **R 版的 `package-lock.json`**。
 
 ```bash
 npm run setup:r           # 依次尝试 verify -> fromRelease -> fromRepos，并说清下一步该做什么
@@ -175,10 +181,34 @@ X→M→Y 拆成直接 / 间接 / 总三条通路，每个格子给后验均值�
 ## 3. 验证（这些命令是真能跑的）
 
 ```bash
-npm run verify            # 全部：24 个 node 套件 + 4 个 R 尺子
+npm run verify            # 全部：27 个 node 套件（含 GUI 端到端）+ 6 个 R 尺子
 npm run verify:js         # 只跑 node（视图渲染 / spec 对账 / 运行时链路）
 npm run verify:r          # 只跑 R 尺子（统计口径的已知答案）
 npm run verify:one era    # 名字含 era 的都跑
+npm run verify:fast         # 只跑快套件（跳 R 尺子与三个慢件，约 3 分钟）
+```
+
+### 3.1 GUI 端到端（真应用 + 真鼠标）
+
+`test_e2e_gui.mjs`（28 项）**真启动 `electron.exe`**，用 CDP 驱动真实 DOM：
+首页卡片 → 路由 → 点模板 → 数据填入 → 运行按钮自动可用 → 真 R 出数
+→ 展开侧工具栏 → 导出对话框 → **断言 json / xlsx / 五张 PNG 真的落到磁盘**
+（下载目录用 `Page.setDownloadBehavior` 指到临时目录），并监控全程页面异常。
+
+之所以要做这一层：「导出的 JSON 根本不落地」「安装包里是脚手架页面」
+这类问题在源码断言里全是绿的 —— 代码写得对、配置也写了，
+只有真点一次才会露馏。它已抓到的真缺陷：
+
+- `frontend/index.html` 的 `<title>` 是空的 —— 标题栏到底显示什么，只有真开窗口才知道；
+- 侧工具栏收起时靠 `visibility:hidden`，而 **`innerText` 会尊重 CSS 可见性返回空串**，
+  于是「按文字找按钮」直接失效。jsdom 不做这层过滤，永远发现不了这一类问题。
+
+单独跑：
+
+```bash
+node r-scripts/tools/test_e2e_gui.mjs            # 完整端到端（含真分析，约 3 分钟）
+node r-scripts/tools/test_e2e_gui.mjs --skip-run # 只验渲染与标题（快）
+node r-scripts/tools/test_e2e_gui.mjs --keep     # 跑完不关窗口，便于人工查看
 ```
 
 | 尺子 | 项数 | 关键锚点 |
@@ -293,27 +323,29 @@ out-proof/win-unpacked/multivariateAnalysis.exe                              ←
 > 我第一轮只加了 `asarUnpack`，结果 `app.asar.unpacked` 压根没生成 ——
 > 光看配置会以为是对的，这就是为什么 §5 的判据要求两者**成对存在**。
 
-> 上一轮之前更糟：主进程里把搜索根**写成了开发机的绝对路径**，且 `r-scripts` 根本没进打包清单
-> —— 开发机上两者恰好都能命中，所以从来没人发现。
+> ✅ **完整安装包已产成并验证可用**：`out/multivariateAnalysis-win-5.0.0-x64.exe`
+> （**342 MB** ✓ 附 `latest.yml` ✓），安装后运行、分析、导出（JSON / xlsx / 图表）均正常。
+> 本机当时无外网，用的是 `npm run build-w:offline`；有网机器直接 `npm run build-w` 即可。
 
 ---
 
 ## 6. 当前未完成 / 已知边界
 
-诚实清单（都有 grep 依据，不是免责套话）：
+诚实清单（都有依据，不是免责套话）：
 
-- 导出已全部走 spec（五个视图都是 `writeWorkbook(...)`，视图里不再有 `json_to_sheet` /
-  `book_append_sheet`）—— 这条原本在待办里，本轮做完并从清单移除了。
-- 打包链已实测通过（`build-w:offline` 产出 `out/win-unpacked`，用包内 R 跑包内脚本得到与开发态一致的统计量）；
-  但 **没有真正启动过 GUI 安装包**，也没跑完整 nsis 安装流程（本次用 `--dir` 只出解包目录）。
+- **已完成并移出清单**：五个视图的导出全部走 spec；打包链三环节已接通，
+  并已产出 **342 MB 安装包且安装验证可用**；六通道运行时链路已测（`test_ipc_chain.mjs` 30 项）。
+- **GUI 层已有端到端自动化**：`test_e2e_gui.mjs`（28 项）用本地 `electron.exe` + CDP
+  真启动应用、真点鼠标（详 §3.1）。它抓到的均为真缺陷：空 `<title>`、
+  侧工具栏收起时 `innerText` 为空导致“按文字找按钮”失效、导出只能导当前 tab。
+  仍缺的：**逐格对比 xlsx 内容 vs 界面显示**的断言（现在只断言文件落地与 JSON 字段）。
+- 自动更新：**产品决定不做**，`publish` 只是占位；决定同时写在 `electron/main.ts`
+  注释与 `test_repo_hygiene.mjs` §7，防止后来人把它当漏接去补。
 - `r-runtime.lock.json` 的 `release.url` / `sha256` 仍为 `null` → 新开发者 clone 后只能用
-  `-Mode fromLocal` 或 `-Mode fromRepos` 装配 R。
-- 导出已全部走 spec（五个视图都是 `writeWorkbook(...)`，视图里不再有 `json_to_sheet` /
-  `book_append_sheet`）—— 这条原本在待办里，本轮做完并从清单移除了。仍然缺的是：
-  **导出内容与界面显示的一致性**只有源码级断言，没有"打开 xlsx 逐格核对"的运行时测试。
-- 运行时链路测试（`test_ipc_chain.mjs`，30 项）覆盖 6 个通道到"引擎出数"，
-  但没有覆盖 Electron 主进程真实启动（`ElLoading` 那层需要浏览器 DOM）。
+  `-Mode fromLocal` 或 `fromRepos` 装配 R（不影响最终用户：运行时已随包分发）。
 - 分项（边际）检验只给了 PERMANOVA 主引擎；`permanova_med` / `nonrandom` 语义不同，不照搬。
+- 图表 PNG 现在一次导出五张（不再需要手动切 tab）；导出过程中会临时切 tab 再恢复，
+  某张图因数据不足渲染不出时会被跳过而不报错。
 
 ---
 
