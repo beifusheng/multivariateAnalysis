@@ -138,13 +138,20 @@ console.log('\n=== 5. 文档类大文件要说明理由 ===');
   // 那就写成白名单，而不是每次跑都提示一遍 —— 长期存在的提示等于没有提示，
   // 它会把真正该看的新问题淹掉。要改这个决定，改这里并在提交说明里写原因。
   const KEEP = ['2026-11-02T03-29-49-031Z_01a19a4e-5be5-7472-909a-cd373ef454eb.jsonl',
-    '2026-11-18T01-01-17-932Z_01a1ec2c-22ea-7781-a539-9c47845954c2.jsonl'];
+    '2026-11-18T01-01-17-932Z_01a1ec2c-22ea-7781-a539-9c47845954c2.jsonl',
+    // 2026-11-20 起那段（统计引擎重写 + 打包链 + GUI 端到端），用户要求留档。
+    '2026-11-20T02-53-16-220Z_01a1f6df-5e38-70f1-9dc8-eb85035eb28f.jsonl'];
   const undeclared = big.filter(([f]) => !KEEP.some((k) => f.endsWith(k)));
-  check('没有未声明理由的大体积记录文件（已明确保留的两个除外）',
+  check('\u6ca1\u6709\u672a\u58f0\u660e\u7406\u7531\u7684\u5927\u4f53\u79ef\u8bb0\u5f55\u6587\u4ef6\uff08\u5df2\u660e\u786e\u4fdd\u7559\u7684\u9664\u5916\uff09',
     undeclared.length === 0,
     undeclared.map(([f, s]) => `${f} ${(s / 1048576).toFixed(1)}MB`).join(', '),
     '要么删掉，要么加进本文件的 KEEP 列表并写清为什么留');
-  console.log('  - 按你的决定保留：' + KEEP.length + ' 个会话记录（10.3MB，仍会在 git 历史里）');
+  // 数字从实际文件算，不写死：上一版这里我写的是“3 个 / 10.3MB”，
+  // 加了第四个会话后它就在说谎 —— 硬编码的统计值比没有统计值更坑。
+  const keptBig = big.filter(([f]) => KEEP.some((k) => f.endsWith(k)));
+  const keptMb = (keptBig.reduce((a, [, s]) => a + s, 0) / 1048576).toFixed(1);
+  console.log('  - ' + '\u6309\u7528\u6237\u51b3\u5b9a\u4fdd\u7559\uff1a' + keptBig.length + ' \u4e2a\u4f1a\u8bdd\u8bb0\u5f55\uff08\u5171 ' + keptMb +
+    'MB\uff0c\u4ecd\u4f1a\u5728 git \u5386\u53f2\u91cc\uff09');
 }
 
 console.log('\n=== 6. SFC 选项里不得有重复键（同名方法后者会静默覆盖前者）===');

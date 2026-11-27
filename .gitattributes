@@ -5,3 +5,7 @@ r-portable/**/*.rdb filter=lfs diff=lfs merge=lfs -text
 r-portable/**/*.rdx filter=lfs diff=lfs merge=lfs -text
 r-portable/**/*.dat filter=lfs diff=lfs merge=lfs -text
 r-portable/**/*.html filter=lfs diff=lfs merge=lfs -text
+
+# 会话转录必须字节一致퟿���development-doc/README.md 承诺“不压缩、不改写”퟿���
+# 而 git 默认会把 LF 换成 CRLF퟿���提交时那句警告퟿���——那就是改写了。
+*.jsonl text=false
