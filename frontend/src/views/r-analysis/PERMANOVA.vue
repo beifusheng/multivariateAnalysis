@@ -225,7 +225,7 @@
       <div class="result-content">
         <table class="rs-table" v-if="resultTerms.length">
           <thead>
-            <tr><th>术语</th><th>Df</th><th>SumOfSqs</th><th>R²</th><th>F</th><th>p</th></tr>
+            <tr><th>项</th><th>Df</th><th>SumOfSqs</th><th>R²</th><th>F</th><th>p 值</th></tr>
           </thead>
           <tbody>
             <tr v-for="t in resultTerms" :key="t.term">
@@ -246,7 +246,7 @@
           <h4 class="rs-subtitle">分项（边际）检验</h4>
           <table class="rs-table">
             <thead>
-              <tr><th>公式项</th><th>Df</th><th>SumOfSqs</th><th>R²</th><th>F</th><th>p</th></tr>
+              <tr><th>公式项</th><th>Df</th><th>SumOfSqs</th><th>R²</th><th>F</th><th>p 值</th></tr>
             </thead>
             <tbody>
               <tr v-for="t in perTermRows" :key="'pt-' + t.term">
@@ -478,7 +478,7 @@ import ImportDialog from '@/components/r-analysis/ImportDialog.vue';
 import ExportDialog from '@/components/r-analysis/ExportDialog.vue';
 import { readWorkbook, mapWorkbook, previewFromFields, writeWorkbook, templateFilename, fileStamp } from '@/utils/sheetIo';
 import { makeFormatters } from '@/utils/format';
-import { pmPosthocSheets, pmPosthocFilename, pmResultSheets, pmPcoaSheets, pmResultFilename, pmPcoaFilename } from '@/utils/permanovaSheetSpec';
+import { pmPosthocSheets, pmPosthocFilename, pmResultSheets, pmPcoaSheets, pmResultFilename, pmPcoaFilename, pmRowLabel } from '@/utils/permanovaSheetSpec';
 
 const FORMATTERS = makeFormatters();
 
@@ -699,10 +699,9 @@ export default {
     resultTerms() {
       const rows = (this.analysisResult && this.analysisResult.permanova_result) || [];
       // 行名用引擎给的 _row（adonis2 单术语时是 Model / Residual / Total）。
-      // 不读 _row 就只能显示“顼 1 / 顼 2 / 顼 3”，用户分不清哪行是检验、哪行是残差。
-      const NAME = { Model: '整模型（所有项合起来）', Residual: '残差', Total: '总计' };
+      // 不读 _row 就只能显示“项 1 / 项 2 / 项 3”，用户分不清哪行是检验、哪行是残差。
       return rows.map((r, i) => ({
-        term: NAME[r._row] || r._row || r.term || r.Variable || `顼 ${i + 1}`,
+        term: pmRowLabel(r, i),
         Df: r.Df,
         SumOfSqs: r.SumOfSqs,
         R2: r.R2,
@@ -1000,7 +999,14 @@ export default {
 
     /** 勾选 -> 任务表（内容与文件名全在 spec 里算，这里不拼） */
     exportJobs(keys) {
-      return planExport(keys || this.exportOptions, { analysisResult: this.analysisResult, params: this.permanovaParams }, this.stamp());
+      return planExport(keys || this.exportOptions, {
+        analysisResult: this.analysisResult,
+        params: this.permanovaParams,
+        // 说明表要写导出时间与公式：这两个值得从视图传进去，
+        // 否则 spec 写出来的「导出时间」是空白（接上 pmResultSheets 后才露出来）
+        stampText: new Date().toLocaleString(),
+        formula: this.permanovaParams.formula
+      }, this.stamp());
     },
 
     async confirmExport() {

@@ -68,7 +68,7 @@ const stripComments = (src) => {
   return out;
 };
 
-const { sheetIo } = await loadFrontendUtils(['sheetIo']);
+const { sheetIo, permanovaSheetSpec: pmSpec } = await loadFrontendUtils(['sheetIo', 'permanovaSheetSpec']);
 
 const DIST = [
   ['样本', 'S1', 'S2', 'S3', 'S4'],
@@ -286,6 +286,15 @@ console.log('\n=== 4. 导出任务表 ===');
       jobs.map((j) => j.filename.split('_')[0]).join('|') === 'PERMANOVA 结果|PERMANOVA 表|PCoA 坐标|分析图表|PERMANOVA 输入',
       jobs.map((j) => j.filename).join(' , '));
     check('[新] 未知 key 不出空文件', vm.exportJobs(['nope']).length === 0);
+
+    // 表头必须与导出的 spec 列名一致：GUI 逐格对比发现过“界面叫术语、表里叫项”。
+    const viewTxt = fs.readFileSync(VIEW, 'utf8');
+    const heads = [...viewTxt.matchAll(/<tr><th>([^<]+)<\/th><th>Df<\/th><th>SumOfSqs<\/th><th>R²<\/th><th>F<\/th><th>([^<]+)<\/th><\/tr>/g)]
+      .map((m) => [m[1], m[2]]);
+    check('[新] 视图两张表的表头与 spec 的 PM_RESULT_COLUMNS 对齐',
+      heads.length === 2 && heads.every((h) => h[1] === 'p \u503c') &&
+        (heads[0][0] === pmSpec.PM_RESULT_COLUMNS[0] || heads[1][0] === pmSpec.PM_RESULT_COLUMNS[0]),
+      JSON.stringify(heads) + ' vs ' + JSON.stringify(pmSpec.PM_RESULT_COLUMNS));
 
     // 今天那个“JSON 没导出来”的真因不是 spec，是 methods 里写了两个 confirmExport：
     // 后一个（硬编码旧版）把前一个（走 spec 的）盖住了 —— 计划算得再对也没人执行。
@@ -733,9 +742,15 @@ console.log('\n=== 8. 新模板 factorFormula：从按钮一路跑到两个引�
       /不是第一个变量的结果/.test(pmViewSource), '');
   check('多因子却没拿到分项时要出警告（不能静默只给整模型一行）',
     /multiTermFormula/.test(pmViewSource) && /但没拿到分项结果/.test(pmViewSource), '');
-  check('Model 行的标签不写「模型（公式项）」这种会被读成第一个变量的措辞',
-    !/Model:\s*'模型（公式项）'/.test(pmViewSource) &&
-      /Model:\s*'整模型（所有项合起来）'/.test(pmViewSource), '');
+  // 行名表已下沉到 spec（PM_ROW_LABELS），视图只负责调用 pmRowLabel()。
+  // 上一版这里直接抓视图源码里的 `Model: '…'` 字面量，我把表一搬走它就假红 ——
+  // 判据应该钉在事实发源处，而不是某个曾经巧合持有它的文件。
+  const specSrc = fs.readFileSync(path.join(FRONTEND, 'src/utils/permanovaSheetSpec.js'), 'utf8');
+  check('Model 行的行名说“整模型”，且导出与界面共用同一份表',
+    /整模型/.test(pmSpec.PM_ROW_LABELS.Model) &&
+      !/模型（公式项）/.test(pmSpec.PM_ROW_LABELS.Model) &&
+      /pmRowLabel\(r, i\)/.test(pmViewSource) && /pmRowLabel/.test(specSrc),
+    JSON.stringify(pmSpec.PM_ROW_LABELS));
 
   // 导出表：列名不再是 R 字段原名（_row / F_model），且说明里写明 by=NULL 的坑
   const specX = await server.ssrLoadModule('/src/utils/permanovaSheetSpec.js');
@@ -963,7 +978,7 @@ console.log('\n=== 9. 运行时链路：api 白名单 -> ipc 桩 -> 真 R 引擎
 // （加/删判据时必须同时改这里 —— 这正是我要的那种"想起来就疼"）
 // 上一轮加了 3 条 confirmExport 的判据却没同步这个数 —— 计数锁当场把退出码弄成 1，
 // 而它做的事正是宣布“有判据多出来/没跑到”。这就是我要的那种“想起来就疼”。
-const EXPECT_TOTAL = 156;
+const EXPECT_TOTAL = 157;
 
 // 顺序要紧：汇总行必须最后打印。上一版它在计数锁之前，于是先喊“0 失败”
 // 再判失败 —— 汇总在骗人，靠 run_all_tests 的“退出码与汇总不一致”交叉检查才置住。

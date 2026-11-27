@@ -21,11 +21,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require_ = createRequire(path.join(ROOT, 'package.json'));
+// xlsx / ws 分别装在 frontend 与根目录：锚点搞错就 Cannot find module（上一版就栽在 xlsx 上）
+const require_fe = createRequire(path.join(ROOT, 'frontend', 'package.json'));
 const WebSocket = require_('ws');
 
 const isWin = process.platform === 'win32';
@@ -192,14 +194,28 @@ if (target) {
     if (enabled) {
       await js('document.querySelector(".btn-run").click(); 1');
       const got = await waitJs(
-        '/0\\.5898/.test(document.body.innerText) ? "shown" : 0', RUN_MS, 'result');
-      check('\u70b9\u8fd0\u884c -> IPC -> \u771f R -> \u754c\u9762\u51fa\u73b0 R\u00b2=0.5898\uff08\u7aef\u5230\u7aef\uff09',
-        got === 'shown', 'result=' + got);
+        '(() => { const n = document.querySelector(".rs-nums");' +
+        ' if (n && /0\.589/.test(n.textContent)) return "shown";' +
+        ' const e = document.querySelector(".el-message--error");' +
+        ' if (e && e.textContent.trim()) return "err:" + e.textContent.trim().slice(0, 160);' +
+        ' return 0; })()',
+        RUN_MS, 'result');
+      if (got !== 'shown') {
+        // 失败原因不能只靠猜：把当前所有可见提示与 loading 状态一起打出来。
+        const diag = await js('(() => { const ms = Array.from(document.querySelectorAll(".el-message")).map(x=>x.textContent.trim());' +
+          ' const ld = !!document.querySelector(".el-loading-mask");' +
+          ' const tbl = document.querySelectorAll("table.rs-table").length;' +
+          ' return JSON.stringify({ messages: ms, loading: ld, tables: tbl, hash: location.hash }); })()');
+        console.log('  \u8bca\u65ad\uff1a' + String(diag));
+      }
+      check('\u70b9\u8fd0\u884c -> IPC -> \u771f R -> \u7ed3\u679c\u533a\u51fa\u73b0 R\u00b2=0.589',
+        got === 'shown', String(got));
     }
   } else {
     console.log('  - \u8df3\u8fc7\u771f\u5206\u6790\uff08--skip-run\uff09');
   }
 
+  let files = [];   // §4 与 §4.6 都要用，声明在外层（上一版把它关在 if 块里，引用不到）
   console.log('\n=== 4. \u5bfc\u51fa\uff1a\u6587\u4ef6\u5fc5\u987b\u771f\u843d\u5730 ===');
   if (!SKIP_RUN) {
     // 侧工具栏默认收起，收起时靠 visibility:hidden 藏 —— innerText 会尊重 CSS
@@ -229,7 +245,7 @@ if (target) {
     check('\u70b9\u5bf9\u8bdd\u6846\u91cc\u7684"\u5bfc\u51fa"\u786e\u8ba4', conf === 'ok', String(conf));
 
     const t0 = Date.now();
-    let files = [];
+      files = [];
     // 不能“看到 json 就收工”：任务表是 json 在前、xlsx 在后，
     // 上一版 json 一到就跳出循环，xlsx 还在写，于是报了一条假缺陷。
     while (Date.now() - t0 < 90000) {
@@ -261,6 +277,106 @@ if (target) {
       'png=' + png.length + ' \u5f20: ' + png.map((f) => f.replace(/^\u5206\u6790\u56fe\u8868_/, '').replace(/\.png$/, '')).join(','));
   } else {
     console.log('  - \u8df3\u8fc7\uff08\u6ca1\u8dd1\u5206\u6790\u5c31\u6ca1\u7ed3\u679c\u53ef\u5bfc\uff09');
+  }
+
+  console.log('\n=== 4.6 导出内容 vs 界面显示：逐格对比（不是"文件存在"就算对）===');
+  {
+    // 界面用 fmt(v,4) 四舍五入，xlsx 里写的是原值 —— 直接比字符串必然假红。
+    // 正确做法是三方对齐：xlsx 单元格 -> 用视图自己的 FORMATTERS 算出期望文本 -> 真 DOM 文本。
+    // 这样任何一侧改了口径（字段名、小数位、极小 p 的写法）都会红。
+      // 导出其实产生两本工作簿（主表 + PCoA 坐标），不能拿第一个 .xlsx 就算。
+      // 上一版取到的是 PCoA 那本，于是报“缺三张表”——问题在测试不在导出。
+      const xl = files.filter((f) => f.endsWith('.xlsx'));
+      check('两本工作簿都落地（主表 + PCoA 坐标）', xl.length >= 2, xl.join(' | '));
+      let xlsxFile = null; let wb = null;
+      const XLSX = require_fe('xlsx');
+      for (const f of xl) {
+        const cand = XLSX.read(fs.readFileSync(path.join(dlDir, f)), { type: 'buffer' });
+        console.log('  \u5bfc\u51fa\u7684\u5de5\u4f5c\u7c3f\uff1a' + f + '  sheets=[' + cand.SheetNames.join(' | ') + ']');
+        if (cand.SheetNames.includes('PERMANOVA') && !wb) { xlsxFile = f; wb = cand; }
+      }
+      check('其中一本是主结果工作簿', !!wb, 'xlsx=' + xl.join(' | '));
+    if (!xlsxFile) {
+      check('有 xlsx 可用于逐格对比', false, 'files=' + files.join(','));
+    } else {
+      const aoa = (name) => (wb.Sheets[name] ? XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' }) : null);
+      check('工作簿里有三张表（主表 / 分项 / 说明）',
+        !!aoa('PERMANOVA') && !!aoa('分项检验') && !!aoa('说明'), wb.SheetNames.join(','));
+
+      const { makeFormatters } = await import(pathToFileURL(path.join(ROOT, 'frontend/src/utils/format.js')).href);
+      const F = makeFormatters();
+
+      const domRaw = await js(`(() => {
+        const ts = Array.from(document.querySelectorAll("table.rs-table")).map((t) => ({
+          head: Array.from(t.querySelectorAll("thead th")).map((x) => x.textContent.trim()),
+          rows: Array.from(t.querySelectorAll("tbody tr")).map((r) => Array.from(r.querySelectorAll("td")).map((c) => c.textContent.trim()))
+        }));
+        const n = document.querySelector(".rs-nums");
+        return JSON.stringify({ ts, nums: n ? n.textContent.replace(/\s+/g, " ").trim() : "" });
+      })()`);
+      const dom = JSON.parse(domRaw || '{}');
+      check('界面上至少有两张结果表（整模型 + 分项）', (dom.ts || []).length >= 2,
+        'tables=' + (dom.ts || []).length);
+
+      const cmp = (label, sheet, table) => {
+        if (!sheet || !table) { check(label + ' 可对比', false, 'sheet=' + !!sheet + ' table=' + !!table); return; }
+        const headBad = [];
+        sheet[0].forEach((h, i) => {
+          if (String(h).trim() !== (table.head[i] || '')) headBad.push('第' + i + '列 表内=' + h + ' / 界面=' + table.head[i]);
+        });
+        check(label + ' 表头一致', headBad.length === 0, headBad.join(' ; '));
+        check(label + ' 行数一致', sheet.length - 1 === table.rows.length,
+          'xlsx=' + (sheet.length - 1) + ' dom=' + table.rows.length);
+        const n = Math.min(sheet.length - 1, table.rows.length);
+        const cellBad = [];
+        // 每一列的口径得按两边实际写法定，不能一把数均交给我臆想的格式：
+        //   0 行名（共用 PM_ROW_LABELS）→ 字符串
+        //   1 Df    界面直接 {{ t.Df }} 输出整数，没有 toFixed → 不能要求 "3.0000"
+        //   2/3/4  SumOfSqs / R² / F → 界面 fmt(v,4)
+        //   5      p → 界面 fmtP(v)（极小值科学计数）
+        // 空值：xlsx 里是空单元，界面显 N/A —— 同一个意思两种写法，算等价。
+        // 空值：xlsx 往返会把 null 写成空单元，而 fmt('') 会算出 0.0000 —— 错的。
+        // 语义上“表里没这个数”就是界面的 N/A，列优先判空再说。
+        const sameNum = (a, b) => String(a).trim() === String(b).trim() ||
+          (String(a).trim() === '' && String(b).trim() === 'N/A') ||
+          (String(b).trim() === '' && String(a).trim() === 'N/A') ||
+          (String(a).trim() === 'N/A' && String(b).trim() === 'N/A');
+        for (let r = 1; r <= n; r++) {
+          for (let c = 0; c < sheet[r].length; c++) {
+            const cell = sheet[r][c];
+            const shown = String(table.rows[r - 1][c] == null ? '' : table.rows[r - 1][c]).trim();
+            const empty = cell === '' || cell === null || cell === undefined;
+            let expect;
+            if (empty && c >= 2) expect = 'N/A';
+            else if (c === 5) expect = F.fmtP(cell);
+            else if (c === 2 || c === 3 || c === 4) expect = F.fmt(cell, 4);
+            else expect = String(cell).trim();
+            if (!sameNum(expect, shown)) cellBad.push('第' + r + '行第' + c + '列：表内=' + cell + ' 期望=' + expect + ' 界面=' + shown);
+          }
+        }
+        check(label + ' 逐格一致（含小数位与极小 p 的写法）', cellBad.length === 0, cellBad.slice(0, 3).join(' ; '));
+      };
+      cmp('整模型表', aoa('PERMANOVA'), dom.ts && dom.ts[0]);
+      cmp('分项检验表', aoa('分项检验'), dom.ts && dom.ts[1]);
+
+      // 大字区那一行也得与表内 Model 行取同一个值（取错字段就白写了）
+      const pm = aoa('PERMANOVA');
+      // 第一列现在已经是人话标签（与界面共用 PM_ROW_LABELS），不能再按 'Model' 找行。
+      const { PM_ROW_LABELS } = await import(pathToFileURL(path.join(ROOT, 'frontend/src/utils/permanovaSheetSpec.js')).href);
+      const modelLabel = PM_ROW_LABELS.Model;
+      const modelRow = pm && pm.find((rw) => {
+        const k = String(rw[0]).trim();
+        return k === modelLabel || k === 'Model';
+      });
+      check('\u884c\u540d\u4e0e\u754c\u9762\u5171\u7528\u540c\u4e00\u4efd\u8868\uff08xlsx \u91cc\u4e0d\u518d\u51fa\u73b0\u88f8\u7684 Model/Residual\uff09',
+        !!modelRow && String(modelRow[0]).trim() === modelLabel,
+        pm ? pm.slice(1).map((rw) => rw[0]).join(' / ') : 'no sheet');
+      const numsOk = !!modelRow && !!dom.nums &&
+        dom.nums.includes('F = ' + F.fmt(modelRow[4], 4)) &&
+        dom.nums.includes('R\u00b2 = ' + F.fmt(modelRow[3], 4));
+      check('\u5927\u5b57\u533a\u7684 F/R\u00b2 \u4e0e\u8868\u5185 Model \u884c\u53d6\u540c\u4e00\u4e2a\u503c', numsOk,
+        'nums=' + String(dom.nums).slice(0, 70) + ' Model\u884c=' + JSON.stringify(modelRow));
+    }
   }
 
   console.log('\n=== 4.5 其余四个模块的渲染冒烟 ===');

@@ -225,5 +225,42 @@ t('模板示例是 8 样本方阵（5 个样本时示例跑不出好看的结果
     labels.join(','));
 }
 
+console.log('\n=== 7. 导出计划必须用 pmResultSheets（今天接错的就是这里）===');
+{
+  const { permanovaSheetSpec: S } = await loadFrontendUtils(['permanovaSheetSpec']);
+  // 这个 fixture 故意长得像真引擎输出：_row / F_model / p_value / per_term。
+  const result = {
+    R2: 0.58982, F_model: 3.8345, p_value: 0.006, permutations: 499,
+    permanova_result: [
+      { _row: 'Model', Df: 3, SumOfSqs: 1.77, R2: 0.58982, F_model: 3.8345, p_value: 0.006 },
+      { _row: 'Residual', Df: 8, SumOfSqs: 1.23, R2: 0.41018 },
+      { _row: 'Total', Df: 11, SumOfSqs: 3.0 }
+    ],
+    per_term: [
+      { term: 'as.factor(Group)', Df: 1, R2: 0.41, F: 5.6, p_value: 0.002 },
+      { term: 'Age', Df: 1, R2: 0.06, F: 0.8, p_value: 0.4 }
+    ]
+  };
+  const jobs = S.planExport(['permanovaTable'], { analysisResult: result, params: { formula: 'as.factor(Group) + Age' } }, 'STAMP');
+  t('permanovaTable 生成了一个任务', jobs.length === 1 && jobs[0].type === 'xlsx', JSON.stringify(jobs.map((j) => j.type)));
+  const names = ((jobs[0] || {}).sheets || []).map((s) => s.name);
+  t('导出包含三张表（主表 / 分项检验 / 说明）',
+    names.includes('PERMANOVA') && names.includes('分项检验') && names.includes('说明'),
+    names.join(' | ') + ' —— 只剩一张就是回到了 permRows 时代');
+  const main = ((jobs[0].sheets.find((s) => s.name === 'PERMANOVA') || {}).aoa) || [];
+  t('主表表头就是 PM_RESULT_COLUMNS（中文，不是引擎字段名）',
+    main.length > 0 && JSON.stringify(main[0]) === JSON.stringify(S.PM_RESULT_COLUMNS),
+    JSON.stringify(main[0] || null));
+  t('主表行名走了 PM_ROW_LABELS（不再是裸的 Model/Residual）',
+    main.length > 1 && main[1][0] === S.PM_ROW_LABELS.Model && main[2][0] === S.PM_ROW_LABELS.Residual,
+    main.slice(1).map((r) => r[0]).join(' / '));
+  const pt = ((jobs[0].sheets.find((s) => s.name === '分项检验') || {}).aoa) || [];
+  t('分项检验表包每一个公式项', pt.length - 1 === result.per_term.length,
+    'rows=' + (pt.length - 1));
+  t('说明表里写清了 Model 行不是第一个变量',
+    JSON.stringify(jobs[0].sheets.find((s) => s.name === '说明') || {}).includes('所有项合起来'), '');
+  t('死函数 permRows 确实已移除（留着只会让人又接错）', typeof S.permRows === 'undefined', typeof S.permRows);
+}
+
 console.log(`\n──────── ${pass} 通过 / ${fail} 失败 ────────`);
 if (fails.length) { console.log('失败项：'); fails.forEach((f) => console.log('  - ' + f)); process.exit(1); }

@@ -147,10 +147,10 @@ export const PM_EXPORT_OPTIONS = [
     label: 'PERMANOVA 表格 (Excel)',
     type: 'xlsx',
     base: 'PERMANOVA 表',
-    sheets: (ctx) => [{
-      name: 'PERMANOVA',
-      aoa: permRows(ctx.analysisResult)
-    }]
+    // 这里原本调 permRows()：把引擎返回对象的键直接拍成表头（Df / R2 / F_model / _row），
+    // 导出一张英文字段名的孤钉表；而 pmResultSheets() 写好的中文表头、分项检验与
+    // 「怎么读」说明表从未被引用 —— 写了但没接上，GUI 逐格对比才把它扒出来。
+    sheets: (ctx) => pmResultSheets(ctx.analysisResult, { stampText: ctx.stampText, formula: ctx.formula })
   },
   {
     key: 'pcoaCoords',
@@ -185,13 +185,9 @@ export const PM_EXPORT_OPTIONS = [
 export const PM_EXPORT_DEFAULTS = ['json', 'permanovaTable'];
 
 /** PERMANOVA 表：analysisResult.permanova_result 是对象数组，列名取并集保序 */
-export function permRows(result) {
-  const rows = (result && result.permanova_result) || [];
-  if (!Array.isArray(rows) || !rows.length) return [['来源', '项', 'R2', 'F', 'p 值', '残差']];
-  const cols = [];
-  rows.forEach((r) => Object.keys(r).forEach((k) => { if (!cols.includes(k)) cols.push(k); }));
-  return [cols.slice(), ...rows.map((r) => cols.map((c) => (r[c] === undefined || r[c] === null ? '' : r[c])))];
-}
+// permRows() 已删除：它把引擎对象的键拍成表头（Df / R2 / F_model / _row），
+// 导出一张英文字段名的孤钉表，且永远不会带分项检验与说明表。
+// GUI 逐格对比查出来后，导出改用 pmResultSheets()；留着死函数只会让下个人又接错。
 
 /** PCoA 坐标：列与旧版逐字一致（样本 ID / PCoA1 / PCoA2 / 分组 / 分组变量） */
 export function pcoaRows(result) {
@@ -294,10 +290,18 @@ export function pmPosthocFilename(stamp) {
  */
 export const PM_RESULT_COLUMNS = ['项', 'Df', 'SumOfSqs', 'R²', 'F', 'p 值'];
 
+/**
+ * 行名对照表：导出与界面必须用同一份，否则拿 xlsx 的人看到 Model/Residual，
+ * 而在界面上看到的是「整模型（所有项合起来）/残差」—— 同一行两个名字最坑人。
+ */
+export const PM_ROW_LABELS = { Model: '整模型（所有项合起来）', Residual: '残差', Total: '总计' };
+export const pmRowLabel = (r, i) => PM_ROW_LABELS[(r && (r._row || r.row || r.term)) || ''] ||
+  (r && (r._row || r.row || r.term)) || r && r.Variable || ('项 ' + (i + 1));
+
 export function pmResultAoA(result) {
   const rows = (result && result.permanova_result) || [];
-  return [PM_RESULT_COLUMNS].concat(rows.map((r) => [
-    r._row || r.row || r.term || '',
+  return [PM_RESULT_COLUMNS].concat(rows.map((r, i) => [
+    pmRowLabel(r, i),
     r.Df, r.SumOfSqs, r.R2,
     r.F_model != null ? r.F_model : r.F,
     r.p_value != null ? r.p_value : ''
