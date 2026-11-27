@@ -10,6 +10,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -268,6 +269,36 @@ console.log('\n=== 8. \u5de5\u5177\u811a\u672c\u5fc5\u987b\u81f3\u5c11\u88ab\u62
     check('--dry \u6253\u5370\u7684\u547d\u4ee4\u91cc\u542b npm-cli \u800c\u4e0d\u662f `node install`\uff08\u4e0a\u4e00\u7248\u4e22\u4e86 execpath \u5c31\u662f\u8fd9\u6837\u5d29\u7684\uff09',
       /npm-cli\.js|npm(\.cmd)? install/.test(o), o.split(String.fromCharCode(10))[1] || o.slice(0, 120));
   }
+}
+
+console.log('\n=== 9. PowerShell 脚本必须能被解析（改动不会自己报错）===');
+{
+  // setup-r-runtime.ps1 只会在“另一台机器”上跑，改错了本地根本看不出来。
+  // 至少让 PS 自己读一遍：语法不过就红。这一步零网络、几百毫秒。
+  const ps = ['scripts/setup-r-runtime.ps1', 'scripts/check-r-runtime.ps1']
+    .filter((f) => fs.existsSync(path.join(ROOT, f)));
+  check('至少有一个装配脚本', ps.length >= 1, ps.join(','));
+  const probe = path.join(os.tmpdir(), 'ps_parse_check_' + Date.now() + '.ps1');
+  fs.writeFileSync(probe, [
+    '$bad = 0',
+    "foreach ($f in $args) {",
+    '  $errs = $null',
+    '  $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw $f), [ref]$errs)',
+    '  if ($errs.Count) { $bad++',
+    '    foreach ($e in $errs) { Write-Host ("PARSE_ERR " + $f + ":line " + $e.Token.StartLine + ": " + $e.Message) }',
+    '  } else { Write-Host ("PARSE-OK " + $f) }',
+    '}',
+    'exit $bad'
+  // 注：不能用 utf16le —— PowerShell 5.1 读无 BOM 的 utf16 会把每个字符当命令。探针内容本来就是 ASCII。
+  ].join(String.fromCharCode(13, 10), 'ascii'));
+  for (const f of ps) {
+    const r = spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', probe, f],
+      { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
+    const out = String(r.stdout || '') + String(r.stderr || '');
+    check(f + ' 语法解析通过', r.status === 0 && /PARSE-OK/.test(out),
+      'exit=' + r.status + ' ' + out.trim().split(String.fromCharCode(10)).slice(0, 2).join(' | ').slice(0, 180));
+  }
+  try { fs.unlinkSync(probe); } catch { /* 临时文件已没 */ }
 }
 
 console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);

@@ -157,18 +157,92 @@ function Install-FromLocal([string]$src) {
   return 0
 }
 
-function Get-File($u, $out) {
+# 下载一个文件：带真实进度、停滞检测与总超时。
+# 上一版用同步 Start-BitsTransfer：BITS 遇到 403/证书/重定向会进 TransientError 静默重试，
+# 屏幕上什么都不会出现，看起来就像卡死；而且提示语"已有 N MB"只在开始前打印一次，
+# 并不是进度（用户报的就是这个现象）。
+function Get-File($u, $out, $StallSeconds = 90, $TotalSeconds = 3600) {
   New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
-  if (Test-Path $out) { $sz = (Get-Item $out).Length } else { $sz = 0 }
-  Info "下载 $u -> $out (已有 $([math]::Round($sz/1MB,1)) MB)"
+
+  # 先问 Content-Length：没有它就没法判断"下完了"，也没法取得百分比。
+  $expected = -1
   try {
-    Start-BitsTransfer -Source $u -Destination $out -ErrorAction Stop   # 支持断点续传
+    $head = Invoke-WebRequest -Uri $u -Method Head -UseBasicParsing -TimeoutSec 30
+    if ($head.Headers['Content-Length']) { $expected = [long]$head.Headers['Content-Length'][0] }
   } catch {
-    Warn "BITS 不可用（$($_.Exception.Message)），改用 Invoke-WebRequest"
+    Info ("HEAD 探测失败，改用边下边看大小的办法：" + $_.Exception.Message.Split("`n")[0])
+  }
+
+  # 已有的部分文件：只有大小对得上才敢复用。旧版只 Test-Path，于是把一个 87 MB
+  # 的半成品当成"已下载的安装器"直接用了下去，接着就是装出坏运行时。
+  $have = 0
+  if (Test-Path $out) { $have = (Get-Item $out).Length }
+  if ($have -gt 0 -and $expected -gt 0 -and $have -eq $expected) {
+    Ok ("文件已完整存在：" + [math]::Round($have/1MB,1) + " MB，跳过下载")
+    return $true
+  }
+  if ($have -gt 0) {
+    $tail = if ($expected -gt 0) { "(目标 " + [math]::Round($expected/1MB,1) + " MB)" } else { "(无法核对目标大小，宁可重下)" }
+    Warn ("清除不完整残留 " + [math]::Round($have/1MB,1) + " MB " + $tail)
+    Remove-Item $out -Force
+  }
+
+  $mb = if ($expected -gt 0) { "共 " + [math]::Round($expected/1MB,1) + " MB" } else { "大小未知" }
+  Info ("开始下载 " + $u + " -> " + $out + "（" + $mb + "）")
+
+  $job = $null
+  try {
+    $job = Start-BitsTransfer -Source $u -Destination $out -Asynchronous -ErrorAction Stop
+  } catch {
+    Warn ("BITS 起不来，改用 Invoke-WebRequest：" + $_.Exception.Message.Split("`n")[0])
     $ProgressPreference = 'SilentlyContinue'
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $u -OutFile $out -UseBasicParsing -TimeoutSec 3600
+    try {
+      Invoke-WebRequest -Uri $u -OutFile $out -UseBasicParsing -TimeoutSec $TotalSeconds
+    } catch {
+      Fail ("下载失败：" + $_.Exception.Message.Split("`n")[0]); return $false
+    }
+    $n = if (Test-Path $out) { (Get-Item $out).Length } else { 0 }
+    if ($expected -gt 0 -and $n -ne $expected) { Fail ("下载不完整：" + $n + " != " + $expected); return $false }
+    Ok ("下载完成：" + [math]::Round($n/1MB,1) + " MB")
+    return $true
   }
+
+  $t0 = Get-Date; $lastSize = -1; $lastMove = Get-Date; $lastBeat = [DateTime]::MinValue
+  while ($job.JobState -in ('Transferring','Queued','Connecting','Suspended','TransientError')) {
+    $now = Get-Date
+    $cur = if (Test-Path $out) { (Get-Item $out).Length } else { 0 }
+    if ($cur -ne $lastSize) { $lastSize = $cur; $lastMove = $now }
+    if (($now - $lastBeat).TotalSeconds -ge 5 -or $job.JobState -eq 'TransientError') {
+      $lastBeat = $now
+      $pct = if ($expected -gt 0) { " " + [math]::Round(100*$cur/$expected,1) + "%" } else { "" }
+      Info ("进度 " + [math]::Round($cur/1MB,1) + " MB" + $pct +
+        "（状态 " + $job.JobState + "，距上次变动 " + [int]($now-$lastMove).TotalSeconds + " 秒）")
+    }
+    if (($now - $lastMove).TotalSeconds -gt $StallSeconds) {
+      Warn ("连续 " + $StallSeconds + " 秒字节数没有变化，判定停滞，换下一个源")
+      try { Remove-BitsTransfer -Job $job } catch {}
+      if (Test-Path $out) { Remove-Item $out -Force }
+      return $false
+    }
+    if (($now - $t0).TotalSeconds -gt $TotalSeconds) {
+      Warn ("超过总时长 " + $TotalSeconds + " 秒，换下一个源")
+      try { Remove-BitsTransfer -Job $job } catch {}
+      return $false
+    }
+    Start-Sleep -Milliseconds 800
+  }
+
+  if ($job.JobState -ne 'Transferred') {
+    Warn ("BITS 结束状态 " + $job.JobState + "：" + $job.ErrorRecord)
+    try { Remove-BitsTransfer -Job $job } catch {}
+    return $false
+  }
+  try { Complete-BitsTransfer -Job $job } catch { Warn ("完成移交失败：" + $_.Exception.Message.Split("`n")[0]); return $false }
+  $n = if (Test-Path $out) { (Get-Item $out).Length } else { 0 }
+  if ($expected -gt 0 -and $n -ne $expected) { Fail ("下载不完整：" + $n + " != " + $expected); return $false }
+  Ok ("下载完成：" + [math]::Round($n/1MB,1) + " MB（用时 " + [int]((Get-Date)-$t0).TotalSeconds + " 秒）")
+  return $true
 }
 
 function Assert-Sha256($file, $expect) {
@@ -213,7 +287,9 @@ function Install-FromRelease($lock) {
     return 1
   }
   $zip = Join-Path $DL ([IO.Path]::GetFileName($u.Split('?')[0]))
-  if (-not (Test-Path $zip)) { Get-File $u $zip }
+  # 不再先 Test-Path 就跳过下载：那会把上次断在中间的半个 zip 当成“已有”，
+  # 然后卡到校验和那一步去。Get-File 自己会比大小：完整就用，不完整就清掉重下。
+  if (-not (Get-File $u $zip)) { Fail "下载失败：$u"; return 1 }
   if (-not (Assert-Sha256 $zip $Sha256)) { return 1 }
   return (Install-FromLocal $zip)
 }
@@ -232,14 +308,18 @@ function Install-FromRepos($lock) {
       "https://mirrors.tuna.tsinghua.edu.cn/CRAN/bin/windows/base/old/$rv/R-$rv-win.exe",
       "https://cran.r-project.org/bin/windows/base/R-$rv-win.exe"
     )
-    if (Test-Path $exe) { Ok "复用已下载的安装器 $exe" }
-    else {
-      $got = $false
-      foreach ($c in $cands) {
-        try { Get-File $c $exe; $got = $true; break }
-        catch { Warn "该源失败：$c" }
-      }
-      if (-not $got) { Fail '所有 CRAN 源都拿不到 R 安装器。请手动下载后放到：' + $exe; return 1 }
+    # 这里不再写“已存在就复用”的短路：旧写法只 Test-Path，把停在 87 MB 的半成品
+    # 当成安装器直接用下去了。完整性判断全部交给 Get-File（它会先 HEAD 拿 Content-Length）。
+    $got = $false
+    foreach ($c in $cands) {
+      # Get-File 现在用返回值说成败（不再靠抛异常）：旧版的 try{...;$got=$true}
+      # 会把“BITS 停滞而返回 false”误记成成功。
+      if (Get-File $c $exe) { $got = $true; break }
+      Warn "该源不行，换下一个：$c"
+    }
+    if (-not $got) {
+      Fail ('所有源都拿不到 R 安装器。可手动下载后放到这个路径（大小会对账）：' + $exe)
+      return 1
     }
     $parent = Split-Path $TARGET_DIR -Parent
     $leaf = Split-Path $TARGET_DIR -Leaf
