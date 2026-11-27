@@ -10,7 +10,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -230,6 +230,44 @@ console.log('\n=== 7. 已定的决定要落在机器可见的地方\uff08防止�
   // 用户决定：public/dist 先入库（短期很少重新构建）—— 写住，别被当成失误删了
   check('public/dist \u4ea7\u7269\u5165\u5e93\uff08\u7528\u6237\u51b3\u5b9a\uff0c\u4fbf\u4e8e\u65e0\u9700\u6784\u5efa\u5373\u53ef\u8dd1\uff09',
     tracked.some((f) => f.startsWith('public/dist/')), '\u82e5\u8981\u6539\u4e3a\u4e0d\u5165\u5e93\uff0c\u540c\u6b65\u6539\u672c\u5224\u636e\u4e0e README');
+}
+
+console.log('\n=== 8. \u5de5\u5177\u811a\u672c\u5fc5\u987b\u81f3\u5c11\u88ab\u6267\u884c\u8fc7\u4e00\u6b21 ===');
+{
+  // install_deps.mjs 曾在用户机器上报 "st.prefix is not iterable" —— 代码写完了、
+  // npm script 也接上了，但**没有人真跑过它**，直到换台机器才爆。
+  // 这与 permRows / confirmExport 是同一类：“写了但从未执行”。所以这里强制跑一次。
+  const pkg = JSON.parse(readSafe(path.join(ROOT, 'package.json')));
+  const tools = new Set();
+  for (const v of Object.values(pkg.scripts || {})) {
+    for (const m of String(v).matchAll(/node (r-scripts\/tools\/[A-Za-z0-9_]+\.mjs)/g)) tools.add(m[1]);
+  }
+  check('\u81f3\u5c11\u627e\u5230\u88ab npm script \u5f15\u7528\u7684\u5de5\u5177\u811a\u672c', tools.size >= 2, [...tools].join(', '));
+  for (const rel of tools) {
+    check(rel + ' \u5b58\u5728\u4e8e\u4ed3\u5e93', fs.existsSync(path.join(ROOT, rel)), rel);
+    const txt = readSafe(path.join(ROOT, rel));
+    const dups = (() => {
+      const seen = new Set(); const out = [];
+      for (const l of txt.split(String.fromCharCode(10))) {
+        const m = l.match(/^const ([A-Za-z0-9_$]+) =/);
+        if (m) { if (seen.has(m[1])) out.push(m[1]); seen.add(m[1]); }
+      }
+      return out;
+    })();
+    check(rel + ' \u6ca1\u6709\u91cd\u590d\u7684 const \u58f0\u660e\uff08\u540c\u540d\u540e\u8005\u9759\u9ed8\u8986\u76d6\u524d\u8005\uff09',
+      dups.length === 0, dups.join(','));
+  }
+  // \u771f\u8dd1\u4e00\u6b21 --dry\uff1a\u5b83\u4e0d\u5b89\u88c5\u4e1c\u897f\uff0c\u4f46\u80fd\u8bc1\u660e\u811a\u672c\u8d77\u5f97\u6765\uff08\u4e0d\u4f1a\u518d\u628a\uff02\u6362\u53f0\u673a\u5668\u624d\u7206\u2016\u7559\u7ed9\u7528\u6237\u2016）
+  if (tools.has('r-scripts/tools/install_deps.mjs')) {
+    const r = spawnSync(process.execPath,
+      [path.join(ROOT, 'r-scripts/tools/install_deps.mjs'), '--dry'],
+      { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
+    const o = String(r.stdout || '') + String(r.stderr || '');
+    check('install_deps.mjs --dry \u80fd\u8dd1\u901a\uff08\u5b83\u662f\u552f\u4e00\u88c5 JS \u4f9d\u8d56\u7684\u5165\u53e3\uff09',
+      r.status === 0 && /\[dry\]/.test(o), 'exit=' + r.status + ' ' + o.split(String.fromCharCode(10)).slice(-2).join(' | ').slice(0, 160));
+    check('--dry \u6253\u5370\u7684\u547d\u4ee4\u91cc\u542b npm-cli \u800c\u4e0d\u662f `node install`\uff08\u4e0a\u4e00\u7248\u4e22\u4e86 execpath \u5c31\u662f\u8fd9\u6837\u5d29\u7684\uff09',
+      /npm-cli\.js|npm(\.cmd)? install/.test(o), o.split(String.fromCharCode(10))[1] || o.slice(0, 120));
+  }
 }
 
 console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);
