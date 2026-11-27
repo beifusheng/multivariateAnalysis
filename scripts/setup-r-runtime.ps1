@@ -210,24 +210,28 @@ function Get-File($u, $out, $StallSeconds = 90, $TotalSeconds = 3600) {
 
   $t0 = Get-Date; $lastSize = -1; $lastMove = Get-Date; $lastBeat = [DateTime]::MinValue
   while ($job.JobState -in ('Transferring','Queued','Connecting','Suspended','TransientError')) {
-    $now = Get-Date
-    $cur = if (Test-Path $out) { (Get-Item $out).Length } else { 0 }
+    $now = Get-Date
+    # 字节数取自作业寱象：BITS 传输期间最终路径根本不存在（本机实测：STATE=Transferred 时目标文件仍 False，
+    # 直到 Complete-BitsTransfer 之后才出现）。盯着最终路径算进度，就是"一直 0 MB"的真相。
+    $cur = 0; $tot = 0
+    try { $cur = [long]$job.BytesTransferred } catch {}
+    try { $tot = [long]$job.BytesTotal } catch {}
     if ($cur -ne $lastSize) { $lastSize = $cur; $lastMove = $now }
     if (($now - $lastBeat).TotalSeconds -ge 5 -or $job.JobState -eq 'TransientError') {
       $lastBeat = $now
-      $pct = if ($expected -gt 0) { " " + [math]::Round(100*$cur/$expected,1) + "%" } else { "" }
+      $pct = if ($tot -gt 0) { ' ' + [math]::Round(100*$cur/$tot,1) + '%' } else { '' }
       Info ("进度 " + [math]::Round($cur/1MB,1) + " MB" + $pct +
         "（状态 " + $job.JobState + "，距上次变动 " + [int]($now-$lastMove).TotalSeconds + " 秒）")
     }
     if (($now - $lastMove).TotalSeconds -gt $StallSeconds) {
       Warn ("连续 " + $StallSeconds + " 秒字节数没有变化，判定停滞，换下一个源")
-      try { Remove-BitsTransfer -Job $job } catch {}
+      try { Remove-BitsTransfer -BitsJob $job } catch {}
       if (Test-Path $out) { Remove-Item $out -Force }
       return $false
     }
     if (($now - $t0).TotalSeconds -gt $TotalSeconds) {
       Warn ("超过总时长 " + $TotalSeconds + " 秒，换下一个源")
-      try { Remove-BitsTransfer -Job $job } catch {}
+      try { Remove-BitsTransfer -BitsJob $job } catch {}
       return $false
     }
     Start-Sleep -Milliseconds 800
@@ -235,10 +239,10 @@ function Get-File($u, $out, $StallSeconds = 90, $TotalSeconds = 3600) {
 
   if ($job.JobState -ne 'Transferred') {
     Warn ("BITS 结束状态 " + $job.JobState + "：" + $job.ErrorRecord)
-    try { Remove-BitsTransfer -Job $job } catch {}
+    try { Remove-BitsTransfer -BitsJob $job } catch {}
     return $false
   }
-  try { Complete-BitsTransfer -Job $job } catch { Warn ("完成移交失败：" + $_.Exception.Message.Split("`n")[0]); return $false }
+  try { Complete-BitsTransfer -BitsJob $job } catch { Warn ("完成移交失败：" + $_.Exception.Message.Split("`n")[0]); return $false }
   $n = if (Test-Path $out) { (Get-Item $out).Length } else { 0 }
   if ($expected -gt 0 -and $n -ne $expected) { Fail ("下载不完整：" + $n + " != " + $expected); return $false }
   Ok ("下载完成：" + [math]::Round($n/1MB,1) + " MB（用时 " + [int]((Get-Date)-$t0).TotalSeconds + " 秒）")
