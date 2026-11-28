@@ -301,7 +301,27 @@ console.log('\n=== 9. PowerShell 脚本必须能被解析（改动不会自己�
   try { fs.unlinkSync(probe); } catch { /* 临时文件已没 */ }
 }
 
-console.log(`\n──────── ${pass} 通过 / ${fails.length} 失败 ────────`);
+console.log(String.fromCharCode(10) + '=== 10. 文本文件里不得有孤立 CR（双重回车会让行尾落单）===');
+{
+  // PSParser 对 CR CR LF 完全无感：setup-r-runtime.ps1 一度有 549 处双重 CR，解析照样
+  // PASS，真跑时却冒 CommandNotFoundException。"语法通过"挡不住结构性损坏，所以查字节。
+  const files = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' })
+    .split(String.fromCharCode(10)).filter((f) => /\.(ps1|js|mjs|vue|json|md|css|html|sh)$/.test(f));
+  const bad = [];
+  for (const f of files) {
+    let b;
+    try { b = fs.readFileSync(path.join(ROOT, f)); } catch { continue; }
+    if (b.includes(Buffer.from([13, 13]))) {
+      let n = 0;
+      for (let x = 1; x < b.length; x++) { if (b[x] === 13 && b[x - 1] === 13) n++; }
+      bad.push(f + '(' + n + ')');
+    }
+  }
+  check('被跟踪的文本文件没有孤立 CR / 双重回车', bad.length === 0, bad.slice(0, 5).join(', '));
+  console.log('  - 扫描 ' + files.length + ' 个文本文件');
+}
+
+console.log(String.fromCharCode(10) + '──────── ' + pass + ' 通过 / ' + fails.length + ' 失败 ────────');
 if (fails.length) { console.log('失败项：'); fails.forEach((x) => console.log('  - ' + x)); }
 console.log('RESULT pass=' + pass + ' fail=' + fails.length);
 process.exit(fails.length ? 1 : 0);
