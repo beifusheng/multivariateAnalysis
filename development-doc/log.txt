@@ -16,9 +16,13 @@ Debugger attached.
 ==> 获取 R 4.6.1 Windows 安装器并静默安装到 r-portable（不需要管理员）
   [info] HEAD 给的 Content-Length 不可信（57 字节，疑似重定向页），改用作业自己报的大小
   [OK]   无法核对大小，但它像个完整安装器（87.5 MB + MZ 头），直接使用
-==> 静默安装（安装目录在项目内，不写注册表机器级键）
-  [FAIL] 安装后找不到 R-4.6.1 目录，检查杀毒软件是否拦截
-  [info] 下载缓存保留在 C:\Users\63269\AppData\Local\Temp\r-runtime-download（重复运行可复用）
+==> 静默安装到 D:\Test\multivariateAnalysis\r-portable（不写注册表机器级键）
+Move-Item : Cannot find path 'D:\Test\multivariateAnalysis\r-portable' because it does not exist.
+At D:\Test\multivariateAnalysis\scripts\setup-r-runtime.ps1:393 char:7
++       Move-Item $installed.FullName $TARGET_DIR
++       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (D:\Test\multivariateAnalysis\r-portable:String) [Move-Item], ItemN  
+   otFoundException
+    + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.MoveItemCommand
 
-结果：失败（代码 1）
 Waiting for the debugger to disconnect...
