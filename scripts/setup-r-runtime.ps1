@@ -170,6 +170,15 @@ function Test-InstallerHint($file) {
   } catch { return $false }
 }
 
+# 在安装产物里找出真正的 R 目录：以 bin\Rscript.exe 存在为准，不靠目录名猜。
+function Find-InstalledR($targetDir, $parentDir, $rv) {
+  if (Test-Path (Join-Path $targetDir 'bin\Rscript.exe')) { return Get-Item $targetDir }
+  foreach ($d in (Get-ChildItem $parentDir -Directory -ErrorAction SilentlyContinue)) {
+    if ($d.Name -like "R-$rv*" -and (Test-Path (Join-Path $d.FullName 'bin\Rscript.exe'))) { return $d }
+  }
+  return $null
+}
+
 function Get-File($u, $out, $StallSeconds = 90, $TotalSeconds = 3600) {
   New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
 
@@ -354,15 +363,30 @@ function Install-FromRepos($lock) {
     $parent = Split-Path $TARGET_DIR -Parent
     $leaf = Split-Path $TARGET_DIR -Leaf
     # /SILENT 而非 /VERYSILENT：历史上 /VERYSILENT 在部分机器上会弹 UAC
-    Step '静默安装（安装目录在项目内，不写注册表机器级键）'
-    $p = Start-Process -FilePath $exe -ArgumentList @('/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$parent", '/CURRENTUSER') -PassThru -Wait
+    # Inno 的 /DIR 是**精确安装目录**，不是上级目录。上一版传 $parent 并假设安装器会
+    # 自建 <parent>\R-<version>，结果 R 的 bin/library/etc 直接铺进了项目根目录，
+    # 而事后按 R-<version> 子目录去找当然找不到，于是报"安装后找不到 R-4.6.1 目录"。
+    if ((Resolve-Path $TARGET_DIR -ErrorAction SilentlyContinue) -eq (Resolve-Path $ROOT -ErrorAction SilentlyContinue)) {
+      Fail '目标目录不能等于项目根目录（否则会把 R 铺进仓库）'; return 1
+    }
+    Step "静默安装到 $TARGET_DIR（不写注册表机器级键）"
+    if (Test-Path $TARGET_DIR) { Backup-Existing $TARGET_DIR }
+    New-Item -ItemType Directory -Force -Path $TARGET_DIR | Out-Null
+    $p = Start-Process -FilePath $exe -ArgumentList @('/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/DIR=' + $TARGET_DIR), '/CURRENTUSER') -PassThru -Wait
     if ($p.ExitCode -ne 0) { Warn "安装器返回码 $($p.ExitCode)，继续检查产物" }
-    # 安装器会建 <DIR>\R-<version>，把它挪成 $Target
-    $installed = Get-ChildItem $parent -Directory | Where-Object { $_.Name -like "R-$rv*" -and (Test-Path (Join-Path $_.FullName 'bin\Rscript.exe')) } | Select-Object -First 1
-    if (-not $installed) { Fail "安装后找不到 R-$rv 目录，检查杀毒软件是否拦截"; return 1 }
-    if (Test-Path $TARGET_DIR) { Remove-Item $TARGET_DIR -Recurse -Force }
-    Move-Item $installed.FullName $TARGET_DIR
-    Ok "便携运行时就位：$TARGET_DIR"
+
+    # 产物位置有两种历史形状：直接装进 $TARGET_DIR（现在），或装成 <parent>\R-<version>
+    # （旧安装器忽略 /DIR 时）。两种都收，但只认带 bin\Rscript.exe 的那个。
+    $installed = Find-InstalledR $TARGET_DIR $parent $rv
+    if (-not $installed) {
+      Fail ('安装后找不到 bin\Rscript.exe。检查：' + $TARGET_DIR + ' 里有没有 bin 目录；也看看杀毒软件是否拦截；若项目根被误装过 R，先清掉残留再重跑')
+      return 1
+    }
+    $want = (Join-Path $TARGET_DIR '').TrimEnd('')
+    if ($installed.FullName.TrimEnd('') -ne $want) {
+      if (Test-Path $TARGET_DIR) { Remove-Item $TARGET_DIR -Recurse -Force }
+      Move-Item $installed.FullName $TARGET_DIR
+    }
   }
 
   Step '按 lockfile 安装 R 包'
