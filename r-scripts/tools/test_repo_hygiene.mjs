@@ -317,6 +317,24 @@ console.log(String.fromCharCode(10) + '=== 10. 文本文件里不得有孤立 CR
       bad.push(f + '(' + n + ')');
     }
   }
+  // 这次的真凶不是语法错：一段三行注释我只重写了两行，第三行的尾巴留在文件里成了
+  // 裸语句，PSParser 照样 PASS，运行时却报「The term '-portable' is not recognized」。
+  // 所以补一条形状检查：PowerShell 脚本里不该有以 -字母 开头的非注释行。
+  const psFiles = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' })
+    .split(String.fromCharCode(10)).filter((f) => f.endsWith('.ps1'));
+  const bare = [];
+  for (const f of psFiles) {
+    const t = readSafe(path.join(ROOT, f));
+    let inHere = false;
+    t.split(String.fromCharCode(13, 10)).forEach((l, n) => {
+      if (/^@?"/.test(l.trim())) { inHere = !inHere; return; }
+      if (inHere) return;
+      const s = l.trimEnd();
+      if (/^-/.test(s) && !s.startsWith('#') && !s.startsWith('--')) bare.push(f + ':' + (n + 1));
+    });
+  }
+  check('PS 脚本里没有以 - 开头的裸语句行（注释残骸会变成命令，语法检查看不见）',
+    bare.length === 0, bare.slice(0, 4).join(', '));
   check('被跟踪的文本文件没有孤立 CR / 双重回车', bad.length === 0, bad.slice(0, 5).join(', '));
   console.log('  - 扫描 ' + files.length + ' 个文本文件');
 }

@@ -110,11 +110,16 @@ function Run-Native {
 
 $ROOT = Split-Path -Parent $PSScriptRoot
 
+if ([IO.Path]::IsPathRooted($Target)) { $TARGET_DIR = [IO.Path]::GetFullPath($Target) }
+else { $TARGET_DIR = [IO.Path]::GetFullPath((Join-Path $ROOT $Target)) }
+# 不能一律 Join-Path ROOT 再接 Target：PS 5.1 的 Join-Path 不认"子路径本身已是绝对路径",
+# 会拼出"项目根 + 绝对路径"这种非法路径, New-Item 直接报 format is not supported.
+Write-Host ("==> 运行时目标目录: " + $TARGET_DIR) -ForegroundColor Cyan
+
 Set-Location $ROOT
 
 $LOCKFILE = Join-Path $ROOT 'r-runtime.lock.json'
 
-$TARGET_DIR = Join-Path $ROOT $Target
 
 # PS 5.1 没有 $IsWindows，配合 StrictMode 会直接报错，用文件存在性判断平台
 
@@ -134,6 +139,7 @@ function Fail($msg) { Write-Host ("  [FAIL] " + $msg) -ForegroundColor Red }
 
 function Info($msg) { Write-Host ("  [info] " + $msg) -ForegroundColor DarkGray }
 
+
 # 热点/校园网下 curl 常因证书失败，wininet 走系统证书库更稳
 
 $CRAN_MIRRORS = @(
@@ -147,6 +153,8 @@ $CRAN_MIRRORS = @(
   'https://cran.us.r-project.org'
 
 )
+
+
 
 function Read-Lock {
 
@@ -390,6 +398,16 @@ function Find-InstalledR($targetDir, $parentDir, $rv) {
 
 }
 
+# 写文件但**不带 BOM**：PowerShell 5.1 的 Set-Content -Encoding UTF8 会写入 EF BB BF，
+# 而 Rscript 读到文件头的 BOM 会直接报「错误: 意外的输入在"﻿"里 / 停止执行」——
+# 现场那条报错就是这个，跟 R 环境、网络、代理都没关系，是我生成的脚本自己读不进去。
+# 用 -Encoding ASCII 也能绕过，但路径/镜像地址里一旦出现中文就会被截成问号，
+# 所以这里明确写 UTF-8 无 BOM。
+function Write-NoBom($path, $content) {
+  $enc = New-Object System.Text.UTF8Encoding($false)
+  [IO.File]::WriteAllText($path, $content, $enc)
+}
+
 function Get-File($u, $out, $StallSeconds = 90, $TotalSeconds = 3600) {
 
   New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
@@ -565,13 +583,20 @@ function Get-File($u, $out, $StallSeconds = 90, $TotalSeconds = 3600) {
   }
 
   if ($job.JobState -ne 'Transferred') {
-
-    Warn ("BITS 结束状态 " + $job.JobState + "：" + $job.ErrorRecord)
-
-    try { Remove-BitsTransfer -BitsJob $job } catch {}
-
+    # 不能直接写 $job 点 ErrorRecord：作业以 Error 结束时，PS 5.1 的这个对象上未必有该
+    # 属性，一读就抛 PropertyNotFound 把整个脚本终结（现场最早那条报错就是这个）。
+    # 失败信息只能"有就说、没有就闭嘴"，逐属性试探。
+    $why = ''
+    foreach ($pn in @('ErrorRecord', 'ErrorCode', 'Description')) {
+      $prop = $job.PSObject.Properties[$pn]
+      if ($prop -and $prop.Value) {
+        $v = ($prop.Value | Out-String).Trim()
+        if ($v) { $why = ' ' + $pn + '=' + $v.Split([char]10)[0]; break }
+      }
+    }
+    Warn ('BITS 结束状态 ' + $job.JobState + $why)
+    try { Remove-BitsTransfer -BitsJob $job -ErrorAction SilentlyContinue } catch {}
     return $false
-
   }
 
   try { Complete-BitsTransfer -BitsJob $job } catch { Warn ("完成移交失败：" + $_.Exception.Message.Split("`n")[0]); return $false }
@@ -806,7 +831,7 @@ function Install-FromRepos($lock) {
 
   $pinLines = ($pinMap.GetEnumerator() | ForEach-Object { "        '$($_.Key)' = '$($_.Value)'" }) -join ",`n"
 
-  @"
+  $pkgScript = @"
 
 # 由 scripts/setup-r-runtime.ps1 生成，勿手工编辑
 
@@ -894,7 +919,8 @@ if (length(missing)) { cat('MISSING:', paste(missing, collapse = ', '), '\n'); q
 
 cat('ALL_PRESENT\n')
 
-"@ | Set-Content -LiteralPath $tmpR -Encoding UTF8
+"@
+  Write-NoBom $tmpR $pkgScript   # 不能用 Set-Content -Encoding UTF8：PS 5.1 会写 BOM，Rscript 读到就报「意外的输入」
 
   $rp = Run-Native -Exe $RSCRIPT -ArgList @($tmpR)
 
