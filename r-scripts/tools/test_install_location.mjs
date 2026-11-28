@@ -22,7 +22,11 @@ const raw = fs.readFileSync(path.join(ROOT, 'scripts/setup-r-runtime.ps1'), 'utf
 const NL = String.fromCharCode(13, 10);
 
 function grab(n) {
-  const start = raw.indexOf('function ' + n + '(');
+  // PowerShell 允许无参函数写成 `function Foo {`（不带括号），两种形状都要能吃下：
+  // Backup-Existing 就是这种，只按 '(' 找会误报"函数不存在"。
+  const withParen = raw.indexOf('function ' + n + '(');
+  const bare = raw.indexOf('function ' + n + ' {');
+  const start = withParen >= 0 ? withParen : bare;
   if (start < 0) throw new Error('找不到函数 ' + n + '（改名了就同步这个测试）');
   const next = raw.indexOf(NL + 'function ', start + 1);
   const b = raw.slice(start, next < 0 ? raw.length : next);
@@ -107,6 +111,79 @@ fs.rmSync(path.join(parent, 'R-3.6.1'), { recursive: true, force: true });
 mkdirOnly('workdir', 'r-portable');                           // 只有目录，没产物
 r = ask(target, parent, '4.6.1');
 t('返回空（Test-Path 存在 ≠ 装好了）', r.found === '', 'found=' + r.found);
+
+console.log('\n=== 7-11. Place-Runtime：这一层曾经把用户刚装好的 R 删了 ===');
+// 现场事故：TrimEnd('\') 被编辑过程吃成 TrimEnd('')，于是
+//   $want = "…\r-portable\"（带尾斜杠）而 $installed.FullName = "…\r-portable"
+// 两者不等 -> 走"删目标再搬"分支 -> 删掉的就是刚装好的那个目录 -> Move 报源不存在。
+function place(targetDir, installedDir, opts) {
+  opts = opts || {};
+  const body = ['[Console]::OutputEncoding = [System.Text.Encoding]::UTF8']
+    .concat(['Ok', 'Warn', 'Fail', 'Info', 'Step', 'Test-Runtime', 'Backup-Existing', 'Find-InstalledR', 'Place-Runtime'].map(grab), [
+      '$TARGET_DIR = "' + targetDir + '"',
+      '$Target = "r-portable"',
+      '$Force = $' + (opts.force ? 'true' : 'false'),
+      '$obj = Get-Item "' + installedDir + '"',
+      '$ret = Place-Runtime $obj $TARGET_DIR',
+      'Write-Output ("RET=" + $ret)',
+    ]).join(NL + NL);
+  const f = path.join(tmp, 'place.ps1');
+  fs.writeFileSync(f, '\uFEFF' + body + NL, 'utf8');
+  const rr = spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', f],
+    { encoding: 'utf8', timeout: 120000 });
+  return String(rr.stdout || '') + String(rr.stderr || '');
+}
+const hasRscript = (d) => fs.existsSync(path.join(d, 'bin', 'Rscript.exe'));
+
+console.log('  -- 7. 产物已经在目标位置（最常见，也最危险）');
+fs.rmSync(target, { recursive: true, force: true });
+fs.rmSync(path.join(parent, 'R-4.6.1'), { recursive: true, force: true });
+mk('workdir', 'r-portable');
+let o = place(target, target);
+t('返回 True', /RET=True/.test(o), o.trim().split('\n').slice(-1)[0]);
+t('刚装好的 r-portable 还在（这就是那条删库事故的回归）', hasRscript(target), '被删了');
+t('没有产生 .invalid-* 备份（说明根本没走破坏性分支）',
+  !/\.invalid-/.test(fs.readdirSync(parent).join(',')), fs.readdirSync(parent).join(','));
+
+console.log('  -- 8. 目标路径带尾斜杠：必须仍然判为"同一个目录"');
+fs.rmSync(target, { recursive: true, force: true });
+mk('workdir', 'r-portable');
+o = place(target + String.fromCharCode(92), target);
+console.log('    RAW8: ' + JSON.stringify(o.split(String.fromCharCode(10)).slice(0, 6).join(' | ').slice(0, 300)));
+t('尾斜杠不再造成误判（当年就是这么删掉的）', /RET=True/.test(o) && hasRscript(target),
+  o.trim().split('\n').slice(-1)[0]);
+
+console.log('  -- 9. 产物在别处（<parent>\R-4.6.1）：搬过去');
+fs.rmSync(target, { recursive: true, force: true });
+const nested2 = mk('workdir', 'R-4.6.1');
+o = place(target, nested2);
+t('返回 True 且产物落到 r-portable', /RET=True/.test(o) && hasRscript(target),
+  o.trim().split('\n').slice(-1)[0]);
+
+console.log('  -- 10. 源目录其实没有 Rscript：拒绝动手，目标原封不动');
+fs.rmSync(target, { recursive: true, force: true });
+mk('workdir', 'r-portable');
+const keepSize = fs.statSync(path.join(target, 'bin', 'Rscript.exe')).size;
+const emptySrc = mkdirOnly('workdir', 'R-9.9.9');           // 没有 bin\Rscript.exe
+o = place(target, emptySrc);
+t('返回 False', /RET=False/.test(o), o.trim().split('\n').slice(-1)[0]);
+t('目标目录没被牵连（还是原来那个文件）',
+  hasRscript(target) && fs.statSync(path.join(target, 'bin', 'Rscript.exe')).size === keepSize, '被殃及');
+
+console.log('  -- 11. 目标已存在且不可用时：改名保留，不是删除');
+fs.rmSync(path.join(parent, 'R-9.9.9'), { recursive: true, force: true });
+fs.rmSync(target, { recursive: true, force: true });
+fs.mkdirSync(target, { recursive: true });                  // 空壳，Test-Runtime 会说不通
+fs.writeFileSync(path.join(target, 'marker.txt'), 'mine');   // 用户自己的东西
+const nested3 = mk('workdir', 'R-4.6.1');
+o = place(target, nested3);
+const survivors = fs.readdirSync(parent).join(',');
+t('返回 True', /RET=True/.test(o), o.trim().split('\n').slice(-1)[0]);
+t('旧目录被改名保留（出现 .invalid-*），而不是被删',
+  /\.invalid-/.test(survivors), survivors);
+t('用户留下的 marker.txt 还在备份里',
+  fs.readdirSync(parent).some((d) => d.includes('.invalid-') &&
+    fs.existsSync(path.join(parent, d, 'marker.txt'))), survivors);
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 系统会清 */ }
 console.log('\n──────── ' + pass + ' 通过 / ' + fails.length + ' 失败 ────────');
