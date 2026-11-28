@@ -1,10 +1,24 @@
+Debugger attached.
+Waiting for the debugger to disconnect...
+Debugger attached.
+
+> multivariateAnalysis@1.0.0 setup:r
+> powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-r-runtime.ps1
+                                                                                                                   ==> 项项目目根根目目录录: D:\Test\multivariateAnalysis                                                                       ==> 模模式式: auto                                                                                                       [info] lockfile: R 4.6.1，，177 个个包包                                                                               缺失或不可用，尝试 Release 整包
+  [info] 查询 Release: https://api.github.com/repos/beifusheng/multivariateAnalysis/releases/latest
+  [WARN] Release 查询失败: 远程服务器返回错误: (403) 已禁止。
+  [FAIL] 无法确定 Release 附件地址。三种办法任选：
+    1) 在 r-runtime.lock.json 的 release.url 填上直链（推荐，顺带填 sha256）
+    2) 命令行显式给：-Mode fromRelease -Url https://github.com/<repo>/releases/download/<tag>/r-portable-4.6.1-win-x64.zip
     3) 用本机已有的那一份：-Mode fromLocal -From "C:\Custom\CodeRepository\Demo\r-portable-4.3.3-backup"
   [WARN] Release 不可用，回退到 fromRepos（下 R 安装器 + 按 lockfile 装包）
   [info] 目标 R 版本 4.6.1
 ==> 获取 R 4.6.1 Windows 安装器并静默安装到 r-portable（不需要管理员）
-  [WARN] 清除不完整残留 87.5 MB (目标 0 MB)
-  [info] 开始下载 https://cran.r-project.org/bin/windows/base/old/4.6.1/R-4.6.1-win.exe -> C:\Users\63269\AppData\Local\Temp\r-runtime-download\R-4.6.1-win.exe（共 0 MB）
-  [info] 进度 0 MB 0%（状态 Connecting，距上次变动 0 秒）
-  [info] 进度 87.5 MB 160964870.2%（状态 Transferring，距上次变动 3 秒）
-  [info] 进度 87.5 MB 160964870.2%（状态 Transferring，距上次变动 9 秒）
-  [info] 进度 87.5 MB 160964870.2%（状态 Transferring，距上次变动 15 秒）
+  [info] HEAD 给的 Content-Length 不可信（57 字节，疑似重定向页），改用作业自己报的大小
+  [OK]   无法核对大小，但它像个完整安装器（87.5 MB + MZ 头），直接使用
+==> 静默安装（安装目录在项目内，不写注册表机器级键）
+  [FAIL] 安装后找不到 R-4.6.1 目录，检查杀毒软件是否拦截
+  [info] 下载缓存保留在 C:\Users\63269\AppData\Local\Temp\r-runtime-download（重复运行可复用）
+
+结果：失败（代码 1）
+Waiting for the debugger to disconnect...
