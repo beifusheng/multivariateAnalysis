@@ -161,30 +161,56 @@ function Install-FromLocal([string]$src) {
 # 上一版用同步 Start-BitsTransfer：BITS 遇到 403/证书/重定向会进 TransientError 静默重试，
 # 屏幕上什么都不会出现，看起来就像卡死；而且提示语"已有 N MB"只在开始前打印一次，
 # 并不是进度（用户报的就是这个现象）。
+# 看一个文件像不像 Windows 可执行体：只读前两字节看 MZ 头，不移动文件也不占内存。
+function Test-InstallerHint($file) {
+  try {
+    $fs = [IO.File]::OpenRead($file)
+    try { $b = New-Object byte[] 2; $n = $fs.Read($b, 0, 2) } finally { $fs.Close() }
+    return ($n -eq 2 -and $b[0] -eq 77 -and $b[1] -eq 90)   # 'M' 'Z'
+  } catch { return $false }
+}
+
 function Get-File($u, $out, $StallSeconds = 90, $TotalSeconds = 3600) {
   New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
 
-  # 先问 Content-Length：没有它就没法判断"下完了"，也没法取得百分比。
+  # 先问 Content-Length，但**只有可信时才采用**。现场日志教警：
+  #   [WARN] 清除不完整残留 87.5 MB (目标 0 MB)      ← 把用户放好的文件删了
+  #   [info] 进度 87.5 MB 160964870.2%              ← 1.6 亿百分比
+  # 真相：HEAD 跟随重定向后拿到的是跳转页的 body 长度（几十 KB），不是安装器大小。
+  # 拿它当真值连坏三件事：删掉手动放好的完整文件、把已下完的文件判成"不完整"、
+  # 百分比算出天文数字。安装器不可能小于 1MB，以此作可信门槛。
   $expected = -1
   try {
     $head = Invoke-WebRequest -Uri $u -Method Head -UseBasicParsing -TimeoutSec 30
-    if ($head.Headers['Content-Length']) { $expected = [long]$head.Headers['Content-Length'][0] }
+    $cl = 0
+    if ($head.Headers['Content-Length']) { $cl = [long]$head.Headers['Content-Length'][0] }
+    if ($cl -gt 1MB) { $expected = $cl }
+    else { Info ('HEAD 给的 Content-Length 不可信（' + $cl + ' 字节，疑似重定向页），改用作业自己报的大小') }
   } catch {
-    Info ("HEAD 探测失败，改用边下边看大小的办法：" + $_.Exception.Message.Split("`n")[0])
+    Info ('HEAD 探测失败，改用作业自己报的大小：' + $_.Exception.Message.Split("`n")[0])
   }
 
-  # 已有的部分文件：只有大小对得上才敢复用。旧版只 Test-Path，于是把一个 87 MB
-  # 的半成品当成"已下载的安装器"直接用了下去，接着就是装出坏运行时。
+  # 已有文件：只有"确定对不上"才敢删。对不上账时先看它像不像一个真安装器
+  # （体积够大 + MZ 头）——像就直接用，这比删掉再赌 BITS 能下好负责。
   $have = 0
   if (Test-Path $out) { $have = (Get-Item $out).Length }
-  if ($have -gt 0 -and $expected -gt 0 -and $have -eq $expected) {
-    Ok ("文件已完整存在：" + [math]::Round($have/1MB,1) + " MB，跳过下载")
-    return $true
-  }
   if ($have -gt 0) {
-    $tail = if ($expected -gt 0) { "(目标 " + [math]::Round($expected/1MB,1) + " MB)" } else { "(无法核对目标大小，宁可重下)" }
-    Warn ("清除不完整残留 " + [math]::Round($have/1MB,1) + " MB " + $tail)
-    Remove-Item $out -Force
+    if ($expected -gt 0 -and $have -eq $expected) {
+      Ok ('文件已完整存在：' + [math]::Round($have / 1MB, 1) + ' MB，跳过下载')
+      return $true
+    }
+    if ($expected -gt 0) {
+      Warn ('清除大小对不上的残留 ' + [math]::Round($have / 1MB, 1) + ' MB（目标 ' + [math]::Round($expected / 1MB, 1) + ' MB）')
+      Remove-Item $out -Force
+    }
+    elseif ($have -ge 20MB -and (Test-InstallerHint $out)) {
+      Ok ('无法核对大小，但它像个完整安装器（' + [math]::Round($have / 1MB, 1) + ' MB + MZ 头），直接使用')
+      return $true
+    }
+    else {
+      Warn ('已有 ' + [math]::Round($have / 1MB, 1) + ' MB，但既无法核对大小也不像安装器，删掉重下')
+      Remove-Item $out -Force
+    }
   }
 
   $mb = if ($expected -gt 0) { "共 " + [math]::Round($expected/1MB,1) + " MB" } else { "大小未知" }
